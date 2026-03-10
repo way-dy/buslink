@@ -4,6 +4,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import DriverApp from "./pages/DriverApp";
 import AdminApp from "./pages/AdminApp";
+import LoginApp from "./pages/LoginApp";
 
 function App() {
   const [user, setUser] = useState(null);
@@ -17,7 +18,7 @@ function App() {
         if (snap.exists()) {
           setRole(snap.data().role);
         } else {
-          setRole("driver"); // users 문서 없으면 기사로 기본값
+          setRole("driver");
         }
         setUser(u);
       } else {
@@ -35,13 +36,12 @@ function App() {
     </div>
   );
 
-  if (!user) return <AdminApp />;
-return <AdminApp />;
-  
-  if (role === "admin" || role === "superadmin") return <AdminApp user={user} />;
+  // 미로그인 → 로그인 화면
+  if (!user) return <LoginApp />;
 
+  // 역할에 따라 분기
+  if (role === "admin" || role === "superadmin") return <AdminApp user={user} />;
   return <DriverApp />;
 }
 
 export default App;
-
