@@ -1,0 +1,135 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── 헬퍼 함수 ──────────────────────────────────────
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function isAdmin(companyId) {
+      return isAuth() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+          in ["admin", "superadmin"] &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId
+          == companyId;
+    }
+
+    function isSuperAdmin() {
+      return isAuth() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+          == "superadmin";
+    }
+
+    function isDriverOf(companyId) {
+      return isAuth() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+          == "driver" &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId
+          == companyId;
+    }
+
+    // ─── users ──────────────────────────────────────────
+    // 본인만 읽기 가능, 슈퍼어드민은 전체 읽기 가능
+    match /users/{uid} {
+      allow read: if isAuth() && (request.auth.uid == uid || isSuperAdmin());
+      allow write: if isSuperAdmin();
+    }
+
+    // ─── companies ──────────────────────────────────────
+    match /companies/{companyId} {
+      // 회사 기본 정보: 인증된 사용자 모두 읽기 (승객앱용)
+      allow read: if isAuth();
+      allow write: if isAdmin(companyId) || isSuperAdmin();
+
+      // 노선
+      match /routes/{routeId} {
+        allow read: if isAuth();
+        allow write: if isAdmin(companyId);
+
+        // 정류장
+        match /stops/{stopId} {
+          allow read: if isAuth();
+          allow write: if isAdmin(companyId);
+        }
+      }
+
+      // 배차
+      match /dispatches/{date}/list/{dispatchId} {
+        allow read: if isAuth() && (isAdmin(companyId) || isDriverOf(companyId));
+        allow write: if isAdmin(companyId);
+      }
+
+      // 기사
+      match /drivers/{driverId} {
+        allow read: if isAdmin(companyId) || isDriverOf(companyId);
+        // 기사 본인은 status, uid 등 일부 필드 수정 가능
+        allow update: if isDriverOf(companyId) &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["status", "uid", "startedAt", "endedAt"]);
+        allow create, delete: if isAdmin(companyId);
+      }
+
+      // 차량
+      match /vehicles/{vehicleId} {
+        allow read: if isAdmin(companyId) || isDriverOf(companyId);
+        allow write: if isAdmin(companyId);
+      }
+
+      // 직원(승객) - 탑승 인증용
+      match /passengers/{empNo} {
+        // 읽기: 어드민 + 익명 인증 (탑승 앱에서 검증)
+        allow read: if isAuth();
+        // 쓰기: 어드민만 (협력사 업로드는 서버가 아닌 클라이언트이므로 partnerCode 검증 필요)
+        allow write: if isAdmin(companyId);
+      }
+
+      // 탑승 기록
+      match /boardings/{date}/list/{boardingId} {
+        // 읽기: 어드민만
+        allow read: if isAdmin(companyId);
+        // 쓰기: 인증된 사용자 (익명 포함 - 탑승 앱에서 기록)
+        allow create: if isAuth();
+        allow update, delete: if isAdmin(companyId);
+      }
+    }
+
+    // ─── GPS 실시간 위치 ─────────────────────────────────
+    match /gps/{vehicleKey} {
+      // 읽기: 인증된 사용자 모두 (승객앱 포함)
+      allow read: if isAuth();
+      // 쓰기: 기사 본인 or 어드민 (시뮬레이터)
+      allow write: if isAuth();
+    }
+
+    // ─── GPS 이력 ────────────────────────────────────────
+    match /gpsHistory/{companyId}/{vehicleId}/{date}/points/{pointId} {
+      allow read: if isAdmin(companyId);
+      allow create: if isAuth();
+    }
+
+    // ─── 탑승 QR 토큰 ────────────────────────────────────
+    match /boardingTokens/{tokenId} {
+      // 읽기: 누구나 (탑승 앱에서 검증)
+      allow read: if true;
+      // 생성: 기사 (운행 시작 시)
+      allow create: if isAuth();
+      // 소각(used: true): 인증된 사용자
+      allow update: if isAuth() &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["used", "usedAt", "usedBy"]);
+      allow delete: if false;
+    }
+
+    // ─── 협력사 코드 ─────────────────────────────────────
+    match /partnerCodes/{code} {
+      // 읽기: 누구나 (협력사 인증용)
+      allow read: if true;
+      // 생성: 어드민 (운영사에서 발급)
+      allow create: if isAuth();
+      // 업데이트: 어드민 or 협력사 (uploadCount 갱신)
+      allow update: if isAuth();
+      allow delete: if isSuperAdmin();
+    }
+  }
+}

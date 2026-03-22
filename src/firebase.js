@@ -11,6 +11,18 @@ const firebaseConfig = {
   appId: process.env.REACT_APP_FIREBASE_APP_ID,
 };
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+export const app = initializeApp(firebaseConfig);
+export const db  = getFirestore(app);
 export const auth = getAuth(app);
+
+// FCM은 필요할 때 동적으로 가져옴 (비동기 race condition 방지)
+export async function getMessagingInstance() {
+  try {
+    const { getMessaging, isSupported } = await import("firebase/messaging");
+    const ok = await isSupported();
+    if (!ok) return null;
+    return getMessaging(app);
+  } catch {
+    return null;
+  }
+}
