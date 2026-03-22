@@ -1,0 +1,131 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function isAdmin(companyId) {
+      return isAuth() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+          in ["admin", "superadmin"] &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId
+          == companyId;
+    }
+
+    function isSuperAdmin() {
+      return isAuth() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+          == "superadmin";
+    }
+
+    function isDriverOf(companyId) {
+      return isAuth() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+          == "driver" &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId
+          == companyId;
+    }
+
+    // ─── users ──────────────────────────────────────────
+    match /users/{uid} {
+      allow read: if isAuth() && (request.auth.uid == uid || isSuperAdmin());
+      allow write: if isSuperAdmin();
+    }
+
+    // ─── companies ──────────────────────────────────────
+    match /companies/{companyId} {
+      allow read: if isAuth();
+      allow write: if isAdmin(companyId) || isSuperAdmin();
+
+      match /routes/{routeId} {
+        allow read: if isAuth();
+        allow write: if isAdmin(companyId);
+        match /stops/{stopId} {
+          allow read: if isAuth();
+          allow write: if isAdmin(companyId);
+        }
+      }
+
+      match /dispatches/{date}/list/{dispatchId} {
+        allow read: if isAuth() && (isAdmin(companyId) || isDriverOf(companyId));
+        allow write: if isAdmin(companyId);
+      }
+
+      match /drivers/{driverId} {
+        allow read: if isAdmin(companyId) || isDriverOf(companyId);
+        allow update: if isDriverOf(companyId) &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["status", "uid", "startedAt", "endedAt"]);
+        allow create, delete: if isAdmin(companyId);
+      }
+
+      match /vehicles/{vehicleId} {
+        allow read: if isAdmin(companyId) || isDriverOf(companyId);
+        allow write: if isAdmin(companyId);
+      }
+
+      match /passengers/{empNo} {
+        allow read: if isAuth();
+        allow write: if isAuth(); // 협력사 포털 업로드 허용
+      }
+
+      match /boardings/{date}/list/{boardingId} {
+        allow read: if isAdmin(companyId);
+        allow create: if isAuth();
+        allow update, delete: if isAdmin(companyId);
+      }
+
+      // ─── FCM 토큰 저장 ───────────────────────────────
+      match /fcmTokens/{empNo} {
+        allow read:  if isAdmin(companyId);
+        allow write: if isAuth(); // 직원 앱에서 토큰 등록
+      }
+
+      // ─── 공지사항 ────────────────────────────────────
+      match /notices/{noticeId} {
+        allow read:   if isAuth(); // 직원 앱에서 읽기
+        allow create: if isAdmin(companyId); // 어드민만 작성
+        allow update: if isAdmin(companyId); // 숨기기 등
+        allow delete: if isAdmin(companyId);
+      }
+    }
+
+    // ─── GPS 실시간 위치 ─────────────────────────────────
+    match /gps/{vehicleKey} {
+      allow read:  if isAuth();
+      allow write: if isAuth();
+    }
+
+    // ─── GPS 이력 ────────────────────────────────────────
+    match /gpsHistory/{companyId}/{vehicleId}/{date}/points/{pointId} {
+      allow read:   if isAdmin(companyId);
+      allow create: if isAuth();
+    }
+
+    // ─── 탑승 QR 토큰 ────────────────────────────────────
+    match /boardingTokens/{tokenId} {
+      allow read:   if true;
+      allow create: if isAuth();
+      allow update: if isAuth() &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["used", "usedAt", "usedBy"]);
+      allow delete: if false;
+    }
+
+    // ─── 협력사 코드 ─────────────────────────────────────
+    match /partnerCodes/{code} {
+      allow read:   if true;
+      allow create: if isAuth();
+      allow update: if isAuth();
+      allow delete: if isSuperAdmin();
+    }
+
+    // ─── FCM 발송 큐 (Cloud Function 트리거용) ───────────
+    match /fcmQueue/{queueId} {
+      allow create: if isAuth(); // 어드민이 공지 발송 시 생성
+      allow read, update: if false; // Cloud Function만 처리
+    }
+  }
+}

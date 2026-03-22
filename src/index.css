@@ -11,3 +11,23 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+/* ── BusLink Admin 모바일 최적화 ── */
+@media (max-width: 767px) {
+  /* 테이블 가로 스크롤 */
+  [data-admin-table] {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* 패널 헤더 버튼 그룹 */
+  [data-panel-actions] {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  /* 모달 모바일 */
+  [data-modal] {
+    padding: 16px 14px !important;
+    border-radius: 12px !important;
+    margin: 8px !important;
+  }
+}
