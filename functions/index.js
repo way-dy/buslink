@@ -29,23 +29,54 @@ exports.sendNoticeToCompany = onDocumentCreated("fcmQueue/{queueId}", async (eve
 
     for (let i = 0; i < tokens.length; i += chunkSize) {
       const chunk = tokens.slice(i, i + chunkSize);
+
       const message = {
         tokens: chunk,
-        notification: { title: title || "BusLink 공지", body: body || "" },
-        data: { type: type || "normal", companyId },
-        android: { priority: type === "emergency" ? "high" : "normal" },
-        apns: {
-          headers: { "apns-priority": type === "emergency" ? "10" : "5" },
-          payload: { aps: { sound: type === "emergency" ? "default" : "" } },
+
+        // ✅ notification 추가 — 시스템이 직접 알림 표시 (Android Chrome 백그라운드/종료 시 확실히 수신)
+        notification: {
+          title: title || "BusLink 공지",
+          body: body || "",
         },
-        webpush: {
-          headers: { Urgency: type === "emergency" ? "high" : "normal" },
+
+        // ✅ data 유지 — SW notificationclick에서 companyId, type 등 활용
+        data: {
+          type: type || "normal",
+          companyId,
+          title: title || "BusLink 공지",
+          body: body || "",
+        },
+
+        // ✅ 항상 high priority — 절전모드에서도 즉시 수신
+        android: {
+          priority: "high",
           notification: {
-            title: title || "BusLink 공지",
-            body: body || "",
-            icon: "/logo192.png",
-            requireInteraction: type === "emergency",
+            channelId: "default",
+            sound: "default",
+            defaultVibrateTimings: true,
+            priority: "high",
           },
+        },
+
+        apns: {
+          headers: {
+            "apns-priority": "10",
+            "apns-push-type": "alert",   // background → alert 로 변경
+          },
+          payload: {
+            aps: {
+              "content-available": 1,
+              sound: "default",
+              alert: {
+                title: title || "BusLink 공지",
+                body: body || "",
+              },
+            },
+          },
+        },
+
+        webpush: {
+          headers: { Urgency: "high" },
           fcmOptions: { link: "/p?c=" + companyId },
         },
       };

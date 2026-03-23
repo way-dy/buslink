@@ -1,10 +1,9 @@
 // public/firebase-messaging-sw.js
 // 이 파일은 public/ 폴더에 위치해야 합니다
 
-importScripts("https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js");
-importScripts("https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js");
+importScripts("https://www.gstatic.com/firebasejs/11.6.0/firebase-app-compat.js");
+importScripts("https://www.gstatic.com/firebasejs/11.6.0/firebase-messaging-compat.js");
 
-// ⚠️ 아래 값을 실제 Firebase 설정으로 교체하세요
 firebase.initializeApp({
   apiKey: "AIzaSyDewSUkYC2O0WZZ95HLepOuCcqVlwfdsPQ",
   authDomain: "buslink-prod.firebaseapp.com",
@@ -16,32 +15,37 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// 백그라운드 메시지 처리
+// 백그라운드 메시지 처리 (data-only 메시지 대응)
 messaging.onBackgroundMessage(payload => {
-  const { title, body } = payload.notification || {};
-  const type = payload.data?.type || "normal";
+  // ★ data-only: data에서 먼저 추출, fallback으로 notification
+  const title = payload.data?.title || payload.notification?.title || "BusLink 공지";
+  const body  = payload.data?.body  || payload.notification?.body  || "";
+  const type  = payload.data?.type  || "normal";
 
-  self.registration.showNotification(title || "BusLink 공지", {
-    body: body || "",
+  self.registration.showNotification(title, {
+    body: body,
     icon: "/logo192.png",
     badge: "/logo192.png",
-    tag: "buslink-notice",
+    tag: "buslink-" + Date.now(),  // ★ 고유 tag — 알림 덮어쓰기 방지
     data: payload.data,
     vibrate: type === "emergency" ? [200, 100, 200, 100, 200] : [100],
-    requireInteraction: type === "emergency", // 긴급이면 수동으로 닫아야 함
+    requireInteraction: type === "emergency",
   });
 });
 
 // 알림 클릭 시 앱으로 이동
 self.addEventListener("notificationclick", event => {
   event.notification.close();
+  const companyId = event.notification.data?.companyId || "dy001";
+  const targetUrl = "/p?c=" + companyId;
+
   event.waitUntil(
-    clients.matchAll({ type: "window" }).then(clientList => {
+    // ★ includeUncontrolled: true — 도메인 하드코딩 제거
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then(clientList => {
       for (const client of clientList) {
-        if (client.url.includes("buslink-prod.web.app") && "focus" in client)
-          return client.focus();
+        if ("focus" in client) return client.focus();
       }
-      if (clients.openWindow) return clients.openWindow("/p?c=" + (event.notification.data?.companyId || "dy001"));
+      if (clients.openWindow) return clients.openWindow(targetUrl);
     })
   );
 });

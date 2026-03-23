@@ -354,11 +354,12 @@ function DispatchTab({ companyId, vehicles, drivers }) {
   const [routes, setRoutes] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState(null);
+  const [editOriginalDate, setEditOriginalDate] = useState(null); // ★ 수정 시 원본 날짜 추적
   const [form, setForm] = useState({ driverId:"", routeId:"", routeName:"", vehicleNo:"", vehicleId:"", departTime:"" });
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!companyId) return;
+    if (!companyId || !date) return; // ★ date 빈값 방지
     const ref = collection(db, "companies", companyId, "dispatches", date, "list");
     return onSnapshot(ref, snap => setDispatches(snap.docs.map(d => ({ id:d.id, ...d.data() }))));
   }, [date, companyId]);
@@ -370,8 +371,13 @@ function DispatchTab({ companyId, vehicles, drivers }) {
     });
   }, [companyId]);
 
-  const openAdd = () => { setEditItem(null); setForm({ driverId:"", routeId:"", routeName:"", vehicleNo:"", vehicleId:"", departTime:"" }); setShowForm(true); };
-  const openEdit = (item) => { setEditItem(item); setForm({ driverId:item.driverId, routeId:item.routeId??"", routeName:item.routeName, vehicleNo:item.vehicleNo, vehicleId:item.vehicleId??"", departTime:item.departTime }); setShowForm(true); };
+  const openAdd = () => { setEditItem(null); setEditOriginalDate(null); setForm({ driverId:"", routeId:"", routeName:"", vehicleNo:"", vehicleId:"", departTime:"" }); setShowForm(true); };
+  const openEdit = (item) => {
+    setEditItem(item);
+    setEditOriginalDate(date); // ★ 현재 보고 있는 날짜가 원본
+    setForm({ driverId:item.driverId, routeId:item.routeId??"", routeName:item.routeName, vehicleNo:item.vehicleNo, vehicleId:item.vehicleId??"", departTime:item.departTime });
+    setShowForm(true);
+  };
 
   const handleDriverSelect = (driverId) => {
     if (!driverId) { setForm({...form, driverId:""}); return; }
@@ -397,11 +403,17 @@ function DispatchTab({ companyId, vehicles, drivers }) {
   const handleSave = async () => {
     if (!form.driverId || !form.routeName || !form.departTime) return alert("필수 항목을 입력해주세요");
     setLoading(true);
-    const ref = collection(db, "companies", companyId, "dispatches", date, "list");
-    if (editItem) {
-      await updateDoc(doc(db, "companies", companyId, "dispatches", date, "list", editItem.id), form);
-    } else {
-      await addDoc(ref, { ...form, date });
+    try {
+      if (editItem && editOriginalDate) {
+        // ★ 수정: 원본 날짜 기준으로 업데이트
+        await updateDoc(doc(db, "companies", companyId, "dispatches", editOriginalDate, "list", editItem.id), { ...form, date: editOriginalDate });
+      } else {
+        // 신규: 현재 선택된 날짜에 추가
+        const ref = collection(db, "companies", companyId, "dispatches", date, "list");
+        await addDoc(ref, { ...form, date });
+      }
+    } catch (e) {
+      alert("저장 오류: " + e.message);
     }
     setShowForm(false); setLoading(false);
   };
@@ -413,13 +425,35 @@ function DispatchTab({ companyId, vehicles, drivers }) {
 
   const driverName = (id) => drivers.find(d => d.id === id)?.name ?? id;
 
+  // ★ 배차 복사 — 현재 날짜 배차를 다른 날짜로 복사
+  const handleCopyDispatches = async () => {
+    if (dispatches.length === 0) return alert("복사할 배차가 없습니다");
+    const targetDate = prompt("복사할 대상 날짜를 입력하세요 (예: 2026-03-24)", "");
+    if (!targetDate || !/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) return;
+    if (targetDate === date) return alert("같은 날짜로는 복사할 수 없습니다");
+    if (!window.confirm(`${date} 배차 ${dispatches.length}건을 ${targetDate}로 복사하시겠습니까?`)) return;
+    setLoading(true);
+    try {
+      const ref = collection(db, "companies", companyId, "dispatches", targetDate, "list");
+      for (const d of dispatches) {
+        const { id: _id, ...data } = d;
+        await addDoc(ref, { ...data, date: targetDate });
+      }
+      alert(`${dispatches.length}건 복사 완료`);
+    } catch (e) { alert("복사 오류: " + e.message); }
+    setLoading(false);
+  };
+
   return (
     <div style={S.panel}>
       <div style={S.panelHeader}>
         <span style={{ fontSize:16, fontWeight:700 }}>배차 관리</span>
-        <div style={{ display:"flex", gap:12, alignItems:"center" }}>
-          <input type="date" value={date} onChange={e => setDate(e.target.value)} style={S.dateInput} />
+        <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+          <input type="date" value={date} onChange={e => { if (e.target.value) setDate(e.target.value); }} style={S.dateInput} />
           <button style={S.addBtn} onClick={openAdd}>+ 배차 등록</button>
+          {dispatches.length > 0 && (
+            <button style={{...S.editBtn, fontSize:12, padding:"6px 10px"}} onClick={handleCopyDispatches} disabled={loading}>📋 복사</button>
+          )}
         </div>
       </div>
       <div style={S.tableWrap}>
@@ -1246,7 +1280,7 @@ function HistoryTab({ companyId, vehicles }) {
           {points.length>0&&<span style={{fontSize:12,color:"#00C48C"}}>{points.length}개 포인트</span>}
         </div>
         <div style={{padding:16,display:"flex",flexDirection:"column",gap:10}}>
-          <div><label style={S.label}>날짜</label><input type="date" style={S.dateInput} value={date} onChange={e=>setDate(e.target.value)}/></div>
+          <div><label style={S.label}>날짜</label><input type="date" style={S.dateInput} value={date} onChange={e=>{ if(e.target.value) setDate(e.target.value); }}/></div>
           <div><label style={S.label}>차량</label>
             <select style={S.input} value={vehicleId} onChange={e=>setVehicleId(e.target.value)}>
               <option value="">차량 선택</option>
