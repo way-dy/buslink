@@ -88,10 +88,24 @@ exports.sendNoticeToCompany = onDocumentCreated("fcmQueue/{queueId}", async (eve
 });
 
 // ════════════════════════════════════════════════════════
+// 호출자 권한 검증 — users/{uid}.role 이 admin/superadmin 인지 확인
+// (같은 프로젝트의 익명 인증(승객·직원)은 토큰만 보유 → role 없음 → 차단)
+// ════════════════════════════════════════════════════════
+async function assertAdmin(request) {
+  if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
+  const userSnap = await admin.firestore()
+    .collection("users").doc(request.auth.uid).get();
+  const role = userSnap.exists ? userSnap.data().role : null;
+  if (role !== "admin" && role !== "superadmin") {
+    throw new HttpsError("permission-denied", "관리자 권한이 필요합니다");
+  }
+}
+
+// ════════════════════════════════════════════════════════
 // 기사 등록
 // ════════════════════════════════════════════════════════
 exports.createDriver = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
+  await assertAdmin(request);
   const { companyId, name, empNo, pin, vehicleId, vehicleNo, phone } = request.data;
   const email = `${empNo}@buslink.com`;
   try {
@@ -116,7 +130,7 @@ exports.createDriver = onCall(async (request) => {
 // 기사 삭제
 // ════════════════════════════════════════════════════════
 exports.deleteDriver = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
+  await assertAdmin(request);
   const { companyId, driverId, uid } = request.data;
   try {
     if (uid) await admin.auth().deleteUser(uid);
@@ -133,7 +147,7 @@ exports.deleteDriver = onCall(async (request) => {
 // 기사 비밀번호 변경
 // ════════════════════════════════════════════════════════
 exports.updateDriverPassword = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
+  await assertAdmin(request);
   const { uid, newPassword } = request.data;
   if (!uid || !newPassword) throw new HttpsError("invalid-argument", "uid와 newPassword가 필요합니다");
   if (newPassword.length < 6) throw new HttpsError("invalid-argument", "비밀번호는 최소 6자리여야 합니다");
@@ -149,7 +163,7 @@ exports.updateDriverPassword = onCall(async (request) => {
 // 기존 기사에 Auth 계정 생성
 // ════════════════════════════════════════════════════════
 exports.createDriverAuth = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
+  await assertAdmin(request);
   const { companyId, driverId, empNo, name, pin } = request.data;
   const email = `${empNo}@buslink.com`;
   if (!driverId || !empNo || !pin) throw new HttpsError("invalid-argument", "driverId, empNo, pin이 필요합니다");

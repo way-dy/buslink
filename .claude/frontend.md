@@ -5,7 +5,7 @@ CRA 단일 SPA. 진입점 `src/index.js` → `src/App.js`. 페이지는 `src/pag
 ## 라우팅 (react-router 없음)
 `src/App.js`가 `window.location.pathname` 접두사로 분기. **검사 순서 = 우선순위**. `/p`가 `/partner`를 삼키므로 EmployeeApp 분기에서 `/partner` 명시 제외:
 - `/` → Firebase Auth 로그인. `users/{uid}.role`로 `admin`/`superadmin`→`AdminApp`, 그 외→`DriverApp`.
-- `/bus*` → `PassengerApp` (익명. param `c`=companyId, `route`/`r`=routeId)
+- `/bus*` → `PassengerApp` (익명. param `c`=companyId, `route`/`r`=routeId). 노선 결정 우선순위 **URL `route`/`r` > localStorage `buslink_passenger_route_{companyId}` > 노선 선택 화면**(미선택 시). 승객이 앱에서 선택하면 기준노선으로 localStorage 저장(다음 방문 자동), 상단 "노선 변경" 버튼으로 갱신.
 - `/board*` → `BoardingApp` (QR 토큰 `t`로 탑승 확인)
 - `/partner*` → `PartnerApp` (Firebase 로그인 없음 — 업체코드 기반)
 - `/p*`(≠`/partner`) → `EmployeeApp` (익명 + localStorage 세션)
@@ -18,6 +18,6 @@ CRA 단일 SPA. 진입점 `src/index.js` → `src/App.js`. 페이지는 `src/pag
 
 ## 상태/패턴
 - 실시간 차량 위치: `onSnapshot` → `useAnimatedPositions`(rAF 보간) 훅 경유.
-- EmployeeApp 세션: localStorage `buslink_employee` 키에 `{empNo,name,dept,routeId,...}` 저장/복원.
+- EmployeeApp 세션: localStorage `buslink_employee` 키에 `{empNo,name,dept,routeId,...}` 저장/복원. `/p` 홈탭은 헤더 "노선 변경" 모달로 `routeId` 갱신(`onSessionUpdate`→`saveSession` 영속, 기준노선), 지도 전 정류장 이름 표시·마커/라벨 클릭 시 정류장 정보 카드(사진/설명).
 - AdminApp: 관리자 기능은 `httpsCallable`로 Cloud Functions 호출(@.claude/functions.md).
 - `companyId` 기본값 `dy001`이 다수 페이지에 하드코딩(@.claude/issues.md).

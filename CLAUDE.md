@@ -12,6 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - @.claude/functions.md — Cloud Functions 목록, 트리거, 주의사항
 - @.claude/issues.md — **중요 이슈 기록**(발견사항·버그·주의 패턴)
 - @.claude/tasks.md — 현재 작업 상태 체크박스, 다음 할 일
+- @.claude/redesign.md — 라이트 리스킨 요약·현재 단계(완료 0~4단계 상세는 redesign-log.md @임포트)
 
 > `.claude/*.md`가 다른 PC 이어작업의 단일 진실원. 작업 끝나면 아래 규칙대로 갱신 후 커밋·푸시.
 

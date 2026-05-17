@@ -162,7 +162,9 @@ export default function BoardingApp() {
             <div style={{ fontSize: 14, color: "#8896AA", textAlign: "center", whiteSpace: "pre-line", lineHeight: 1.6, marginBottom: 24 }}>
               {errMsg}
             </div>
-            {tokenId && step !== STEPS.ERROR || errMsg.includes("만료") ? null : (
+            {/* 만료성 오류(QR 5분 만료)는 재시도해도 무의미 → 버튼 숨김.
+                그 외 복구 가능한 오류(잘못된/사용된 QR, 사번 미입력 등)는 재시도 노출 */}
+            {errMsg.includes("만료") ? null : (
               <button
                 style={{ ...S.btn, background: "#1E3A5F", fontSize: 14 }}
                 onClick={() => { setStep(STEPS.INPUT); setErrMsg(""); }}

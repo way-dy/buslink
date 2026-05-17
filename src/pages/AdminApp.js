@@ -11,8 +11,12 @@ import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { sendGPS } from "../lib/gps";
 import { createPartnerCode, getBoardingUrl } from "../lib/partner";
 import { sendNotice } from "../lib/notifications";
+import { compressImageFile } from "../lib/image";
+// 리디자인 3단계 — 실시간 관제(MapTab) 라이트 리스킨 전용. 타 탭 미사용.
+import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 
-const TABS = ["🏠 대시보드", "🗺 실시간 관제", "📋 배차 관리", "📍 노선 관리", "👤 기사 관리", "🚌 차량 관리", "🧪 시뮬레이터", "📅 운행 이력", "🤝 협력사 관리", "📢 공지 발송"];
+const TABS = ["대시보드", "실시간 관제", "배차 관리", "노선 관리", "기사 관리", "차량 관리", "시뮬레이터", "운행 이력", "협력사 관리", "공지 발송"];
+const TAB_ICONS = ["grid", "pin", "flag", "route", "user", "bus", "play", "clock", "globe", "bell"];
 const functions = getFunctions(undefined, "us-central1");
 const getToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 
@@ -69,20 +73,25 @@ export default function AdminApp({ user, companyId }) {
       {!isMobile && (
         <div style={S.sidebar}>
           <div style={S.logo}>
-            <span style={S.logoText}>BusLink</span>
-            <span style={S.logoSub}>관리자</span>
+            <BusLinkLogo size={22} sub="관리자" />
           </div>
+          <div style={S.sideSection}>메뉴</div>
           <nav style={S.nav}>
             {TABS.map((t, i) => (
-              <div key={i} onClick={() => setTab(i)}
+              <div key={i} data-nav-item onClick={() => setTab(i)}
                 style={{ ...S.navItem, ...(tab === i ? S.navActive : {}) }}>
+                {tab === i && <span style={S.navAccent} />}
+                <span style={S.navIcon}><Icon name={TAB_ICONS[i]} size={17} stroke={tab === i ? 2 : 1.7} /></span>
                 {t}
               </div>
             ))}
           </nav>
           <div style={{ flex: 1 }} />
-          <div style={{ padding:"8px 12px", fontSize:11, color:"#4A6FA5", marginBottom:4 }}>{companyId}</div>
-          <button style={S.logoutBtn} onClick={() => signOut(auth)}>로그아웃</button>
+          <div style={S.sideFoot}>
+            <StatusDot tone="positive" size={7} />
+            <span>{companyId}</span>
+          </div>
+          <button data-logout style={S.logoutBtn} onClick={() => signOut(auth)}>로그아웃</button>
         </div>
       )}
 
@@ -90,18 +99,18 @@ export default function AdminApp({ user, companyId }) {
       <div style={S.content}>
         {/* 모바일 상단 헤더 */}
         {isMobile && (
-          <div style={{ background:"#112240", borderBottom:"1px solid #1E3A5F", padding:"10px 14px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0, zIndex:50 }}>
+          <div style={{ background:"var(--color-bg)", borderBottom:"1px solid var(--color-line)", padding:"10px 14px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0, zIndex:50 }}>
             <div style={{ display:"flex", alignItems:"center", gap:8 }}>
               <button onClick={() => setMenuOpen(p => !p)}
-                style={{ background:"#1E3A5F", border:"none", borderRadius:8, padding:"6px 10px", color:"#F0F4FF", fontSize:18, cursor:"pointer", lineHeight:1 }}>
+                style={{ background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:8, padding:"5px 9px", color:"var(--color-label)", fontSize:18, cursor:"pointer", lineHeight:1 }}>
                 ☰
               </button>
-              <span style={{ fontSize:14, fontWeight:700, color:"#00C2FF" }}>
-                {TABS[tab].replace(/^\S+\s/, "")}
+              <span style={{ display:"flex", alignItems:"center", gap:7, fontSize:14, fontWeight:700, color:"var(--color-primary-deep)" }}>
+                <Icon name={TAB_ICONS[tab]} size={16} /> {TABS[tab]}
               </span>
             </div>
             <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-              <span style={{ fontSize:11, color:"#4A6FA5" }}>{companyId}</span>
+              <span style={{ fontSize:11, color:"var(--color-label-alt)" }}>{companyId}</span>
               <button style={{ ...S.logoutBtn, padding:"5px 10px", fontSize:11 }} onClick={() => signOut(auth)}>로그아웃</button>
             </div>
           </div>
@@ -109,15 +118,15 @@ export default function AdminApp({ user, companyId }) {
 
         {/* 모바일 드롭다운 메뉴 */}
         {isMobile && menuOpen && (
-          <div style={{ position:"absolute", top:50, left:0, right:0, background:"#112240", zIndex:100, borderBottom:"1px solid #1E3A5F", boxShadow:"0 8px 32px rgba(0,0,0,.5)" }}>
+          <div style={{ position:"absolute", top:50, left:0, right:0, background:"var(--color-bg)", zIndex:100, borderBottom:"1px solid var(--color-line)", boxShadow:"var(--shadow-strong)" }}>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:0 }}>
               {TABS.map((t, i) => (
                 <div key={i} onClick={() => { setTab(i); setMenuOpen(false); }}
-                  style={{ padding:"13px 16px", cursor:"pointer", fontSize:13, borderBottom:"1px solid #1E3A5F",
-                    background: tab === i ? "#1A6BFF22" : "transparent",
-                    color: tab === i ? "#00C2FF" : "#8896AA",
-                    fontWeight: tab === i ? 700 : 400 }}>
-                  {t}
+                  style={{ display:"flex", alignItems:"center", gap:10, padding:"13px 16px", cursor:"pointer", fontSize:13, borderBottom:"1px solid var(--color-line)",
+                    background: tab === i ? "var(--color-primary-soft)" : "transparent",
+                    color: tab === i ? "var(--color-primary-deep)" : "var(--color-label-mute)",
+                    fontWeight: tab === i ? 700 : 500 }}>
+                  <Icon name={TAB_ICONS[i]} size={16} /> {t}
                 </div>
               ))}
             </div>
@@ -169,10 +178,10 @@ function DashboardTab({ companyId, drivers, vehicles, onNav }) {
   const waiting = drivers.filter(d => d.status !== "운행중").length;
 
   const stats = [
-    { label: "오늘 배차 노선", value: dispatches.length, sub: "금일 등록 기준", color: "#00C2FF" },
-    { label: "운행중 차량", value: gpsVehicles.length, sub: `기사 운행중 ${driving}명`, color: "#00C48C" },
-    { label: "오늘 탑승 인원", value: boardings.length, sub: "QR 탑승 기준", color: "#00C48C" },
-    { label: "전체 기사", value: drivers.length, sub: `대기 ${waiting}명`, color: "#1A6BFF" },
+    { label: "오늘 배차 노선", value: dispatches.length, sub: "금일 등록 기준", color: "var(--color-primary)" },
+    { label: "운행중 차량", value: gpsVehicles.length, sub: `기사 운행중 ${driving}명`, color: "var(--color-positive)" },
+    { label: "오늘 탑승 인원", value: boardings.length, sub: "QR 탑승 기준", color: "var(--color-positive)" },
+    { label: "전체 기사", value: drivers.length, sub: `대기 ${waiting}명`, color: "var(--color-primary-deep)" },
   ];
 
   const driverName = (id) => drivers.find(d => d.id === id)?.name ?? id;
@@ -181,8 +190,8 @@ function DashboardTab({ companyId, drivers, vehicles, onNav }) {
     <div style={S.panel}>
       <div style={S.panelHeader}>
         <div>
-          <span style={{ fontSize:16, fontWeight:700 }}>🏠 대시보드</span>
-          <div style={{ fontSize:12, color:"#8896AA", marginTop:2 }}>
+          <span style={{ fontSize:16, fontWeight:700, color:"var(--color-label)" }}>🏠 대시보드</span>
+          <div style={{ fontSize:12, color:"var(--color-label-mute)", marginTop:2 }}>
             {new Date().toLocaleDateString("ko-KR", { year:"numeric", month:"long", day:"numeric", weekday:"short" })}
           </div>
         </div>
@@ -193,19 +202,19 @@ function DashboardTab({ companyId, drivers, vehicles, onNav }) {
         {/* 통계 카드 */}
         <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:20 }}>
           {stats.map(s => (
-            <div key={s.label} style={{ background:"#112240", border:"1px solid #1E3A5F", borderRadius:12, padding:"18px 20px" }}>
-              <div style={{ fontSize:12, color:"#8896AA", marginBottom:8 }}>{s.label}</div>
-              <div style={{ fontSize:30, fontWeight:700, color:s.color }}>{s.value}</div>
-              <div style={{ fontSize:11, color:"#8896AA", marginTop:4 }}>{s.sub}</div>
+            <div key={s.label} style={{ background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:12, padding:"18px 20px", boxShadow:"var(--shadow-emphasize)" }}>
+              <div style={{ fontSize:12, color:"var(--color-label-mute)", marginBottom:8 }}>{s.label}</div>
+              <div style={{ fontSize:30, fontWeight:800, fontFamily:"var(--font-brand)", letterSpacing:"-0.02em", color:s.color }}>{s.value}</div>
+              <div style={{ fontSize:11, color:"var(--color-label-alt)", marginTop:4 }}>{s.sub}</div>
             </div>
           ))}
         </div>
 
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
           {/* 오늘 배차 현황 */}
-          <div style={{ background:"#112240", border:"1px solid #1E3A5F", borderRadius:12, overflow:"hidden" }}>
-            <div style={{ padding:"14px 18px", borderBottom:"1px solid #1E3A5F", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <span style={{ fontWeight:600 }}>오늘 배차 현황</span>
+          <div style={{ background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:12, overflow:"hidden", boxShadow:"var(--shadow-emphasize)" }}>
+            <div style={{ padding:"14px 18px", borderBottom:"1px solid var(--color-line)", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <span style={{ fontWeight:700, color:"var(--color-label)" }}>오늘 배차 현황</span>
               <button style={S.editBtn} onClick={() => onNav(2)}>배차 관리</button>
             </div>
             {dispatches.length === 0 ? (
@@ -219,7 +228,7 @@ function DashboardTab({ companyId, drivers, vehicles, onNav }) {
                   {[...dispatches].sort((a,b) => a.departTime > b.departTime ? 1 : -1).map(d => (
                     <tr key={d.id} style={S.tr}>
                       <td style={S.td}><span style={S.timeBadge}>{d.departTime}</span></td>
-                      <td style={{ ...S.td, color:"#00C2FF", fontSize:12, maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{d.routeName}</td>
+                      <td style={{ ...S.td, color:"var(--color-primary)", fontWeight:600, fontSize:12, maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{d.routeName}</td>
                       <td style={S.td}>{driverName(d.driverId)}</td>
                     </tr>
                   ))}
@@ -229,9 +238,9 @@ function DashboardTab({ companyId, drivers, vehicles, onNav }) {
           </div>
 
           {/* 기사 현황 */}
-          <div style={{ background:"#112240", border:"1px solid #1E3A5F", borderRadius:12, overflow:"hidden" }}>
-            <div style={{ padding:"14px 18px", borderBottom:"1px solid #1E3A5F", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <span style={{ fontWeight:600 }}>기사 현황</span>
+          <div style={{ background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:12, overflow:"hidden", boxShadow:"var(--shadow-emphasize)" }}>
+            <div style={{ padding:"14px 18px", borderBottom:"1px solid var(--color-line)", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <span style={{ fontWeight:700, color:"var(--color-label)" }}>기사 현황</span>
               <button style={S.editBtn} onClick={() => onNav(4)}>기사 관리</button>
             </div>
             {drivers.length === 0 ? (
@@ -245,9 +254,9 @@ function DashboardTab({ companyId, drivers, vehicles, onNav }) {
                   {drivers.slice(0, 8).map(d => (
                     <tr key={d.id} style={S.tr}>
                       <td style={{ ...S.td, fontWeight:600 }}>{d.name}</td>
-                      <td style={{ ...S.td, color:"#8896AA", fontSize:12 }}>{d.vehicleNo || "–"}</td>
+                      <td style={{ ...S.td, color:"var(--color-label-mute)", fontSize:12 }}>{d.vehicleNo || "–"}</td>
                       <td style={S.td}>
-                        <span style={{ ...S.statusBadge, background:d.status==="운행중"?"#00C48C22":"#1E3A5F", color:d.status==="운행중"?"#00C48C":"#8896AA" }}>
+                        <span style={{ ...S.statusBadge, background:d.status==="운행중"?"#E6F7EB":"var(--color-bg-soft)", color:d.status==="운행중"?"#007A29":"var(--color-label-mute)" }}>
                           ●{d.status ?? "대기"}
                         </span>
                       </td>
@@ -261,15 +270,15 @@ function DashboardTab({ companyId, drivers, vehicles, onNav }) {
 
         {/* GPS 수신 현황 */}
         {gpsVehicles.length > 0 && (
-          <div style={{ background:"#112240", border:"1px solid #1E3A5F", borderRadius:12, padding:"14px 18px", marginTop:16 }}>
-            <div style={{ fontWeight:600, marginBottom:12 }}>📡 실시간 GPS 수신 차량 ({gpsVehicles.length}대)</div>
+          <div style={{ background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:12, padding:"14px 18px", marginTop:16, boxShadow:"var(--shadow-emphasize)" }}>
+            <div style={{ fontWeight:700, marginBottom:12, color:"var(--color-label)" }}>📡 실시간 GPS 수신 차량 ({gpsVehicles.length}대)</div>
             <div style={{ display:"flex", flexWrap:"wrap", gap:10 }}>
               {gpsVehicles.map(v => (
-                <div key={v.id} style={{ background:"#0B1A2E", border:"1px solid #1E3A5F", borderRadius:8, padding:"8px 14px", fontSize:12 }}>
-                  <span style={{ color:"#00C48C", marginRight:6 }}>●</span>
-                  <span style={{ fontWeight:600 }}>{v.vehicleNo || v.vehicleId}</span>
-                  <span style={{ color:"#8896AA", marginLeft:8 }}>{v.driverName}</span>
-                  <span style={{ color:"#FFD166", marginLeft:8 }}>{timeSince(v.updatedAt)}</span>
+                <div key={v.id} style={{ background:"var(--color-bg-alt)", border:"1px solid var(--color-line)", borderRadius:8, padding:"8px 14px", fontSize:12 }}>
+                  <span style={{ color:"var(--color-positive)", marginRight:6 }}>●</span>
+                  <span style={{ fontWeight:700, color:"var(--color-label)" }}>{v.vehicleNo || v.vehicleId}</span>
+                  <span style={{ color:"var(--color-label-mute)", marginLeft:8 }}>{v.driverName}</span>
+                  <span style={{ color:"var(--color-cautionary)", marginLeft:8 }}>{timeSince(v.updatedAt)}</span>
                 </div>
               ))}
             </div>
@@ -303,47 +312,158 @@ function MapTab({ companyId }) {
     });
   }, [companyId]);
 
+  // 운행중(좌표 유효) 차량만 카운트 — 실데이터 기반(가짜 KPI 미도입)
+  const liveCount = vehicles.filter(v => v.lat && v.lng).length;
+
   return (
-    <div style={{ display:"flex", height:"100%", minHeight:0 }}>
-      <div style={S.mapSidebar}>
-        <div style={S.panelHeader}>
-          <span>운행 중인 차량</span>
-          <span style={{ color:"#00C48C", fontWeight:700 }}>{vehicles.length}대</span>
-        </div>
-        {vehicles.length === 0 ? (
-          <div style={S.empty}>운행 중인 차량 없음</div>
-        ) : vehicles.map(v => (
-          <div key={v.id} onClick={() => { setSelected(v); if (v.lat && v.lng) setCenter({ lat:v.lat, lng:v.lng }); }}
-            style={{ ...S.vehicleCard, border:selected?.id===v.id?"1px solid #00C2FF":"1px solid #1E3A5F" }}>
-            <div style={S.vehicleTop}><span style={S.dot} /><span style={S.vehicleName}>{v.vehicleNo || v.id}</span></div>
-            <div style={S.vehicleInfo}>기사: {v.driverName || v.driverId}</div>
-            <div style={S.vehicleInfo}>노선: {v.routeName || v.routeId || "–"}</div>
-            <div style={S.vehicleInfo}>속도: {v.speed ?? 0} km/h</div>
-            <div style={{ ...S.vehicleInfo, color:"#FFD166" }}>갱신: {timeSince(v.updatedAt)}</div>
-          </div>
+    <div style={MS.wrap}>
+      {/* 맵 퍼스트 — 카카오맵 구조/마커 불변(목업 MapMock 도입 금지) */}
+      <Map center={center} style={MS.map} level={7}>
+        {vehicles.map(v => v.lat && v.lng && (
+          <MapMarker key={v.id} position={{ lat:v.lat, lng:v.lng }} onClick={() => setSelected(v)} />
         ))}
+      </Map>
+
+      {/* 부유 글래스 탑바 — 로고+회사(실제 companyId). 검색/벨/아바타는 로직 부재로 제외 */}
+      <div style={MS.topbar}>
+        <BusLinkLogo size={20} />
+        <div style={MS.topDivider} />
+        <span style={MS.topCo}>동영관광 <span style={{ color:"var(--color-label-alt)" }}>· {companyId}</span></span>
+        <span style={MS.topTab}><Icon name="pin" size={15}/> 실시간 관제</span>
+        <span style={MS.topNow}>
+          <StatusDot tone="positive" size={6} pulse /> 실시간 GPS 수신
+        </span>
       </div>
-      <div style={{ flex:1, position:"relative" }}>
-        <Map center={center} style={{ width:"100%", height:"100%" }} level={7}>
-          {vehicles.map(v => v.lat && v.lng && (
-            <MapMarker key={v.id} position={{ lat:v.lat, lng:v.lng }} onClick={() => setSelected(v)} />
-          ))}
-        </Map>
-        {selected && (
-          <div style={S.infoBox}>
-            <div style={S.infoTitle}>📍 {selected.vehicleNo || selected.id}</div>
-            <div style={S.infoRow}>기사: {selected.driverName || selected.driverId}</div>
-            <div style={S.infoRow}>노선: {selected.routeName || selected.routeId || "–"}</div>
-            <div style={S.infoRow}>속도: {selected.speed ?? 0} km/h</div>
-            <div style={S.infoRow}>정확도: ±{selected.accuracy}m</div>
-            <div style={{ ...S.infoRow, color:"#FFD166" }}>마지막 수신: {timeSince(selected.updatedAt)}</div>
-            <button onClick={() => setSelected(null)} style={S.closeBtn}>닫기</button>
+
+      {/* 좌 레일 — 운행 차량 목록(실 onSnapshot 데이터만) */}
+      <div style={MS.leftRail}>
+        <div style={MS.railHead}>
+          <span style={MS.railTitle}>운행 중인 차량</span>
+          <Pill tone={liveCount > 0 ? "positive" : "neutral"} dot>{liveCount}대</Pill>
+        </div>
+        <div style={MS.railBody}>
+          {vehicles.length === 0 ? (
+            <div style={MS.empty}>운행 중인 차량 없음</div>
+          ) : vehicles.map(v => {
+            const on = selected?.id === v.id;
+            return (
+              <div key={v.id}
+                onClick={() => { setSelected(v); if (v.lat && v.lng) setCenter({ lat:v.lat, lng:v.lng }); }}
+                style={{ ...MS.vCard, ...(on ? MS.vCardOn : {}) }}>
+                <div style={{ ...MS.vBar, background: on ? "var(--color-primary)" : "transparent" }} />
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={MS.vTop}>
+                    <StatusDot tone="positive" size={7} />
+                    <span style={{ ...MS.vName, color: on ? "var(--color-primary-deep)" : "var(--color-label)" }}>
+                      {v.vehicleNo || v.id}
+                    </span>
+                  </div>
+                  <div style={MS.vSub}>{v.routeName || v.routeId || "노선 미지정"}</div>
+                  <div style={MS.vMeta}>기사 {v.driverName || v.driverId || "–"}</div>
+                </div>
+                <div style={{ textAlign:"right", flexShrink:0 }}>
+                  <div style={MS.vSpeed}>{v.speed ?? 0}<span style={MS.vUnit}>km/h</span></div>
+                  <div style={MS.vAgo}>{timeSince(v.updatedAt)}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 우 상세 — 선택 차량(실데이터 stats·기사). 가짜 ETA/탑승인원/정류장 타임라인 제외 */}
+      {selected && (
+        <div style={MS.detail}>
+          <div style={MS.detailHead}>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <Pill tone="positive" dot>운행 중</Pill>
+                <span style={MS.detailAgo}>{timeSince(selected.updatedAt)} 수신</span>
+              </div>
+              <div style={MS.detailNo}>{selected.vehicleNo || selected.id}</div>
+              <div style={MS.detailRoute}>{selected.routeName || selected.routeId || "노선 미지정"}</div>
+            </div>
+            <button onClick={() => setSelected(null)} style={MS.closeBtn} title="닫기">
+              <Icon name="close" size={16}/>
+            </button>
           </div>
-        )}
-      </div>
+          <div style={MS.statGrid}>
+            <div style={MS.stat}>
+              <div style={MS.statLabel}>현재 속도</div>
+              <div style={MS.statVal}>{selected.speed ?? 0}<span style={MS.statUnit}>km/h</span></div>
+            </div>
+            <div style={MS.stat}>
+              <div style={MS.statLabel}>GPS 정확도</div>
+              <div style={MS.statVal}>±{selected.accuracy ?? "–"}<span style={MS.statUnit}>m</span></div>
+            </div>
+          </div>
+          <div style={MS.driverRow}>
+            <div style={MS.driverAv}>{(selected.driverName || "기")[0]}</div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={MS.driverName}>{selected.driverName || selected.driverId || "기사 미지정"} 기사</div>
+              <div style={MS.driverSub}>차량 {selected.vehicleNo || selected.id}</div>
+            </div>
+          </div>
+          <div style={MS.coordBox}>
+            <div style={MS.coordItem}>
+              <span style={MS.coordLbl}>위도</span>
+              <span style={MS.coordVal}>{selected.lat?.toFixed?.(6) ?? "–"}</span>
+            </div>
+            <div style={MS.coordItem}>
+              <span style={MS.coordLbl}>경도</span>
+              <span style={MS.coordVal}>{selected.lng?.toFixed?.(6) ?? "–"}</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+// MapTab 전용 라이트 스타일(리디자인 3단계). 공유 S 객체 무손상 → 타 9탭 격리.
+const MS = {
+  wrap:{ position:"relative", height:"100%", minHeight:0, overflow:"hidden", background:"var(--color-bg-soft)", fontFamily:"var(--font-base)" },
+  map:{ position:"absolute", inset:0, width:"100%", height:"100%" },
+  topbar:{ position:"absolute", top:12, left:12, right:12, height:52, display:"flex", alignItems:"center", gap:14, padding:"0 18px", background:"rgba(255,255,255,0.92)", backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)", border:"1px solid var(--color-line)", borderRadius:14, boxShadow:"var(--shadow-float)", zIndex:20 },
+  topDivider:{ width:1, height:20, background:"var(--color-line)" },
+  topCo:{ fontSize:13, fontWeight:600, color:"var(--color-label-mute)" },
+  topTab:{ marginLeft:24, display:"flex", alignItems:"center", gap:6, fontSize:13, fontWeight:700, color:"var(--color-primary)", background:"var(--color-primary-soft)", padding:"7px 12px", borderRadius:8 },
+  topNow:{ marginLeft:"auto", display:"flex", alignItems:"center", gap:7, fontSize:12, fontWeight:600, color:"var(--color-label-mute)" },
+  leftRail:{ position:"absolute", top:76, left:12, bottom:12, width:"min(280px,32vw)", minWidth:200, display:"flex", flexDirection:"column", background:"var(--color-bg)", borderRadius:16, boxShadow:"var(--shadow-float)", zIndex:10, overflow:"hidden" },
+  railHead:{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 16px 12px", borderBottom:"1px solid var(--color-bg-soft)", flexShrink:0 },
+  railTitle:{ fontSize:15, fontWeight:700, color:"var(--color-label)" },
+  railBody:{ flex:1, overflowY:"auto", padding:"8px" },
+  empty:{ color:"var(--color-label-alt)", fontSize:13, textAlign:"center", padding:"32px 16px" },
+  vCard:{ display:"flex", gap:10, padding:"11px 10px", borderRadius:10, marginTop:2, cursor:"pointer", transition:"background .12s" },
+  vCardOn:{ background:"var(--color-primary-soft)" },
+  vBar:{ width:4, alignSelf:"stretch", borderRadius:4, flexShrink:0 },
+  vTop:{ display:"flex", alignItems:"center", gap:7, marginBottom:3 },
+  vName:{ fontSize:13.5, fontWeight:700 },
+  vSub:{ fontSize:11.5, color:"var(--color-label-mute)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
+  vMeta:{ fontSize:11, color:"var(--color-label-alt)", marginTop:1 },
+  vSpeed:{ fontSize:14, fontWeight:800, color:"var(--color-label)", fontFamily:"var(--font-mono)" },
+  vUnit:{ fontSize:10, fontWeight:600, color:"var(--color-label-alt)", marginLeft:2 },
+  vAgo:{ fontSize:10, color:"var(--color-label-alt)", marginTop:2 },
+  detail:{ position:"absolute", top:76, right:12, bottom:12, width:320, display:"flex", flexDirection:"column", background:"var(--color-bg)", borderRadius:16, boxShadow:"var(--shadow-float)", zIndex:10, overflow:"hidden" },
+  detailHead:{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:10, padding:"18px 18px 14px", borderBottom:"1px solid var(--color-bg-soft)" },
+  detailAgo:{ fontSize:11, color:"var(--color-label-mute)" },
+  detailNo:{ fontFamily:"var(--font-brand)", fontSize:26, fontWeight:800, letterSpacing:"-0.02em", marginTop:8, color:"var(--color-label)" },
+  detailRoute:{ fontSize:13, color:"var(--color-label-mute)", marginTop:2 },
+  closeBtn:{ width:32, height:32, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", border:"none", background:"var(--color-bg-alt)", borderRadius:8, color:"var(--color-label-mute)", cursor:"pointer", fontFamily:"inherit" },
+  statGrid:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, padding:"16px 18px", borderBottom:"1px solid var(--color-bg-soft)" },
+  stat:{},
+  statLabel:{ fontSize:11, fontWeight:600, color:"var(--color-label-mute)" },
+  statVal:{ fontFamily:"var(--font-brand)", fontSize:22, fontWeight:800, letterSpacing:"-0.02em", marginTop:3, color:"var(--color-label)" },
+  statUnit:{ fontSize:11, fontWeight:600, color:"var(--color-label-mute)", marginLeft:3 },
+  driverRow:{ display:"flex", alignItems:"center", gap:12, padding:"16px 18px", borderBottom:"1px solid var(--color-bg-soft)" },
+  driverAv:{ width:40, height:40, borderRadius:"50%", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", background:"var(--color-primary-soft)", color:"var(--color-primary-deep)", fontWeight:700, fontSize:15 },
+  driverName:{ fontSize:14, fontWeight:700, color:"var(--color-label)" },
+  driverSub:{ fontSize:12, color:"var(--color-label-mute)", marginTop:1 },
+  coordBox:{ padding:"16px 18px", display:"flex", flexDirection:"column", gap:8 },
+  coordItem:{ display:"flex", alignItems:"center", justifyContent:"space-between" },
+  coordLbl:{ fontSize:12, color:"var(--color-label-mute)", fontWeight:600 },
+  coordVal:{ fontSize:13, color:"var(--color-label)", fontFamily:"var(--font-mono)" },
+};
 
 // ═══════════════════════════════════════════════════════
 // 탭2: 배차 관리
@@ -426,11 +546,11 @@ function DispatchTab({ companyId, vehicles, drivers }) {
         <table style={S.table}>
           <thead><tr>{["출발시간","노선명","차량번호","기사"].map(h=><th key={h} style={S.th}>{h}</th>)}<th style={S.th}>관리</th></tr></thead>
           <tbody>
-            {dispatches.length === 0 ? <tr><td colSpan={5} style={{...S.td,textAlign:"center",color:"#4A6FA5"}}>배차 내역이 없습니다</td></tr>
+            {dispatches.length === 0 ? <tr><td colSpan={5} style={{...S.td,textAlign:"center",color:"var(--color-label-alt)"}}>배차 내역이 없습니다</td></tr>
             : [...dispatches].sort((a,b)=>a.departTime>b.departTime?1:-1).map(d=>(
               <tr key={d.id} style={S.tr}>
                 <td style={S.td}><span style={S.timeBadge}>{d.departTime}</span></td>
-                <td style={{...S.td,color:"#00C2FF",fontWeight:600}}>{d.routeName}</td>
+                <td style={{...S.td,color:"var(--color-primary)",fontWeight:600}}>{d.routeName}</td>
                 <td style={S.td}>{d.vehicleNo}</td>
                 <td style={S.td}>{driverName(d.driverId)}</td>
                 <td style={S.td}>
@@ -495,11 +615,17 @@ function RoutesTab({ companyId }) {
   const [stops, setStops] = useState([]);
   const [showStopForm, setShowStopForm] = useState(false);
   const [editStop, setEditStop] = useState(null);
-  const [stopForm, setStopForm] = useState({ name:"", address:"", lat:"", lng:"" });
+  const [stopForm, setStopForm] = useState({ name:"", address:"", lat:"", lng:"", photo:"", description:"" });
   const [stopLoading, setStopLoading] = useState(false);
+  const [photoProcessing, setPhotoProcessing] = useState(false); // 사진 압축 중
   const [showMapPicker, setShowMapPicker] = useState(false);   // 지도 좌표 선택 모달
   const [pickerCenter, setPickerCenter] = useState({ lat: 37.3894, lng: 126.9522 });
   const [pickerPin, setPickerPin] = useState(null);            // 선택된 핀
+  // 주소/장소 검색 (기획 갭 #14 B방식 — 카카오 Geocoder→Places 폴백). RoutesTab 지역 한정.
+  const [addrQuery, setAddrQuery] = useState("");              // 검색어(주소 입력과 분리)
+  const [addrResults, setAddrResults] = useState([]);          // 검색 결과 드롭다운(최대 5)
+  const [addrSearching, setAddrSearching] = useState(false);   // 검색 중 표시
+  const [addrMsg, setAddrMsg] = useState("");                  // 검색 불가/실패 안내
 
   useEffect(() => {
     if (!companyId) return;
@@ -555,17 +681,20 @@ function RoutesTab({ companyId }) {
   };
 
   // ─── 정류장 CRUD ────────────────────────────────────
+  const resetAddrSearch = () => { setAddrQuery(""); setAddrResults([]); setAddrSearching(false); setAddrMsg(""); };
   const openStopAdd = () => {
     setEditStop(null);
-    setStopForm({ name:"", address:"", lat:"", lng:"" });
+    setStopForm({ name:"", address:"", lat:"", lng:"", photo:"", description:"" });
     setPickerPin(null);
+    resetAddrSearch();
     // 기존 정류장이 있으면 첫 번째 정류장 위치로 중심 설정
     if (stops.length > 0) setPickerCenter({ lat: stops[0].lat, lng: stops[0].lng });
     setShowStopForm(true);
   };
   const openStopEdit = (s) => {
     setEditStop(s);
-    setStopForm({ name:s.name||"", address:s.address||"", lat:s.lat?.toString()||"", lng:s.lng?.toString()||"" });
+    setStopForm({ name:s.name||"", address:s.address||"", lat:s.lat?.toString()||"", lng:s.lng?.toString()||"", photo:s.photo||"", description:s.description||"" });
+    resetAddrSearch();
     if (s.lat && s.lng) {
       setPickerCenter({ lat: s.lat, lng: s.lng });
       setPickerPin({ lat: s.lat, lng: s.lng });
@@ -573,12 +702,122 @@ function RoutesTab({ companyId }) {
     setShowStopForm(true);
   };
 
+  // ─── 주소/장소 검색 (카카오 services) ──────────────────
+  // Geocoder.addressSearch(주소) 우선 → 결과 없으면 Places.keywordSearch(지명/상호) 폴백.
+  // callcenter geocodeAddress 패턴 참고하되 buslink 독립 구현(다중 결과 드롭다운).
+  // ⚠ 카카오 키는 현재 callcenter와 임시 공유 — Geocoder/Places 일일 한도 공유(issues.md).
+  const handleAddrSearch = () => {
+    const q = addrQuery.trim();
+    if (!q) { setAddrMsg("검색어를 입력하세요"); setAddrResults([]); return; }
+    // SDK/services 미로드 가드 — 폼은 죽지 않고 수동 경로 그대로 동작
+    const svc = window.kakao?.maps?.services;
+    if (!svc || !svc.Geocoder || !svc.Places || !svc.Status) {
+      setAddrResults([]);
+      setAddrMsg("주소 검색 불가 — 지도에서 위치 선택 또는 좌표 직접 입력을 이용하세요");
+      return;
+    }
+    setAddrSearching(true);
+    setAddrMsg("");
+    setAddrResults([]);
+    const finish = (list, msg) => {
+      setAddrSearching(false);
+      setAddrResults(list);
+      setAddrMsg(msg || (list.length ? "" : "검색 결과가 없습니다 — 지도에서 위치 선택 또는 좌표 직접 입력"));
+    };
+    try {
+      new svc.Geocoder().addressSearch(q, (result, status) => {
+        if (status === svc.Status.OK && result && result.length) {
+          finish(result.slice(0, 5).map(r => ({
+            name: r.address_name,
+            address: r.road_address?.address_name || r.address_name,
+            lat: parseFloat(r.y), lng: parseFloat(r.x),
+          })));
+          return;
+        }
+        // 주소가 아니면 지명/상호로 재검색
+        new svc.Places().keywordSearch(q, (pres, pstatus) => {
+          if (pstatus === svc.Status.OK && pres && pres.length) {
+            finish(pres.slice(0, 5).map(p => ({
+              name: p.place_name,
+              address: p.road_address_name || p.address_name || "",
+              lat: parseFloat(p.y), lng: parseFloat(p.x),
+            })));
+          } else if (pstatus === svc.Status.ZERO_RESULT && status === svc.Status.ZERO_RESULT) {
+            finish([], "검색 결과가 없습니다 — 지도에서 위치 선택 또는 좌표 직접 입력");
+          } else {
+            // ERROR(한도초과 등) — 우아한 실패, 수동 경로 안내
+            finish([], "주소 검색 불가 — 지도에서 위치 선택 또는 좌표 직접 입력을 이용하세요");
+          }
+        });
+      });
+    } catch (e) {
+      finish([], "주소 검색 불가 — 지도에서 위치 선택 또는 좌표 직접 입력을 이용하세요");
+    }
+  };
+
+  // 검색 결과 선택 → 주소/좌표 채움 + picker 동기(기존 좌표입력·picker 동작과 일관)
+  const pickAddrResult = (r) => {
+    const latS = r.lat.toFixed(6), lngS = r.lng.toFixed(6);
+    setStopForm(f => ({
+      ...f,
+      address: r.address || r.name || f.address,
+      lat: latS, lng: lngS,
+      // name이 비어있을 때만 결과명 프리필(채워져 있으면 덮어쓰지 않음)
+      name: f.name?.trim() ? f.name : (r.name || f.name),
+    }));
+    setPickerPin({ lat: r.lat, lng: r.lng });
+    setPickerCenter({ lat: r.lat, lng: r.lng });
+    setShowMapPicker(true);   // 검색 결과 → 지도 바로 열어 핀 드래그로 미세조정
+    setAddrResults([]);
+    setAddrMsg("");
+  };
+
+  // 정류장 사진 첨부 — 클라에서 리사이즈·압축 후 data URI를 폼에 보관(Firestore 직저장).
+  const handleStopPhoto = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";              // 같은 파일 재선택 허용
+    if (!file) return;
+    setPhotoProcessing(true);
+    try {
+      const { dataUri } = await compressImageFile(file);
+      setStopForm(f => ({ ...f, photo: dataUri }));
+    } catch (err) {
+      alert(err.message || "사진 처리에 실패했습니다");
+    }
+    setPhotoProcessing(false);
+  };
+
+  // 정류장 폼 열림 동안 클립보드 이미지 붙여넣기(Ctrl+V) 지원 — 이미지 클립보드일 때만 가로챔(텍스트 붙여넣기 무영향)
+  useEffect(() => {
+    if (!showStopForm) return;
+    const onPaste = async (e) => {
+      const items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      let file = null;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type && items[i].type.indexOf("image") === 0) { file = items[i].getAsFile(); break; }
+      }
+      if (!file) return;
+      e.preventDefault();
+      setPhotoProcessing(true);
+      try {
+        const { dataUri } = await compressImageFile(file);
+        setStopForm(f => ({ ...f, photo: dataUri }));
+      } catch (err) {
+        alert(err.message || "사진 처리에 실패했습니다");
+      }
+      setPhotoProcessing(false);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [showStopForm]);
+
   const handleStopSave = async () => {
     if (!stopForm.name || !stopForm.lat || !stopForm.lng) return alert("정류장명, 위도, 경도는 필수입니다");
     const lat = parseFloat(stopForm.lat), lng = parseFloat(stopForm.lng);
     if (isNaN(lat) || isNaN(lng)) return alert("위도/경도는 숫자로 입력해주세요");
     setStopLoading(true);
-    const data = { name:stopForm.name.trim(), address:stopForm.address.trim(), lat, lng, updatedAt:new Date().toISOString() };
+    const data = { name:stopForm.name.trim(), address:stopForm.address.trim(), lat, lng, photo:stopForm.photo||"", description:(stopForm.description||"").trim(), updatedAt:new Date().toISOString() };
     const col = collection(db, "companies", companyId, "routes", stopsRoute.id, "stops");
     try {
       if (editStop) {
@@ -621,21 +860,21 @@ function RoutesTab({ companyId }) {
       <div style={S.panelHeader}>
         <span style={{ fontSize:16, fontWeight:700 }}>📍 노선 관리</span>
         <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-          <span style={{ fontSize:12, color:"#8896AA" }}>총 {routes.length}개</span>
+          <span style={{ fontSize:12, color:"var(--color-label-mute)" }}>총 {routes.length}개</span>
           <button style={S.addBtn} onClick={openAdd}>+ 노선 추가</button>
         </div>
       </div>
 
-      <div style={{ padding:"10px 16px", display:"flex", flexWrap:"wrap", gap:6, alignItems:"center", borderBottom:"1px solid #1E3A5F" }}>
+      <div style={{ padding:"10px 16px", display:"flex", flexWrap:"wrap", gap:6, alignItems:"center", borderBottom:"1px solid var(--color-line)" }}>
         {/* 출근/퇴근 필터 */}
         {["전체","출근","퇴근"].map(f=>(
           <button key={f} onClick={()=>setFilter(f)}
-            style={{ ...S.editBtn, background:filter===f?"#1A6BFF22":"#1E3A5F", color:filter===f?"#00C2FF":"#8896AA", border:filter===f?"1px solid rgba(0,194,255,.3)":"none" }}>
+            style={{ ...S.editBtn, background:filter===f?"var(--color-primary-soft)":"var(--color-bg-soft)", color:filter===f?"var(--color-primary-deep)":"var(--color-label-mute)", border:filter===f?"1px solid var(--color-primary)":"1px solid var(--color-line)" }}>
             {f}
           </button>
         ))}
         {/* 거래처 필터 */}
-        <span style={{ fontSize:11, color:"#4A6FA5", marginLeft:4 }}>거래처:</span>
+        <span style={{ fontSize:11, color:"var(--color-label-alt)", marginLeft:4 }}>거래처:</span>
         <select value={partnerFilter} onChange={e=>setPartnerFilter(e.target.value)}
           style={{ ...S.input, padding:"5px 10px", fontSize:12, width:"auto", minWidth:100, maxWidth:160 }}>
           <option value="전체">전체</option>
@@ -652,21 +891,21 @@ function RoutesTab({ companyId }) {
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"#4A6FA5"}}>
+              <tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"var(--color-label-alt)"}}>
                 {routes.length===0?"등록된 노선이 없습니다":"검색 결과가 없습니다"}
               </td></tr>
             ) : [...filtered].sort((a,b)=>a.departTime>b.departTime?1:-1).map(r=>(
               <tr key={r.id} style={S.tr}>
-                <td style={S.td}><span style={{...S.statusBadge, background:r.type==="출근"?"rgba(26,107,255,.2)":"rgba(255,140,66,.15)", color:r.type==="출근"?"#3D8BFF":"#FF8C42"}}>{r.type}</span></td>
-                <td style={{...S.td,fontSize:12}}><span style={{ background:"rgba(255,209,102,.1)", color:"#FFD166", borderRadius:6, padding:"2px 7px", fontSize:11, whiteSpace:"nowrap" }}>{r.partnerName||"–"}</span></td>
-                <td style={{...S.td,color:"#8896AA",fontSize:12}}>{r.shift||"–"}</td>
-                <td style={{...S.td,color:"#8896AA",fontSize:12,fontFamily:"monospace"}}>{r.code||"–"}</td>
+                <td style={S.td}><span style={{...S.statusBadge, background:r.type==="출근"?"var(--color-primary-soft)":"#FFF1E0", color:r.type==="출근"?"var(--color-primary-deep)":"#B95300"}}>{r.type}</span></td>
+                <td style={{...S.td,fontSize:12}}><span style={{ background:"var(--color-bg-soft)", color:"var(--color-label-mute)", borderRadius:6, padding:"2px 7px", fontSize:11, fontWeight:600, whiteSpace:"nowrap" }}>{r.partnerName||"–"}</span></td>
+                <td style={{...S.td,color:"var(--color-label-mute)",fontSize:12}}>{r.shift||"–"}</td>
+                <td style={{...S.td,color:"var(--color-label-mute)",fontSize:12,fontFamily:"monospace"}}>{r.code||"–"}</td>
                 <td style={{...S.td,fontWeight:600,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</td>
                 <td style={S.td}>{r.seats?`${r.seats}석`:"–"}</td>
                 <td style={S.td}><span style={S.timeBadge}>{r.departTime}</span></td>
                 <td style={S.td}>
                   <button onClick={()=>setStopsRoute(r)}
-                    style={{...S.editBtn, background:stopsRoute?.id===r.id?"#1A6BFF22":"#1E3A5F", color:stopsRoute?.id===r.id?"#00C2FF":"#8896AA", border:stopsRoute?.id===r.id?"1px solid rgba(0,194,255,.3)":"none"}}>
+                    style={{...S.editBtn, background:stopsRoute?.id===r.id?"var(--color-primary-soft)":"var(--color-bg-soft)", color:stopsRoute?.id===r.id?"var(--color-primary-deep)":"var(--color-label-mute)", border:stopsRoute?.id===r.id?"1px solid var(--color-primary)":"1px solid var(--color-line)"}}>
                     정류장 관리
                   </button>
                 </td>
@@ -682,11 +921,11 @@ function RoutesTab({ companyId }) {
 
       {/* ─── 정류장 관리 패널 ─── */}
       {stopsRoute && (
-        <div style={{ position:"absolute", top:0, right:0, width:"min(380px,100%)", height:"100%", background:"#112240", borderLeft:"1px solid #1E3A5F", display:"flex", flexDirection:"column", zIndex:20 }}>
-          <div style={{ padding:"14px 16px", borderBottom:"1px solid #1E3A5F", display:"flex", alignItems:"center", justifyContent:"space-between", background:"#0B1A2E" }}>
+        <div style={{ position:"absolute", top:0, right:0, width:"min(380px,100%)", height:"100%", background:"var(--color-bg)", borderLeft:"1px solid var(--color-line)", display:"flex", flexDirection:"column", zIndex:20 }}>
+          <div style={{ padding:"14px 16px", borderBottom:"1px solid var(--color-line)", display:"flex", alignItems:"center", justifyContent:"space-between", background:"var(--color-bg-alt)", flexShrink:0 }}>
             <div>
-              <div style={{ fontWeight:700, fontSize:14, color:"#00C2FF" }}>📍 정류장 관리</div>
-              <div style={{ fontSize:11, color:"#8896AA", marginTop:2, maxWidth:280, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{stopsRoute.name}</div>
+              <div style={{ fontWeight:700, fontSize:14, color:"var(--color-primary)" }}>📍 정류장 관리</div>
+              <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:2, maxWidth:280, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{stopsRoute.name}</div>
             </div>
             <div style={{ display:"flex", gap:8 }}>
               <button style={S.addBtn} onClick={openStopAdd}>+ 추가</button>
@@ -694,23 +933,29 @@ function RoutesTab({ companyId }) {
             </div>
           </div>
 
+          {/* 패널 본문 — 목록 + 추가/수정 폼을 한 스크롤 영역으로(내용 길어도 저장 버튼까지 스크롤) */}
+          <div style={{ flex:1, overflowY:"auto", minHeight:0 }}>
           {/* 정류장 목록 */}
-          <div style={{ flex:1, overflowY:"auto", padding:"8px 12px" }}>
+          <div style={{ padding:"8px 12px" }}>
             {stops.length === 0 ? (
-              <div style={{ color:"#4A6FA5", textAlign:"center", padding:30, fontSize:13 }}>
+              <div style={{ color:"var(--color-label-alt)", textAlign:"center", padding:30, fontSize:13 }}>
                 정류장이 없습니다<br/>
-                <span style={{ fontSize:11, color:"#1E3A5F" }}>+ 추가 버튼으로 정류장을 등록하세요</span>
+                <span style={{ fontSize:11, color:"var(--color-label-assistive)" }}>+ 추가 버튼으로 정류장을 등록하세요</span>
               </div>
             ) : stops.map((s, i) => (
-              <div key={s.id} style={{ background:"#0B1A2E", border:"1px solid #1E3A5F", borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
+              <div key={s.id} style={{ background:"var(--color-bg-alt)", border:"1px solid var(--color-line)", borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                  <div style={{ width:24, height:24, borderRadius:"50%", background:"#1A6BFF22", border:"1px solid #1A6BFF44", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700, color:"#3D8BFF", flexShrink:0 }}>
+                  <div style={{ width:24, height:24, borderRadius:"50%", background:"var(--color-primary-soft)", border:"1px solid var(--color-primary)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700, color:"var(--color-primary-deep)", flexShrink:0 }}>
                     {s.order || i+1}
                   </div>
+                  {s.photo && (
+                    <img src={s.photo} alt="" style={{ width:40, height:40, objectFit:"cover", borderRadius:6, border:"1px solid var(--color-line)", flexShrink:0 }}/>
+                  )}
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontSize:13, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.name}</div>
-                    {s.address && <div style={{ fontSize:11, color:"#8896AA", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.address}</div>}
-                    <div style={{ fontSize:10, color:"#4A6FA5", marginTop:1 }}>{s.lat?.toFixed(5)}, {s.lng?.toFixed(5)}</div>
+                    {s.address && <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.address}</div>}
+                    {s.description && <div style={{ fontSize:10, color:"var(--color-label-mute)", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>📝 {s.description}</div>}
+                    <div style={{ fontSize:10, color:"var(--color-label-alt)", marginTop:1 }}>{s.lat?.toFixed(5)}, {s.lng?.toFixed(5)}</div>
                   </div>
                   <div style={{ display:"flex", flexDirection:"column", gap:4, flexShrink:0 }}>
                     <div style={{ display:"flex", gap:4 }}>
@@ -729,16 +974,69 @@ function RoutesTab({ companyId }) {
 
           {/* 정류장 추가/수정 폼 */}
           {showStopForm && (
-            <div style={{ padding:"14px 16px", borderTop:"1px solid #1E3A5F", background:"#0B1A2E" }}>
-              <div style={{ fontSize:13, fontWeight:700, marginBottom:10, color:"#00C2FF" }}>{editStop?"정류장 수정":"정류장 추가"}</div>
+            <div style={{ padding:"14px 16px", borderTop:"1px solid var(--color-line)", background:"var(--color-bg-alt)" }}>
+              <div style={{ fontSize:13, fontWeight:700, marginBottom:10, color:"var(--color-primary)" }}>{editStop?"정류장 수정":"정류장 추가"}</div>
               <label style={S.label}>정류장명 *</label>
               <input style={{...S.input, marginBottom:6}} placeholder="예) 서대전역 5번출구" value={stopForm.name} onChange={e=>setStopForm({...stopForm,name:e.target.value})}/>
+              <label style={S.label}>주소·장소 검색</label>
+              <div style={{ display:"flex", gap:6, marginBottom:6 }}>
+                <input style={{...S.input, flex:1}} placeholder="예) 대전 서구 둔산동 / 서대전역"
+                  value={addrQuery}
+                  onChange={e=>setAddrQuery(e.target.value)}
+                  onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); handleAddrSearch(); } }}/>
+                <button style={{...S.addBtn, opacity:addrSearching?0.6:1}} onClick={handleAddrSearch} disabled={addrSearching}>
+                  {addrSearching ? "검색 중" : "검색"}
+                </button>
+              </div>
+              {addrMsg && (
+                <div style={{ fontSize:11, color:"var(--color-label-alt)", marginBottom:6, lineHeight:1.5 }}>{addrMsg}</div>
+              )}
+              {addrResults.length > 0 && (
+                <div style={{ border:"1px solid var(--color-line)", borderRadius:8, marginBottom:6, overflow:"hidden", background:"var(--color-bg)" }}>
+                  {addrResults.map((r, i) => (
+                    <button key={i} onClick={()=>pickAddrResult(r)}
+                      style={{ display:"block", width:"100%", textAlign:"left", border:"none", background:"transparent", borderBottom: i<addrResults.length-1?"1px solid var(--color-line)":"none", padding:"8px 10px", cursor:"pointer", fontFamily:"inherit" }}>
+                      <div style={{ fontSize:12, fontWeight:600, color:"var(--color-label)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.name}</div>
+                      {r.address && r.address!==r.name && (
+                        <div style={{ fontSize:10, color:"var(--color-label-mute)", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.address}</div>
+                      )}
+                      <div style={{ fontSize:10, color:"var(--color-label-assistive)", marginTop:1 }}>{r.lat.toFixed(5)}, {r.lng.toFixed(5)}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
               <label style={S.label}>주소 (선택)</label>
-              <input style={{...S.input, marginBottom:8}} placeholder="예) 대전 서구 둔산동" value={stopForm.address} onChange={e=>setStopForm({...stopForm,address:e.target.value})}/>
+              <input style={{...S.input, marginBottom:8}} placeholder="예) 대전 서구 둔산동 (검색 또는 직접 입력)" value={stopForm.address} onChange={e=>setStopForm({...stopForm,address:e.target.value})}/>
+
+              {/* 정류장 사진 (선택) — 승객이 위치 사진으로 정류장 확인. Firestore에 압축 data URI 저장 */}
+              <label style={S.label}>정류장 사진 (선택)</label>
+              {stopForm.photo ? (
+                <div style={{ position:"relative", marginBottom:8 }}>
+                  <img src={stopForm.photo} alt="정류장 사진 미리보기"
+                    style={{ width:"100%", maxHeight:160, objectFit:"cover", borderRadius:8, border:"1px solid var(--color-line)", display:"block" }}/>
+                  <button onClick={()=>setStopForm(f=>({...f,photo:""}))} title="사진 삭제"
+                    style={{ position:"absolute", top:6, right:6, width:26, height:26, borderRadius:"50%", border:"none", background:"rgba(11,16,32,0.62)", color:"#fff", fontSize:14, fontWeight:700, cursor:"pointer", lineHeight:1, fontFamily:"inherit" }}>✕</button>
+                </div>
+              ) : (
+                <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, width:"100%", padding:"12px", background:"var(--color-bg-soft)", border:"1px dashed var(--color-line)", borderRadius:8, color:"var(--color-label-mute)", fontSize:13, fontWeight:600, cursor: photoProcessing?"default":"pointer", marginBottom:8, opacity: photoProcessing?0.6:1 }}>
+                  {photoProcessing ? "사진 처리 중..." : "📷 사진 첨부 (자동 압축)"}
+                  <input type="file" accept="image/*" onChange={handleStopPhoto} disabled={photoProcessing} style={{ display:"none" }}/>
+                </label>
+              )}
+              <div style={{ fontSize:11, color:"var(--color-label-alt)", marginTop:-4, marginBottom:8 }}>
+                💡 이미지를 복사한 뒤 <b>Ctrl+V</b>로 붙여넣어도 됩니다 (스크린샷·캡처 가능)
+              </div>
+
+              {/* 정류장 설명 (선택) — 승객 안내용 위치 설명 */}
+              <label style={S.label}>정류장 설명 (선택)</label>
+              <textarea style={{...S.input, marginBottom:8, minHeight:60, resize:"vertical", lineHeight:1.5}}
+                placeholder="예) 정문 앞 버스 표지판 옆, 횡단보도 건너편"
+                value={stopForm.description}
+                onChange={e=>setStopForm({...stopForm,description:e.target.value})}/>
 
               {/* 지도 클릭 좌표 선택 버튼 */}
               <button onClick={() => setShowMapPicker(true)}
-                style={{ width:"100%", padding:"10px", background: pickerPin ? "rgba(0,196,140,.15)" : "#1E3A5F", border: pickerPin ? "1px solid rgba(0,196,140,.4)" : "1px solid #1E3A5F", borderRadius:8, color: pickerPin ? "#00C48C" : "#8896AA", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit", marginBottom:6 }}>
+                style={{ width:"100%", padding:"10px", background: pickerPin ? "#E6F7EB" : "var(--color-bg-soft)", border: pickerPin ? "1px solid #00BF40" : "1px solid var(--color-line)", borderRadius:8, color: pickerPin ? "#007A29" : "var(--color-label-mute)", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit", marginBottom:6 }}>
                 {pickerPin
                   ? `📍 ${parseFloat(stopForm.lat).toFixed(5)}, ${parseFloat(stopForm.lng).toFixed(5)}`
                   : "🗺 지도에서 위치 선택"}
@@ -746,7 +1044,7 @@ function RoutesTab({ companyId }) {
 
               {/* 좌표 직접 입력 (접기/펼치기) */}
               <details style={{ marginBottom:8 }}>
-                <summary style={{ fontSize:11, color:"#4A6FA5", cursor:"pointer", userSelect:"none" }}>좌표 직접 입력</summary>
+                <summary style={{ fontSize:11, color:"var(--color-label-alt)", cursor:"pointer", userSelect:"none" }}>좌표 직접 입력</summary>
                 <div style={{ display:"flex", gap:6, marginTop:6 }}>
                   <div style={{ flex:1 }}>
                     <label style={S.label}>위도</label>
@@ -767,6 +1065,7 @@ function RoutesTab({ companyId }) {
               </div>
             </div>
           )}
+          </div>
         </div>
       )}
 
@@ -774,11 +1073,11 @@ function RoutesTab({ companyId }) {
       {showMapPicker && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.7)", zIndex:200, display:"flex", flexDirection:"column" }}>
           {/* 모달 헤더 */}
-          <div style={{ background:"#112240", padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", flexShrink:0 }}>
+          <div style={{ background:"var(--color-bg)", padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", flexShrink:0 }}>
             <div>
               <div style={{ fontSize:14, fontWeight:700 }}>📍 위치 선택</div>
-              <div style={{ fontSize:11, color:"#8896AA", marginTop:2 }}>
-                {pickerPin ? `선택됨: ${pickerPin.lat.toFixed(5)}, ${pickerPin.lng.toFixed(5)}` : "지도를 클릭하여 정류장 위치를 선택하세요"}
+              <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:2 }}>
+                {pickerPin ? `선택됨: ${pickerPin.lat.toFixed(5)}, ${pickerPin.lng.toFixed(5)} · 핀을 끌거나 지도를 클릭해 미세조정` : "지도를 클릭하거나 핀을 끌어 정류장 위치를 선택하세요"}
               </div>
             </div>
             <div style={{ display:"flex", gap:8 }}>
@@ -791,11 +1090,11 @@ function RoutesTab({ companyId }) {
                   setShowMapPicker(false);
                 }}
                 disabled={!pickerPin}
-                style={{ background: pickerPin ? "linear-gradient(135deg,#1A6BFF,#00C2FF)" : "#1E3A5F", border:"none", borderRadius:8, padding:"8px 16px", color: pickerPin ? "#fff" : "#4A6FA5", fontSize:13, fontWeight:700, cursor: pickerPin ? "pointer" : "default", fontFamily:"inherit", opacity: pickerPin ? 1 : 0.6 }}>
+                style={{ background: pickerPin ? "var(--color-primary)" : "var(--color-bg-soft)", border: pickerPin ? "none" : "1px solid var(--color-line)", borderRadius:8, padding:"8px 16px", color: pickerPin ? "#fff" : "var(--color-label-alt)", fontSize:13, fontWeight:700, cursor: pickerPin ? "pointer" : "default", fontFamily:"inherit", opacity: pickerPin ? 1 : 0.6 }}>
                 이 위치로 선택
               </button>
               <button onClick={() => setShowMapPicker(false)}
-                style={{ background:"#1E3A5F", border:"none", borderRadius:8, padding:"8px 14px", color:"#8896AA", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>
+                style={{ background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:8, padding:"8px 14px", color:"var(--color-label-mute)", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>
                 취소
               </button>
             </div>
@@ -817,12 +1116,18 @@ function RoutesTab({ companyId }) {
               {pickerPin && (
                 <>
                   <MapMarker position={pickerPin}
+                    draggable={true}
+                    onDragEnd={(marker) => {
+                      const p = marker.getPosition();
+                      const np = { lat: p.getLat(), lng: p.getLng() };
+                      setPickerPin(np); setPickerCenter(np);
+                    }}
                     image={{ src:"https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png", size:{ width:24, height:35 } }}
                   />
                   <CustomOverlayMap position={pickerPin} yAnchor={2.2}>
-                    <div style={{ background:"#112240", border:"1px solid #00C2FF", borderRadius:8, padding:"4px 10px", fontSize:11, color:"#00C2FF", fontWeight:600, whiteSpace:"nowrap" }}>
+                    <div style={{ background:"var(--color-bg)", border:"1px solid var(--color-primary)", borderRadius:8, padding:"4px 10px", fontSize:11, color:"var(--color-primary)", fontWeight:600, whiteSpace:"nowrap", boxShadow:"var(--shadow-float)" }}>
                       {stopForm.name || "새 정류장"}<br/>
-                      <span style={{ color:"#4A6FA5", fontWeight:400 }}>{pickerPin.lat.toFixed(5)}, {pickerPin.lng.toFixed(5)}</span>
+                      <span style={{ color:"var(--color-label-alt)", fontWeight:400 }}>{pickerPin.lat.toFixed(5)}, {pickerPin.lng.toFixed(5)}</span>
                     </div>
                   </CustomOverlayMap>
                 </>
@@ -838,8 +1143,8 @@ function RoutesTab({ companyId }) {
           </div>
 
           {/* 하단 안내 */}
-          <div style={{ background:"#112240", padding:"10px 16px", borderTop:"1px solid #1E3A5F", flexShrink:0 }}>
-            <div style={{ fontSize:12, color:"#8896AA", textAlign:"center" }}>
+          <div style={{ background:"var(--color-bg)", padding:"10px 16px", borderTop:"1px solid var(--color-line)", flexShrink:0 }}>
+            <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center" }}>
               지도를 클릭하면 핀이 찍힙니다 · 빨간 마커는 기존 정류장 위치입니다
             </div>
           </div>
@@ -862,7 +1167,7 @@ function RoutesTab({ companyId }) {
           <div style={{ display:"flex", gap:8, marginBottom:4 }}>
             {["출근","퇴근"].map(t=>(
               <button key={t} onClick={()=>setForm({...form,type:t})}
-                style={{...S.editBtn,flex:1,padding:"9px",background:form.type===t?"linear-gradient(135deg,#1A6BFF,#00C2FF)":"#1E3A5F",color:form.type===t?"#fff":"#8896AA",border:"none",cursor:"pointer",fontFamily:"inherit"}}>
+                style={{...S.editBtn,flex:1,padding:"9px",background:form.type===t?"var(--color-primary)":"var(--color-bg-soft)",color:form.type===t?"#fff":"var(--color-label-mute)",border:form.type===t?"none":"1px solid var(--color-line)",cursor:"pointer",fontFamily:"inherit"}}>
                 {t}
               </button>
             ))}
@@ -969,14 +1274,14 @@ function DriverTab({ companyId, vehicles }) {
         <table style={S.table}>
           <thead><tr>{["사번","이름","차량번호","연락처","상태"].map(h=><th key={h} style={S.th}>{h}</th>)}<th style={S.th}>관리</th></tr></thead>
           <tbody>
-            {drivers.length===0?<tr><td colSpan={6} style={{...S.td,textAlign:"center",color:"#4A6FA5"}}>등록된 기사가 없습니다</td></tr>
+            {drivers.length===0?<tr><td colSpan={6} style={{...S.td,textAlign:"center",color:"var(--color-label-alt)"}}>등록된 기사가 없습니다</td></tr>
             :drivers.map(d=>(
               <tr key={d.id} style={S.tr}>
                 <td style={S.td}>{d.empNo??d.id}</td>
                 <td style={{...S.td,fontWeight:600}}>{d.name}</td>
                 <td style={S.td}>{d.vehicleNo||"–"}</td>
                 <td style={S.td}>{d.phone||"–"}</td>
-                <td style={S.td}><span style={{...S.statusBadge,background:d.status==="운행중"?"#00C48C22":"#1E3A5F",color:d.status==="운행중"?"#00C48C":"#8896AA"}}>{d.status??"대기"}</span></td>
+                <td style={S.td}><span style={{...S.statusBadge,background:d.status==="운행중"?"#E6F7EB":"var(--color-bg-soft)",color:d.status==="운행중"?"#007A29":"var(--color-label-mute)"}}>{d.status??"대기"}</span></td>
                 <td style={S.td}>
                   <button style={S.editBtn} onClick={()=>openEdit(d)}>수정</button>
                   <button style={S.delBtn} onClick={()=>handleDelete(d)}>삭제</button>
@@ -1002,7 +1307,7 @@ function DriverTab({ companyId, vehicles }) {
           </select>
           <label style={S.label}>연락처</label>
           <input style={S.input} placeholder="010-0000-0000" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/>
-          {error&&<p style={{color:"#FF4D6A",fontSize:13,margin:0}}>{error}</p>}
+          {error&&<p style={{color:"var(--color-destructive)",fontSize:13,margin:0}}>{error}</p>}
           <div style={{display:"flex",gap:8,marginTop:8}}>
             <button style={{...S.addBtn,flex:1,opacity:loading?0.6:1}} onClick={handleSave} disabled={loading}>{loading?"저장 중...":"저장"}</button>
             <button style={{...S.closeBtn,flex:1}} onClick={()=>setShowForm(false)}>취소</button>
@@ -1051,7 +1356,7 @@ function VehicleTab({ companyId, vehicles }) {
       <div style={S.panelHeader}>
         <span style={{fontSize:16,fontWeight:700}}>차량 관리</span>
         <div style={{display:"flex",gap:12,alignItems:"center"}}>
-          <span style={{fontSize:13,color:"#8896AA"}}>총 {vehicles.length}대</span>
+          <span style={{fontSize:13,color:"var(--color-label-mute)"}}>총 {vehicles.length}대</span>
           <button style={S.addBtn} onClick={openAdd}>+ 차량 등록</button>
         </div>
       </div>
@@ -1059,16 +1364,16 @@ function VehicleTab({ companyId, vehicles }) {
         <table style={S.table}>
           <thead><tr>{["차량ID","차량번호","차종","모델명","좌석수","연식","비고"].map(h=><th key={h} style={S.th}>{h}</th>)}<th style={S.th}>관리</th></tr></thead>
           <tbody>
-            {vehicles.length===0?<tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"#4A6FA5"}}>등록된 차량이 없습니다</td></tr>
+            {vehicles.length===0?<tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"var(--color-label-alt)"}}>등록된 차량이 없습니다</td></tr>
             :vehicles.map(v=>(
               <tr key={v.id} style={S.tr}>
-                <td style={{...S.td,color:"#8896AA",fontSize:12}}>{v.id}</td>
+                <td style={{...S.td,color:"var(--color-label-mute)",fontSize:12}}>{v.id}</td>
                 <td style={{...S.td,fontWeight:600}}>{v.plateNo}</td>
-                <td style={S.td}><span style={{...S.statusBadge,background:v.type==="대형"?"#1A6BFF22":v.type==="중형"?"#FFD16622":"#00C48C22",color:v.type==="대형"?"#3D8BFF":v.type==="중형"?"#FFD166":"#00C48C"}}>{v.type||"–"}</span></td>
+                <td style={S.td}><span style={{...S.statusBadge,background:v.type==="대형"?"var(--color-primary-soft)":v.type==="중형"?"#FFF1E0":"#E6F7EB",color:v.type==="대형"?"var(--color-primary-deep)":v.type==="중형"?"#B95300":"#007A29"}}>{v.type||"–"}</span></td>
                 <td style={S.td}>{v.model||"–"}</td>
                 <td style={S.td}>{v.seats?`${v.seats}석`:"–"}</td>
                 <td style={S.td}>{v.year||"–"}</td>
-                <td style={{...S.td,fontSize:12,color:"#8896AA"}}>{v.memo||"–"}</td>
+                <td style={{...S.td,fontSize:12,color:"var(--color-label-mute)"}}>{v.memo||"–"}</td>
                 <td style={S.td}>
                   <button style={S.editBtn} onClick={()=>openEdit(v)}>수정</button>
                   <button style={S.delBtn} onClick={()=>handleDelete(v)}>삭제</button>
@@ -1150,8 +1455,8 @@ function SimulatorTab({ companyId, vehicles, drivers }) {
     <div style={{display:"flex",height:"100%",minHeight:0}}>
       <div style={{...S.mapSidebar,padding:"0 0 16px"}}>
         <div style={S.panelHeader}>
-          <span style={{fontWeight:700}}>🧪 GPS 시뮬레이터</span>
-          <span style={{fontSize:11,color:running?"#00C48C":"#8896AA"}}>{running?"● 송출 중":"○ 정지"}</span>
+          <span style={{fontWeight:700,color:"var(--color-label)"}}>🧪 GPS 시뮬레이터</span>
+          <span style={{fontSize:11,fontWeight:600,color:running?"var(--color-positive)":"var(--color-label-mute)"}}>{running?"● 송출 중":"○ 정지"}</span>
         </div>
         <div style={{padding:"16px 16px 0",display:"flex",flexDirection:"column",gap:10}}>
           <div><label style={S.label}>기사 선택</label>
@@ -1167,7 +1472,7 @@ function SimulatorTab({ companyId, vehicles, drivers }) {
             </select>
           </div>
           <div><label style={S.label}>노선명</label><input style={S.input} value={routeName} onChange={e=>setRouteName(e.target.value)}/></div>
-          <div style={{background:"#0B1A2E",borderRadius:8,padding:12}}>
+          <div style={{background:"var(--color-bg-alt)",borderRadius:8,padding:12}}>
             <label style={{...S.label,display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}>
               <input type="checkbox" checked={useMyLocation} onChange={e=>setUseMyLocation(e.target.checked)}/>내 현재 위치 사용
             </label>
@@ -1185,12 +1490,12 @@ function SimulatorTab({ companyId, vehicles, drivers }) {
           </div>
           {!running
             ?<button style={{...S.addBtn,padding:"10px"}} onClick={handleStart}>🟢 시뮬레이터 시작</button>
-            :<button style={{...S.addBtn,background:"#FF4D6A",padding:"10px"}} onClick={handleStop}>🔴 시뮬레이터 종료</button>
+            :<button style={{...S.addBtn,background:"var(--color-destructive)",padding:"10px"}} onClick={handleStop}>🔴 시뮬레이터 종료</button>
           }
           <button style={{...S.editBtn,padding:"8px",fontSize:13}} onClick={doSend} disabled={running}>📡 1회 수동 전송</button>
         </div>
-        <div style={{margin:"12px 16px 0",background:"#0B1A2E",borderRadius:8,padding:10,fontSize:11,color:"#8896AA",maxHeight:200,overflowY:"auto"}}>
-          {log.length===0?<span style={{color:"#4A6FA5"}}>로그 없음</span>:log.map((l,i)=><div key={i}>{l}</div>)}
+        <div style={{margin:"12px 16px 0",background:"var(--color-bg-alt)",borderRadius:8,padding:10,fontSize:11,color:"var(--color-label-mute)",maxHeight:200,overflowY:"auto"}}>
+          {log.length===0?<span style={{color:"var(--color-label-alt)"}}>로그 없음</span>:log.map((l,i)=><div key={i}>{l}</div>)}
         </div>
       </div>
       <div style={{flex:1,position:"relative"}}>
@@ -1243,7 +1548,7 @@ function HistoryTab({ companyId, vehicles }) {
       <div style={{...S.mapSidebar}}>
         <div style={S.panelHeader}>
           <span style={{fontWeight:700}}>📅 운행 이력</span>
-          {points.length>0&&<span style={{fontSize:12,color:"#00C48C"}}>{points.length}개 포인트</span>}
+          {points.length>0&&<span style={{fontSize:12,fontWeight:600,color:"var(--color-positive)"}}>{points.length}개 포인트</span>}
         </div>
         <div style={{padding:16,display:"flex",flexDirection:"column",gap:10}}>
           <div><label style={S.label}>날짜</label><input type="date" style={S.dateInput} value={date} onChange={e=>setDate(e.target.value)}/></div>
@@ -1257,15 +1562,15 @@ function HistoryTab({ companyId, vehicles }) {
         </div>
         {points.length>0&&(
           <div style={{flex:1,overflowY:"auto",padding:"0 12px"}}>
-            <div style={{fontSize:12,color:"#8896AA",padding:"4px 4px 8px",borderBottom:"1px solid #1E3A5F",marginBottom:8}}>{vehicle?.plateNo} · {date}</div>
+            <div style={{fontSize:12,color:"var(--color-label-mute)",padding:"4px 4px 8px",borderBottom:"1px solid var(--color-line)",marginBottom:8}}>{vehicle?.plateNo} · {date}</div>
             {points.map(p=>(
               <div key={p.id} onClick={()=>{setSelected(p);setCenter({lat:p.lat,lng:p.lng});}}
-                style={{padding:"8px 10px",borderRadius:8,marginBottom:4,cursor:"pointer",background:selected?.id===p.id?"#1A6BFF22":"#0B1A2E",border:`1px solid ${selected?.id===p.id?"#1A6BFF":"transparent"}`}}>
+                style={{padding:"8px 10px",borderRadius:8,marginBottom:4,cursor:"pointer",background:selected?.id===p.id?"var(--color-primary-soft)":"var(--color-bg-alt)",border:`1px solid ${selected?.id===p.id?"var(--color-primary)":"var(--color-line)"}`}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{fontSize:11,fontWeight:700,color:"#00C2FF"}}>#{p.idx}</span>
-                  <span style={{fontSize:11,color:"#8896AA"}}>{formatTs(p.ts)}</span>
+                  <span style={{fontSize:11,fontWeight:700,color:"var(--color-primary)"}}>#{p.idx}</span>
+                  <span style={{fontSize:11,color:"var(--color-label-mute)"}}>{formatTs(p.ts)}</span>
                 </div>
-                <div style={{fontSize:11,color:"#8896AA",marginTop:2}}>{p.speed??0} km/h</div>
+                <div style={{fontSize:11,color:"var(--color-label-mute)",marginTop:2}}>{p.speed??0} km/h</div>
               </div>
             ))}
           </div>
@@ -1274,7 +1579,7 @@ function HistoryTab({ companyId, vehicles }) {
       </div>
       <div style={{flex:1,position:"relative"}}>
         <Map center={center} style={{width:"100%",height:"100%"}} level={7}>
-          {path.length>=2&&<Polyline path={path} strokeWeight={4} strokeColor="#1A6BFF" strokeOpacity={0.8} strokeStyle="solid"/>}
+          {path.length>=2&&<Polyline path={path} strokeWeight={4} strokeColor="#0066FF" strokeOpacity={0.8} strokeStyle="solid"/>}
           {points.length>0&&<MapMarker position={{lat:points[0].lat,lng:points[0].lng}} title="출발"/>}
           {points.length>1&&<MapMarker position={{lat:points[points.length-1].lat,lng:points[points.length-1].lng}} title="도착"/>}
           {selected&&<MapMarker position={{lat:selected.lat,lng:selected.lng}}/>}
@@ -1290,7 +1595,7 @@ function HistoryTab({ companyId, vehicles }) {
           </div>
         )}
         {points.length===0&&!loading&&(
-          <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",background:"#112240cc",border:"1px solid #1E3A5F",borderRadius:12,padding:"20px 32px",textAlign:"center",color:"#8896AA",fontSize:14}}>
+          <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",background:"rgba(255,255,255,0.92)",backdropFilter:"blur(8px)",WebkitBackdropFilter:"blur(8px)",border:"1px solid var(--color-line)",borderRadius:12,padding:"20px 32px",textAlign:"center",color:"var(--color-label-mute)",fontSize:14,boxShadow:"var(--shadow-float)"}}>
             차량과 날짜를 선택 후<br/>이력 조회를 눌러주세요
           </div>
         )}
@@ -1353,6 +1658,11 @@ function PartnerTab({ companyId }) {
     await updateDoc(doc(db, "partnerCodes", code.id), { active: false });
   };
 
+  const handleActivate = async (code) => {
+    if (!window.confirm(`${code.partnerName} 업체코드를 다시 활성화하시겠습니까?`)) return;
+    await updateDoc(doc(db, "partnerCodes", code.id), { active: true });
+  };
+
   const copyCode = (code) => {
     navigator.clipboard.writeText(code);
     setCopiedCode(code);
@@ -1394,14 +1704,14 @@ function PartnerTab({ companyId }) {
             </thead>
             <tbody>
               {codes.length === 0 ? (
-                <tr><td colSpan={7} style={{ ...S.td, textAlign: "center", color: "#4A6FA5" }}>발급된 업체코드가 없습니다</td></tr>
+                <tr><td colSpan={7} style={{ ...S.td, textAlign: "center", color: "var(--color-label-alt)" }}>발급된 업체코드가 없습니다</td></tr>
               ) : [...codes].sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0)).map(c => (
-                <tr key={c.id} style={{ ...S.tr, background: selectedCode === c.id ? "rgba(26,107,255,.08)" : "#112240" }}
+                <tr key={c.id} style={{ ...S.tr, background: selectedCode === c.id ? "var(--color-primary-soft)" : "var(--color-bg)" }}
                   onClick={() => setSelectedCode(selectedCode === c.id ? null : c.id)}>
                   <td style={{ ...S.td, fontWeight: 600 }}>{c.partnerName}</td>
                   <td style={{ ...S.td }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <code style={{ fontSize: 11, color: "#00C2FF", background: "#0B1A2E", padding: "2px 8px", borderRadius: 4 }}>
+                      <code style={{ fontSize: 11, color: "var(--color-primary)", background: "var(--color-bg-alt)", padding: "2px 8px", borderRadius: 4 }}>
                         {c.code}
                       </code>
                       <button onClick={(e) => { e.stopPropagation(); copyCode(c.code); }}
@@ -1411,16 +1721,18 @@ function PartnerTab({ companyId }) {
                     </div>
                   </td>
                   <td style={S.td}>
-                    <span style={{ ...S.statusBadge, background: c.active ? "#00C48C22" : "#FF4D6A22", color: c.active ? "#00C48C" : "#FF4D6A" }}>
+                    <span style={{ ...S.statusBadge, background: c.active ? "#E6F7EB" : "#FCE5E5", color: c.active ? "#007A29" : "#A81818" }}>
                       ● {c.active ? "활성" : "비활성"}
                     </span>
                   </td>
-                  <td style={{ ...S.td, fontSize: 12, color: "#8896AA" }}>{formatDate(c.expiresAt)}</td>
-                  <td style={{ ...S.td, color: "#00C2FF", fontWeight: 600 }}>{c.uploadCount || 0}회</td>
-                  <td style={{ ...S.td, fontSize: 12, color: "#8896AA" }}>{formatDate(c.lastUploadAt)}</td>
+                  <td style={{ ...S.td, fontSize: 12, color: "var(--color-label-mute)" }}>{formatDate(c.expiresAt)}</td>
+                  <td style={{ ...S.td, color: "var(--color-primary)", fontWeight: 600 }}>{c.uploadCount || 0}회</td>
+                  <td style={{ ...S.td, fontSize: 12, color: "var(--color-label-mute)" }}>{formatDate(c.lastUploadAt)}</td>
                   <td style={S.td} onClick={e => e.stopPropagation()}>
-                    {c.active && (
+                    {c.active ? (
                       <button style={S.delBtn} onClick={() => handleDeactivate(c)}>비활성화</button>
+                    ) : (
+                      <button style={S.actBtn} onClick={() => handleActivate(c)}>활성화</button>
                     )}
                   </td>
                 </tr>
@@ -1430,14 +1742,14 @@ function PartnerTab({ companyId }) {
 
           {/* 선택된 업체 직원 목록 */}
           {selectedCode && (
-            <div style={{ marginTop: 20, background: "#0B1A2E", borderRadius: 12, overflow: "hidden" }}>
-              <div style={{ padding: "12px 16px", borderBottom: "1px solid #1E3A5F", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontWeight: 700, color: "#00C2FF" }}>
+            <div style={{ marginTop: 20, background: "var(--color-bg-alt)", borderRadius: 12, overflow: "hidden" }}>
+              <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--color-line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontWeight: 700, color: "var(--color-primary)" }}>
                   {codes.find(c => c.id === selectedCode)?.partnerName} 직원 목록
                 </span>
                 <div style={{ display: "flex", gap: 10 }}>
-                  <span style={{ fontSize: 12, color: "#00C48C" }}>재직 {passengers.filter(p => p.active).length}명</span>
-                  <span style={{ fontSize: 12, color: "#FF8C42" }}>퇴사 {passengers.filter(p => !p.active).length}명</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-positive)" }}>재직 {passengers.filter(p => p.active).length}명</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-cautionary)" }}>퇴사 {passengers.filter(p => !p.active).length}명</span>
                 </div>
               </div>
               <div style={{ maxHeight: 300, overflowY: "auto" }}>
@@ -1447,15 +1759,15 @@ function PartnerTab({ companyId }) {
                   </thead>
                   <tbody>
                     {passengers.length === 0
-                      ? <tr><td colSpan={5} style={{ ...S.td, textAlign: "center", color: "#4A6FA5" }}>등록된 직원이 없습니다</td></tr>
+                      ? <tr><td colSpan={5} style={{ ...S.td, textAlign: "center", color: "var(--color-label-alt)" }}>등록된 직원이 없습니다</td></tr>
                       : passengers.map(p => (
                         <tr key={p.id} style={S.tr}>
                           <td style={{ ...S.td, fontFamily: "monospace", fontSize: 12 }}>{p.empNo}</td>
                           <td style={{ ...S.td, fontWeight: 600 }}>{p.name}</td>
-                          <td style={{ ...S.td, color: "#8896AA", fontSize: 12 }}>{p.dept || "–"}</td>
-                          <td style={{ ...S.td, color: "#8896AA", fontSize: 12 }}>{p.routeCode || "–"}</td>
+                          <td style={{ ...S.td, color: "var(--color-label-mute)", fontSize: 12 }}>{p.dept || "–"}</td>
+                          <td style={{ ...S.td, color: "var(--color-label-mute)", fontSize: 12 }}>{p.routeCode || "–"}</td>
                           <td style={S.td}>
-                            <span style={{ ...S.statusBadge, background: p.active ? "#00C48C22" : "#FF4D6A22", color: p.active ? "#00C48C" : "#FF4D6A" }}>
+                            <span style={{ ...S.statusBadge, background: p.active ? "#E6F7EB" : "#FCE5E5", color: p.active ? "#007A29" : "#A81818" }}>
                               {p.active ? "재직" : "퇴사"}
                             </span>
                           </td>
@@ -1479,7 +1791,7 @@ function PartnerTab({ companyId }) {
           <label style={S.label}>메모 (선택)</label>
           <input style={S.input} placeholder="예) 삼성 천안캠퍼스 노선 전용"
             value={form.memo} onChange={e => setForm({ ...form, memo: e.target.value })} />
-          <div style={{ background: "rgba(255,209,102,.08)", border: "1px solid rgba(255,209,102,.2)", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#FFD166" }}>
+          <div style={{ background: "#FFF1E0", border: "1px solid #FFE0C2", borderRadius: 8, padding: "10px 14px", fontSize: 12, fontWeight: 500, color: "#B95300" }}>
             ⓘ 유효기간 1년 · 발급 후 협력사 담당자에게 코드를 전달하세요
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
@@ -1523,7 +1835,7 @@ function NoticeTab({ companyId }) {
     setLoading(true); setResult(null);
     try {
       await sendNotice({ companyId, title, body, type });
-      setResult({ ok: true, msg: "공지가 발송되었습니다\n(인앱 배너 즉시 표시, FCM 푸시는 Cloud Function 배포 후 동작)" });
+      setResult({ ok: true, msg: "공지가 발송되었습니다\n(인앱 배너 즉시 표시, FCM 푸시는 알림 허용 직원에게 발송)" });
       setTitle(""); setBody(""); setType("normal");
     } catch (e) {
       setResult({ ok: false, msg: "발송 실패: " + e.message });
@@ -1545,18 +1857,18 @@ function NoticeTab({ companyId }) {
     <div style={S.panel}>
       <div style={S.panelHeader}>
         <span style={{ fontSize:16, fontWeight:700 }}>📢 공지 발송</span>
-        <span style={{ fontSize:12, color:"#8896AA" }}>인앱 배너 + FCM 푸시</span>
+        <span style={{ fontSize:12, color:"var(--color-label-mute)" }}>인앱 배너 + FCM 푸시</span>
       </div>
 
       <div style={{ padding:"16px 20px", display:"flex", flexDirection:"column", gap:12 }}>
         {/* 공지 유형 */}
         <div style={{ display:"flex", gap:8 }}>
-          {[["normal","📋 일반 공지","#1A6BFF"],["emergency","🚨 긴급 공지","#FF4D6A"]].map(([v,label,color])=>(
+          {[["normal","📋 일반 공지","var(--color-primary-soft)","var(--color-primary-deep)","var(--color-primary)"],["emergency","🚨 긴급 공지","#FCE5E5","#A81818","var(--color-destructive)"]].map(([v,label,softBg,deepFg,line])=>(
             <button key={v} onClick={()=>setType(v)}
-              style={{ flex:1, padding:"10px", borderRadius:10, border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700,
-                background: type===v ? color+"33" : "#1E3A5F",
-                color: type===v ? color : "#8896AA",
-                outline: type===v ? `2px solid ${color}` : "none" }}>
+              style={{ flex:1, padding:"10px", borderRadius:10, cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700,
+                background: type===v ? softBg : "var(--color-bg-soft)",
+                color: type===v ? deepFg : "var(--color-label-mute)",
+                border: type===v ? `1px solid ${line}` : "1px solid var(--color-line)" }}>
               {label}
             </button>
           ))}
@@ -1564,7 +1876,7 @@ function NoticeTab({ companyId }) {
 
         {/* 긴급 안내 */}
         {type === "emergency" && (
-          <div style={{ background:"rgba(255,77,106,.08)", border:"1px solid rgba(255,77,106,.3)", borderRadius:8, padding:"10px 14px", fontSize:12, color:"#FF4D6A" }}>
+          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", borderRadius:8, padding:"10px 14px", fontSize:12, fontWeight:500, color:"#A81818" }}>
             🚨 긴급 공지는 홈 화면 최상단에 빨간 배너로 표시되며, FCM 푸시 알림이 즉시 발송됩니다
           </div>
         )}
@@ -1586,7 +1898,7 @@ function NoticeTab({ companyId }) {
 
         {/* 결과 메시지 */}
         {result && (
-          <div style={{ background: result.ok?"rgba(0,196,140,.1)":"rgba(255,77,106,.1)", border:`1px solid ${result.ok?"rgba(0,196,140,.3)":"rgba(255,77,106,.3)"}`, borderRadius:8, padding:"10px 14px", fontSize:13, color: result.ok?"#00C48C":"#FF4D6A", whiteSpace:"pre-line" }}>
+          <div style={{ background: result.ok?"#E6F7EB":"#FCE5E5", border:`1px solid ${result.ok?"#A7E2BB":"#F6C9C9"}`, borderRadius:8, padding:"10px 14px", fontSize:13, fontWeight:500, color: result.ok?"#007A29":"#A81818", whiteSpace:"pre-line" }}>
             {result.msg}
           </div>
         )}
@@ -1600,26 +1912,26 @@ function NoticeTab({ companyId }) {
         <div style={{ marginTop:8 }}>
           <div style={{ fontSize:13, fontWeight:700, marginBottom:10 }}>발송 이력</div>
           {notices.length === 0 ? (
-            <div style={{ color:"#4A6FA5", fontSize:13, textAlign:"center", padding:"16px 0" }}>발송된 공지가 없습니다</div>
+            <div style={{ color:"var(--color-label-alt)", fontSize:13, textAlign:"center", padding:"16px 0" }}>발송된 공지가 없습니다</div>
           ) : notices.slice(0,10).map(n => (
-            <div key={n.id} style={{ background:"#0B1A2E", borderRadius:10, padding:"12px 14px", marginBottom:8, border:`1px solid ${n.type==="emergency"?"rgba(255,77,106,.3)":"#1E3A5F"}`, opacity: n.active?1:0.5 }}>
+            <div key={n.id} style={{ background:"var(--color-bg)", borderRadius:10, padding:"12px 14px", marginBottom:8, border:`1px solid ${n.type==="emergency"?"#F6C9C9":"var(--color-line)"}`, boxShadow:"var(--shadow-emphasize)", opacity: n.active?1:0.5 }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4 }}>
                     <span style={{ fontSize:10, padding:"2px 8px", borderRadius:8, fontWeight:700,
-                      background: n.type==="emergency"?"rgba(255,77,106,.2)":"rgba(26,107,255,.2)",
-                      color: n.type==="emergency"?"#FF4D6A":"#3D8BFF" }}>
+                      background: n.type==="emergency"?"#FCE5E5":"var(--color-primary-soft)",
+                      color: n.type==="emergency"?"#A81818":"var(--color-primary-deep)" }}>
                       {n.type==="emergency"?"🚨 긴급":"📋 일반"}
                     </span>
-                    {!n.active && <span style={{ fontSize:10, color:"#4A6FA5" }}>비활성</span>}
-                    <span style={{ fontSize:11, color:"#4A6FA5", marginLeft:"auto" }}>{fmt(n.createdAt)}</span>
+                    {!n.active && <span style={{ fontSize:10, color:"var(--color-label-alt)" }}>비활성</span>}
+                    <span style={{ fontSize:11, color:"var(--color-label-alt)", marginLeft:"auto" }}>{fmt(n.createdAt)}</span>
                   </div>
                   <div style={{ fontSize:13, fontWeight:700, marginBottom:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{n.title}</div>
-                  <div style={{ fontSize:12, color:"#8896AA", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{n.body}</div>
+                  <div style={{ fontSize:12, color:"var(--color-label-mute)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{n.body}</div>
                 </div>
                 {n.active && (
                   <button onClick={()=>handleDeactivate(n.id)}
-                    style={{ background:"transparent", border:"1px solid #1E3A5F", borderRadius:6, padding:"4px 8px", color:"#8896AA", fontSize:11, cursor:"pointer", fontFamily:"inherit", flexShrink:0 }}>
+                    style={{ background:"transparent", border:"1px solid var(--color-line)", borderRadius:6, padding:"4px 8px", color:"var(--color-label-mute)", fontSize:11, cursor:"pointer", fontFamily:"inherit", flexShrink:0 }}>
                     숨기기
                   </button>
                 )}
@@ -1636,44 +1948,52 @@ function NoticeTab({ companyId }) {
 // ═══════════════════════════════════════════════════════
 // 스타일
 // ═══════════════════════════════════════════════════════
+// 리디자인 4단계 — 공유 S 객체를 tokens.css 변수 기반 라이트로 일괄 전환.
+// 키 이름·구조 100% 보존(전 9탭+전역 셸 동시 전파). MS(MapTab)와 동일 토큰 체계로 정합.
+// 다크 하드코딩(#0B1A2E/#112240/#1E3A5F/#00C2FF 등) 전면 제거.
 const S = {
-  wrap:{display:"flex",height:"100dvh",background:"#0B1A2E",fontFamily:"'Noto Sans KR',sans-serif",color:"#F0F4FF",position:"relative",overflow:"hidden",fontSize:13},
-  sidebar:{width:220,background:"#112240",borderRight:"1px solid #1E3A5F",display:"flex",flexDirection:"column",padding:"20px 12px"},
-  logo:{display:"flex",alignItems:"baseline",gap:8,marginBottom:24,paddingBottom:16,borderBottom:"1px solid #1E3A5F"},
-  logoText:{fontSize:20,fontWeight:800,background:"linear-gradient(90deg,#1A6BFF,#00C2FF)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"},
-  logoSub:{fontSize:12,color:"#8896AA"},
-  nav:{display:"flex",flexDirection:"column",gap:4},
-  navItem:{padding:"10px 12px",borderRadius:8,cursor:"pointer",fontSize:13,color:"#8896AA",transition:"all .15s"},
-  navActive:{background:"#1A6BFF22",color:"#00C2FF",fontWeight:600},
-  logoutBtn:{background:"transparent",border:"1px solid #1E3A5F",borderRadius:8,padding:"8px 12px",color:"#8896AA",fontSize:13,cursor:"pointer",fontFamily:"inherit"},
+  wrap:{display:"flex",height:"100dvh",background:"var(--color-bg-soft)",fontFamily:"var(--font-base)",color:"var(--color-label)",position:"relative",overflow:"hidden",fontSize:13},
+  sidebar:{width:236,background:"var(--color-bg)",borderRight:"1px solid var(--color-line)",display:"flex",flexDirection:"column",padding:"18px 14px"},
+  logo:{display:"flex",alignItems:"baseline",gap:8,padding:"4px 8px 16px",marginBottom:10,borderBottom:"1px solid var(--color-line)"},
+  logoText:{fontSize:20,fontWeight:800,fontFamily:"var(--font-brand)",letterSpacing:"-0.03em",color:"var(--color-primary)"},
+  logoSub:{fontSize:12,color:"var(--color-label-mute)"},
+  sideSection:{fontSize:11,fontWeight:700,letterSpacing:"0.04em",color:"var(--color-label-alt)",padding:"6px 12px 8px"},
+  nav:{display:"flex",flexDirection:"column",gap:2},
+  navItem:{display:"flex",alignItems:"center",gap:11,padding:"10px 12px",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:500,color:"var(--color-label-mute)",position:"relative",transition:"background .15s,color .15s",userSelect:"none"},
+  navActive:{background:"var(--color-primary-soft)",color:"var(--color-primary-deep)",fontWeight:700},
+  navAccent:{position:"absolute",left:3,top:"50%",transform:"translateY(-50%)",width:3,height:18,borderRadius:3,background:"var(--color-primary)"},
+  navIcon:{flexShrink:0,display:"flex",opacity:.92},
+  sideFoot:{display:"flex",alignItems:"center",gap:7,padding:"10px 12px 8px",fontSize:11,color:"var(--color-label-alt)"},
+  logoutBtn:{display:"flex",alignItems:"center",justifyContent:"center",gap:7,width:"100%",border:"1px solid var(--color-line)",borderRadius:10,padding:"10px 12px",color:"var(--color-label-mute)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"},
   content:{flex:1,display:"flex",flexDirection:"column",minHeight:0,overflow:"hidden"},
-  mapSidebar:{width:"min(280px,38vw)",minWidth:180,background:"#112240",borderRight:"1px solid #1E3A5F",display:"flex",flexDirection:"column",overflowY:"auto"},
-  panelHeader:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,padding:"12px 16px",borderBottom:"1px solid #1E3A5F",background:"#112240",flexShrink:0},
-  vehicleCard:{margin:"8px 12px 0",background:"#0B1A2E",borderRadius:10,padding:"12px 14px",cursor:"pointer"},
+  mapSidebar:{width:"min(280px,38vw)",minWidth:180,background:"var(--color-bg)",borderRight:"1px solid var(--color-line)",display:"flex",flexDirection:"column",overflowY:"auto"},
+  panelHeader:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,padding:"14px 20px",borderBottom:"1px solid var(--color-line)",background:"var(--color-bg)",flexShrink:0},
+  vehicleCard:{margin:"8px 12px 0",background:"var(--color-bg-alt)",border:"1px solid var(--color-line)",borderRadius:10,padding:"12px 14px",cursor:"pointer"},
   vehicleTop:{display:"flex",alignItems:"center",gap:8,marginBottom:6},
-  dot:{width:8,height:8,borderRadius:"50%",background:"#00C48C",flexShrink:0,boxShadow:"0 0 6px #00C48C"},
-  vehicleName:{fontSize:13,fontWeight:600},
-  vehicleInfo:{fontSize:12,color:"#8896AA",marginTop:2},
-  infoBox:{position:"absolute",top:20,right:20,background:"#112240",border:"1px solid #1E3A5F",borderRadius:12,padding:20,minWidth:220,zIndex:10},
-  infoTitle:{fontSize:14,fontWeight:700,marginBottom:12,color:"#00C2FF"},
-  infoRow:{fontSize:13,color:"#8896AA",marginBottom:6},
-  closeBtn:{marginTop:8,width:"100%",padding:"8px",background:"rgba(255,255,255,.05)",border:"1px solid #1E3A5F",borderRadius:8,color:"#8896AA",cursor:"pointer",fontFamily:"inherit",fontSize:13},
-  panel:{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"},
-  empty:{color:"#4A6FA5",fontSize:13,textAlign:"center",padding:20},
+  dot:{width:8,height:8,borderRadius:"50%",background:"var(--color-positive)",flexShrink:0},
+  vehicleName:{fontSize:13,fontWeight:700,color:"var(--color-label)"},
+  vehicleInfo:{fontSize:12,color:"var(--color-label-mute)",marginTop:2},
+  infoBox:{position:"absolute",top:20,right:20,background:"var(--color-bg)",border:"1px solid var(--color-line)",borderRadius:12,padding:20,minWidth:220,zIndex:10,boxShadow:"var(--shadow-float)"},
+  infoTitle:{fontSize:14,fontWeight:700,marginBottom:12,color:"var(--color-primary)"},
+  infoRow:{fontSize:13,color:"var(--color-label-mute)",marginBottom:6},
+  closeBtn:{marginTop:8,width:"100%",padding:"8px",background:"var(--color-bg-soft)",border:"1px solid var(--color-line)",borderRadius:8,color:"var(--color-label-mute)",cursor:"pointer",fontFamily:"inherit",fontSize:13},
+  panel:{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",background:"var(--color-bg-soft)"},
+  empty:{color:"var(--color-label-alt)",fontSize:13,textAlign:"center",padding:20},
   tableWrap:{flex:1,overflowY:"auto",overflowX:"auto",padding:"0 0 24px",WebkitOverflowScrolling:"touch"},
   table:{width:"100%",minWidth:520,borderCollapse:"collapse"},
-  th:{textAlign:"left",padding:"10px 12px",fontSize:11,color:"#8896AA",fontWeight:600,borderBottom:"1px solid #1E3A5F",whiteSpace:"nowrap"},
-  td:{padding:"10px 12px",fontSize:13,borderBottom:"1px solid #0B1A2E",whiteSpace:"nowrap"},
-  tr:{background:"#112240"},
-  timeBadge:{background:"#1A6BFF22",color:"#00C2FF",padding:"3px 10px",borderRadius:20,fontSize:13,fontWeight:600},
+  th:{textAlign:"left",padding:"10px 12px",fontSize:11,color:"var(--color-label-mute)",fontWeight:600,borderBottom:"1px solid var(--color-line)",whiteSpace:"nowrap",background:"var(--color-bg-alt)"},
+  td:{padding:"10px 12px",fontSize:13,borderBottom:"1px solid var(--color-line-soft)",whiteSpace:"nowrap"},
+  tr:{background:"var(--color-bg)"},
+  timeBadge:{background:"var(--color-primary-soft)",color:"var(--color-primary-deep)",padding:"3px 10px",borderRadius:20,fontSize:13,fontWeight:700},
   statusBadge:{padding:"3px 10px",borderRadius:20,fontSize:12,fontWeight:600},
-  addBtn:{background:"linear-gradient(90deg,#1A6BFF,#00C2FF)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0},
-  editBtn:{background:"#1E3A5F",border:"none",borderRadius:6,padding:"4px 8px",color:"#8896AA",fontSize:11,cursor:"pointer",marginRight:4,fontFamily:"inherit",whiteSpace:"nowrap"},
-  delBtn:{background:"#FF4D6A22",border:"none",borderRadius:6,padding:"4px 8px",color:"#FF4D6A",fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"},
-  dateInput:{background:"#0B1A2E",border:"1px solid #1E3A5F",borderRadius:8,padding:"6px 12px",color:"#F0F4FF",fontSize:13,outline:"none",fontFamily:"inherit"},
-  overlay:{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100},
-  modal:{background:"#112240",border:"1px solid #1E3A5F",borderRadius:16,padding:"20px 18px",width:"calc(100% - 32px)",maxWidth:420,display:"flex",flexDirection:"column",gap:8,maxHeight:"88dvh",overflowY:"auto",margin:"0 auto"},
-  modalTitle:{fontSize:16,fontWeight:700,marginBottom:8,color:"#00C2FF"},
-  label:{fontSize:12,color:"#8896AA",marginTop:4},
-  input:{background:"#0B1A2E",border:"1px solid #1E3A5F",borderRadius:8,padding:"10px 14px",color:"#F0F4FF",fontSize:14,outline:"none",fontFamily:"inherit",width:"100%",boxSizing:"border-box"},
+  addBtn:{background:"var(--color-primary)",border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0},
+  editBtn:{background:"var(--color-bg-soft)",border:"1px solid var(--color-line)",borderRadius:6,padding:"4px 9px",color:"var(--color-label-mute)",fontSize:11,fontWeight:600,cursor:"pointer",marginRight:4,fontFamily:"inherit",whiteSpace:"nowrap"},
+  delBtn:{background:"#FCE5E5",border:"1px solid #F6C9C9",borderRadius:6,padding:"4px 9px",color:"var(--color-destructive)",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"},
+  actBtn:{background:"#E6F7EB",border:"1px solid #B7E6C7",borderRadius:6,padding:"4px 9px",color:"#007A29",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"},
+  dateInput:{background:"var(--color-bg)",border:"1px solid var(--color-line)",borderRadius:8,padding:"7px 12px",color:"var(--color-label)",fontSize:13,outline:"none",fontFamily:"inherit"},
+  overlay:{position:"fixed",inset:0,background:"var(--color-overlay)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100},
+  modal:{background:"var(--color-bg)",border:"1px solid var(--color-line)",borderRadius:16,padding:"22px 20px",width:"calc(100% - 32px)",maxWidth:420,display:"flex",flexDirection:"column",gap:8,maxHeight:"88dvh",overflowY:"auto",margin:"0 auto",boxShadow:"var(--shadow-strong)"},
+  modalTitle:{fontSize:17,fontWeight:800,fontFamily:"var(--font-brand)",letterSpacing:"-0.02em",marginBottom:8,color:"var(--color-label)"},
+  label:{fontSize:12,fontWeight:600,color:"var(--color-label-mute)",marginTop:4},
+  input:{background:"var(--color-bg)",border:"1px solid var(--color-line)",borderRadius:8,padding:"10px 14px",color:"var(--color-label)",fontSize:14,outline:"none",fontFamily:"inherit",width:"100%",boxSizing:"border-box"},
 };

@@ -4,7 +4,7 @@
 
 ## 컬렉션 구조
 `companies/{companyId}/`:
-- `routes/{routeId}/stops/{stopId}`
+- `routes/{routeId}/stops/{stopId}` — `name/address/lat/lng/order` + (선택) `photo`(클라 압축 JPEG data URI 문자열, Storage 미사용)·`description`(승객 안내문)
 - `dispatches/{date}/list/{dispatchId}`
 - `drivers/{driverId}`, `vehicles/{vehicleId}`
 - `passengers/{empNo}` (PIN 해시·노선 배정)

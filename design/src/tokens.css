@@ -1,0 +1,141 @@
+/* ===========================================================================
+   BusLink — Wanted DS tokens (CDN-only fonts; trimmed for product use)
+   =========================================================================== */
+/* fonts loaded via <link> in index.html */
+
+:root {
+  /* ATOMIC — neutrals */
+  --color-atomic-common-0:    #FFFFFF;
+  --color-atomic-common-100:  #000000;
+  --color-atomic-coolNeutral-15: #1B1C1E;
+  --color-atomic-coolNeutral-22: #2E2F33;
+  --color-atomic-coolNeutral-25: #37383C;
+  --color-atomic-coolNeutral-30: #46474B;
+  --color-atomic-coolNeutral-35: #55565A;
+  --color-atomic-coolNeutral-50: #7C7E83;
+  --color-atomic-coolNeutral-55: #898B91;
+  --color-atomic-coolNeutral-60: #989BA2;
+  --color-atomic-coolNeutral-80: #AEB0B6;
+  --color-atomic-coolNeutral-85: #C2C4C8;
+  --color-atomic-coolNeutral-90: #DBDCDF;
+  --color-atomic-coolNeutral-95: #ECEDEE;
+  --color-atomic-coolNeutral-96: #EFEFF0;
+  --color-atomic-coolNeutral-97: #F2F2F3;
+  --color-atomic-coolNeutral-98: #F4F4F5;
+  --color-atomic-coolNeutral-99: #F7F7F8;
+
+  /* Brand blue (primary) */
+  --color-atomic-blue-30:  #003DCC;
+  --color-atomic-blue-40:  #005EEB;
+  --color-atomic-blue-45:  #0066FF;
+  --color-atomic-blue-50:  #3385FF;
+  --color-atomic-blue-90:  #DCE9FE;
+  --color-atomic-blue-95:  #EAF2FE;
+
+  /* Accents */
+  --color-atomic-green-40: #009E33;
+  --color-atomic-green-50: #00BF40;
+  --color-atomic-green-90: #C8F0D4;
+  --color-atomic-orange-50: #FF7A00;
+  --color-atomic-orange-90: #FFE0C2;
+  --color-atomic-red-45: #E52222;
+  --color-atomic-red-50: #FF4242;
+  --color-atomic-red-90: #FBD4D4;
+  --color-atomic-violet-45: #7B3FE4;
+  --color-atomic-violet-90: #F0ECFE;
+  --color-atomic-cyan-50:  #00BFB1;
+  --color-atomic-cyan-90:  #CFF1ED;
+  --color-atomic-pink-50: #FF3D9E;
+  --color-atomic-pink-90: #FBD2E5;
+  --color-atomic-lime-50: #6FBF00;
+  --color-atomic-lime-90: #DDF0C2;
+
+  /* SEMANTIC */
+  --color-bg:       #FFFFFF;
+  --color-bg-alt:   #F7F7F8;
+  --color-bg-soft:  #F2F2F3;
+  --color-bg-dark:  #0B1020;            /* product navy used sparingly */
+  --color-bg-darker:#070A15;
+
+  --color-primary:  #0066FF;
+  --color-primary-strong: #005EEB;
+  --color-primary-deep:   #003DCC;
+  --color-primary-soft:   #EAF2FE;
+
+  --color-label:        #171719;
+  --color-label-strong: #000000;
+  --color-label-mute:   rgba(46,47,51,0.61);
+  --color-label-alt:    rgba(46,47,51,0.40);
+  --color-label-assistive: rgba(46,47,51,0.20);
+  --color-label-on-dark: #F2F2F3;
+  --color-label-on-dark-mute: rgba(242,242,243,0.62);
+
+  --color-line:     rgba(112,115,124,0.18);
+  --color-line-soft:rgba(112,115,124,0.10);
+  --color-line-dark:rgba(255,255,255,0.10);
+  --color-line-dark-soft: rgba(255,255,255,0.06);
+
+  --color-positive: #00BF40;
+  --color-cautionary:#FF7A00;
+  --color-destructive:#E52222;
+
+  --color-overlay:  rgba(11,16,32,0.52);
+
+  /* Type */
+  --font-base:  "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", Roboto, sans-serif;
+  --font-brand: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono:  "SF Mono", ui-monospace, Menlo, Monaco, Consolas, monospace;
+
+  /* Type scale (subset) */
+  --type-display-1-size: 56px; --type-display-1-line: 1.286; --type-display-1-track: -0.032em; --type-display-1-weight: 700;
+  --type-display-2-size: 40px; --type-display-2-line: 1.300; --type-display-2-track: -0.0282em; --type-display-2-weight: 700;
+  --type-display-3-size: 36px; --type-display-3-line: 1.334; --type-display-3-track: -0.027em;  --type-display-3-weight: 700;
+  --type-title-1-size: 32px;   --type-title-1-line: 1.375; --type-title-1-track: -0.0253em; --type-title-1-weight: 700;
+  --type-title-2-size: 28px;   --type-title-2-line: 1.358; --type-title-2-track: -0.0236em; --type-title-2-weight: 700;
+  --type-title-3-size: 24px;   --type-title-3-line: 1.334; --type-title-3-track: -0.023em;  --type-title-3-weight: 700;
+  --type-heading-1-size: 22px; --type-heading-1-line: 1.364; --type-heading-1-track: -0.0194em; --type-heading-1-weight: 700;
+  --type-heading-2-size: 20px; --type-heading-2-line: 1.400; --type-heading-2-track: -0.012em;  --type-heading-2-weight: 700;
+  --type-headline-1-size: 18px;--type-headline-1-line: 1.445; --type-headline-1-track: -0.002em; --type-headline-1-weight: 600;
+  --type-headline-2-size: 17px;--type-headline-2-line: 1.412; --type-headline-2-track: 0em; --type-headline-2-weight: 600;
+  --type-body-1-size: 16px;    --type-body-1-line: 1.5;   --type-body-1-track: 0.0057em; --type-body-1-weight: 500;
+  --type-body-2-size: 15px;    --type-body-2-line: 1.467; --type-body-2-track: 0.0096em; --type-body-2-weight: 500;
+  --type-label-1-size: 14px;   --type-label-1-line: 1.429; --type-label-1-track: 0.0145em; --type-label-1-weight: 600;
+  --type-label-2-size: 13px;   --type-label-2-line: 1.385; --type-label-2-track: 0.0194em; --type-label-2-weight: 600;
+  --type-caption-1-size: 12px; --type-caption-1-line: 1.334; --type-caption-1-track: 0.0252em; --type-caption-1-weight: 500;
+  --type-caption-2-size: 11px; --type-caption-2-line: 1.273; --type-caption-2-track: 0.0311em; --type-caption-2-weight: 500;
+
+  /* Radius */
+  --radius-2:2px;--radius-4:4px;--radius-6:6px;--radius-8:8px;--radius-12:12px;--radius-16:16px;--radius-20:20px;--radius-24:24px;--radius-32:32px;--radius-40:40px;
+  --radius-pill:999px;--radius-circle:50%;
+
+  /* Shadow */
+  --shadow-emphasize: 0 1px 3px rgba(23,23,23,0.06), 0 4px 12px rgba(23,23,23,0.06);
+  --shadow-strong:    0 2px 8px rgba(0,0,0,0.06), 0 12px 32px rgba(0,0,0,0.10);
+  --shadow-heavy:     0 4px 16px rgba(0,0,0,0.10), 0 24px 56px rgba(0,0,0,0.14);
+  --shadow-float:     0 1px 2px rgba(11,16,32,0.06), 0 8px 24px rgba(11,16,32,0.08);
+}
+
+html, body { font-family: var(--font-base); color: var(--color-label); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+* { box-sizing: border-box; }
+
+/* Type utility */
+.t-display-1 { font: var(--type-display-1-weight) var(--type-display-1-size)/var(--type-display-1-line) var(--font-base); letter-spacing: var(--type-display-1-track); }
+.t-display-2 { font: var(--type-display-2-weight) var(--type-display-2-size)/var(--type-display-2-line) var(--font-base); letter-spacing: var(--type-display-2-track); }
+.t-display-3 { font: var(--type-display-3-weight) var(--type-display-3-size)/var(--type-display-3-line) var(--font-base); letter-spacing: var(--type-display-3-track); }
+.t-title-1   { font: var(--type-title-1-weight) var(--type-title-1-size)/var(--type-title-1-line) var(--font-base); letter-spacing: var(--type-title-1-track); }
+.t-title-2   { font: var(--type-title-2-weight) var(--type-title-2-size)/var(--type-title-2-line) var(--font-base); letter-spacing: var(--type-title-2-track); }
+.t-title-3   { font: var(--type-title-3-weight) var(--type-title-3-size)/var(--type-title-3-line) var(--font-base); letter-spacing: var(--type-title-3-track); }
+.t-heading-1 { font: var(--type-heading-1-weight) var(--type-heading-1-size)/var(--type-heading-1-line) var(--font-base); letter-spacing: var(--type-heading-1-track); }
+.t-heading-2 { font: var(--type-heading-2-weight) var(--type-heading-2-size)/var(--type-heading-2-line) var(--font-base); letter-spacing: var(--type-heading-2-track); }
+.t-headline-1{ font: var(--type-headline-1-weight) var(--type-headline-1-size)/var(--type-headline-1-line) var(--font-base); letter-spacing: var(--type-headline-1-track); }
+.t-headline-2{ font: var(--type-headline-2-weight) var(--type-headline-2-size)/var(--type-headline-2-line) var(--font-base); letter-spacing: var(--type-headline-2-track); }
+.t-body-1    { font: var(--type-body-1-weight) var(--type-body-1-size)/var(--type-body-1-line) var(--font-base); letter-spacing: var(--type-body-1-track); }
+.t-body-2    { font: var(--type-body-2-weight) var(--type-body-2-size)/var(--type-body-2-line) var(--font-base); letter-spacing: var(--type-body-2-track); }
+.t-label-1   { font: var(--type-label-1-weight) var(--type-label-1-size)/var(--type-label-1-line) var(--font-base); letter-spacing: var(--type-label-1-track); }
+.t-label-2   { font: var(--type-label-2-weight) var(--type-label-2-size)/var(--type-label-2-line) var(--font-base); letter-spacing: var(--type-label-2-track); }
+.t-caption-1 { font: var(--type-caption-1-weight) var(--type-caption-1-size)/var(--type-caption-1-line) var(--font-base); letter-spacing: var(--type-caption-1-track); }
+.t-caption-2 { font: var(--type-caption-2-weight) var(--type-caption-2-size)/var(--type-caption-2-line) var(--font-base); letter-spacing: var(--type-caption-2-track); }
+
+.font-brand { font-family: var(--font-brand); }
+.font-mono  { font-family: var(--font-mono); font-feature-settings: "tnum"; }
+.tnum       { font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; }

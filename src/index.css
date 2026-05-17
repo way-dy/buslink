@@ -30,4 +30,24 @@ code {
     border-radius: 12px !important;
     margin: 8px !important;
   }
+  /* 로그인 화면(LoginApp) — split → 단일 컬럼 폴백 (목업 LoginMobile 참조) */
+  [data-login-brand] {
+    display: none !important;
+  }
+  [data-login-mobile-logo] {
+    display: block !important;
+  }
+}
+
+/* ── BusLink Admin 사이드바 (호버 피드백 — 인라인 스타일 한계 보완) ── */
+[data-nav-item]:hover {
+  background: var(--color-bg-soft);
+}
+[data-logout] {
+  background: var(--color-bg);
+  transition: background .15s, border-color .15s;
+}
+[data-logout]:hover {
+  background: var(--color-bg-soft);
+  border-color: var(--color-label-mute);
 }
