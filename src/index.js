@@ -17,3 +17,15 @@ root.render(
 );
 
 reportWebVitals();
+
+// ── Service Worker 등록 (PWA 설치 프롬프트 활성화) ──
+// beforeinstallprompt는 등록된 SW가 있어야 발화. notifications.js는 알림 초기화 시에만
+// 등록하므로(권한 거부 시 미등록), 앱 로드 시 1회 선등록.
+// 동일 URL register는 idempotent — notifications.js 재등록과 충돌 없음.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("/firebase-messaging-sw.js")
+      .catch((e) => console.warn("[SW] 등록 실패:", e.message));
+  });
+}

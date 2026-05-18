@@ -1,11 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Map, MapMarker, Polyline, CustomOverlayMap } from "react-kakao-maps-sdk";
 import { db, auth } from "../firebase";
 import { signInAnonymously } from "firebase/auth";
 import { collection, onSnapshot, query, where, doc, getDoc, getDocs, orderBy } from "firebase/firestore";
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { calcETA } from "../lib/gps";
+import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom } from "../lib/routeProgress";
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
+
+// ── 경로 진행 판정 임계값 (작업2, 2026-05-18 — EmployeeApp과 동일 정책) ──
+const OFF_ROUTE_M = 70;       // 버스 투영 수직거리 초과 시 경로 이탈로 보고 직전 진행 유지
+const PASSED_MARGIN_M = 40;   // busProgress > myStopProgress + 마진 → 지나감
+const ARRIVING_M = 150;       // 남은 경로거리 < 이 값 → 곧 도착
+const TRAVELED_COLOR = "#9AA3B2"; // 지나온 경로 회색(Polyline strokeColor는 SDK prop)
 
 // 리디자인 2단계(2026-05-16): 라이트 테마 리스킨.
 // ── 로직 100% 불변: getParam(c/route/r)·signInAnonymously·회사/노선/정류장
@@ -59,6 +66,7 @@ export default function PassengerApp() {
   const [routeList, setRouteList] = useState([]);     // 회사 노선 목록(선택 UI용)
   const [showPicker, setShowPicker] = useState(false); // 노선 변경 모달 표시
   const [routeQuery, setRouteQuery] = useState("");    // 노선 검색어
+  const lastBusProgressRef = useRef(null); // 경로 이탈 시 직전 유효 진행거리 유지
 
   // 노선 선택 확정 — active 노선 설정 + localStorage 저장(다음 방문 자동) + 재바인딩
   const chooseRoute = (rid) => {
@@ -146,18 +154,47 @@ export default function PassengerApp() {
   // 주요 버스 (선택됐거나 첫 번째)
   const mainBus = selected || (buses.length > 0 ? buses[0] : null);
 
-  // 내 정류장까지 ETA
+  // ── 사전 경로(routePath) 우선, 없으면 stops 직선 폴백(하위호환 필수) ──
+  const preDrawnPath = Array.isArray(route?.routePath)
+    ? route.routePath.filter(p => typeof p?.lat === 'number' && typeof p?.lng === 'number')
+    : [];
+  const usePathProgress = preDrawnPath.length >= 2;
+  const routePath = usePathProgress
+    ? preDrawnPath
+    : stops.map(s => ({ lat: s.lat, lng: s.lng }));
+  const routeCum = usePathProgress ? buildCumulativeLengths(routePath) : null;
+
+  // 버스를 경로에 투영 — 이탈(수직거리>OFF_ROUTE_M) 시 직전 유효 진행거리 유지
+  const busProj = (usePathProgress && mainBus)
+    ? projectToPolyline({ lat: mainBus.lat, lng: mainBus.lng }, routePath, routeCum) : null;
+  let busProgress = null;
+  if (busProj) {
+    if (busProj.perpDist <= OFF_ROUTE_M) {
+      busProgress = busProj.progress;
+      lastBusProgressRef.current = busProgress;
+    } else {
+      busProgress = lastBusProgressRef.current; // 이탈 좌표 제외
+    }
+  }
+  const myStopProgress = (usePathProgress && myStopIdx !== null && stops[myStopIdx])
+    ? projectToPolyline({ lat: stops[myStopIdx].lat, lng: stops[myStopIdx].lng }, routePath, routeCum)?.progress
+    : null;
+
+  // 내 정류장까지 ETA — routePath 있으면 경로거리 기반, 없으면 기존 직선 calcETA(폴백)
   const getMyETA = () => {
     if (!mainBus || myStopIdx === null || !stops[myStopIdx]) return null;
+    if (usePathProgress && busProgress !== null && myStopProgress !== null) {
+      const remain = myStopProgress - busProgress;
+      if (busProgress > myStopProgress + PASSED_MARGIN_M) return null; // 지나감
+      const speed = (mainBus.speed > 5 ? mainBus.speed : 30);
+      return Math.ceil((Math.max(remain, 0) / 1000) / speed * 60);
+    }
     return calcETA(
       { lat: mainBus.lat, lng: mainBus.lng },
       stops[myStopIdx],
       mainBus.speed
     );
   };
-
-  // 폴리라인 경로
-  const routePath = stops.map(s => ({ lat: s.lat, lng: s.lng }));
 
   // 노선 검색 필터 (노선명·거래처명·구분)
   const filteredRoutes = routeList.filter(r => {
@@ -252,10 +289,19 @@ export default function PassengerApp() {
         <Map center={center} style={{ width: "100%", height: "100%" }} level={routeId ? 9 : 7}
           onCenterChanged={map => {}}>
 
-          {/* 노선 폴리라인 */}
-          {routePath.length >= 2 && (
+          {/* 노선 폴리라인 — routePath 진행 모드면 지나온(회색)/남은(파랑) 분할, 아니면 단일 파랑(폴백) */}
+          {routePath.length >= 2 && usePathProgress && busProgress !== null ? (
+            <>
+              {(() => { const t = pathUpTo(routePath, routeCum, busProgress); return t.length >= 2 ? (
+                <Polyline path={t} strokeWeight={5} strokeColor={TRAVELED_COLOR} strokeOpacity={0.7} strokeStyle="solid" />
+              ) : null; })()}
+              {(() => { const r = pathFrom(routePath, routeCum, busProgress); return r.length >= 2 ? (
+                <Polyline path={r} strokeWeight={5} strokeColor="#0066FF" strokeOpacity={0.85} strokeStyle="solid" />
+              ) : null; })()}
+            </>
+          ) : routePath.length >= 2 ? (
             <Polyline path={routePath} strokeWeight={5} strokeColor="#0066FF" strokeOpacity={0.85} strokeStyle="solid" />
-          )}
+          ) : null}
 
           {/* 정류장 마커 */}
           {stops.map((s, i) => (

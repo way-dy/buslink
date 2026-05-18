@@ -14,20 +14,29 @@
 - [x] 6단계 — EmployeeApp(`/p` 직원앱) 전면 라이트 리스킨 (2026-05-16, 배포 안 함 — 단독 격리, 로직 HEAD=NOW)
 - [ ] 5·6단계 배포 — 사용자 승인 시 `firebase deploy --only hosting` 단독(프론트 전용)
 
-## 진행 중 — ⚠ 주말 작업 PC에서 이어서 (이 D: PC 작업 금지: issues.md `[패턴]`)
-> 2026-05-18 세션 종결. prod=롤백된 주말 빌드 `main.d85ec794.js`(정상). origin/master HEAD=ce4c5b5+오늘커밋(e522329 FCM/2ad1a31 GPS/78f95f5 배차/게이트·폰트 revert/docs) **전부 미배포**. 문제 2개로 분리 확정:
-- [ ] **문제 A (prod 전용·코드무관)**: `buslink-prod.web.app` 가 **Firebase Auth 승인 도메인 누락** → prod에서 Firestore `permission-denied`(공지구독·fcmToken·gps). localhost는 기본 허용이라 정상(`[FCM] Firestore 저장 완료 ✅` 확인). **해결: Firebase 콘솔 → Authentication → Settings → 승인된 도메인 → `buslink-prod.web.app`·`buslink-prod.firebaseapp.com` 추가**(즉시 반영, 배포 불필요).
-- [ ] **문제 B (진짜 "지도 안나옴"·localhost 재현)**: ce4c5b5 EmployeeApp(`/p`) HomeTab 카카오 `<Map>`(EmployeeApp.js:413-414 `flex:'0 0 55%'`) **흰 화면**. localhost 재현됨 = 안전 디버깅 가능. **제 커밋 무관 확정**(gps.js/useAnimatedPositions ce4c5b5로 A/B 복원해도 흰 화면). auth 무관(localhost Firestore OK). 높이체인 구조상 정상(appWrap 100dvh→content flex1→HomeTab flex1→map flex:0 0 55%→Map 100%), 카카오 콘솔에러 없음. 미확인 결정타: 주말 PC localhost에서 `window.kakao&&window.kakao.maps` 준비여부 + Network `dapi.kakao.com/.../sdk.js` status + 지도컨테이너 computed height(DevTools). d85ec794(중간 빌드)는 /p지도 정상이었으나 이후 주말변경(정류장 사진/설명·#14-B 등)이 ce4c5b5에 뭉쳐 깨짐 — 중간 git커밋 없어 diff 불가, 라이브 디버깅 필요.
-- [ ] 원래 의뢰 **기사앱 GPS 실시간**(commit `2ad1a31`, origin/master 있음·미배포) — A·B 해결·재배포 시 함께.
+## 현재 상태 + 배포 (2026-05-18 — "특정 PC만" 규율 폐기: 이 저장소가 작업 정본)
+> **어느 PC든** `git pull` + `.env.local`(↓부트스트랩)만 맞추면 이어작업·빌드·배포 가능.
+> prod 라이브 = 콘솔 롤백된 정상 빌드. 아래 미배포분을 빌드→localhost 확인→배포하면 끝.
 
-## 다음 할 일
-- (없음 — 위 진행 중 우선)
+### 새 PC 부트스트랩 (이어작업 시 1회)
+- `git pull` → 프로젝트 폴더(`app/buslink`) 존재 확인 → `npm install` (functions 쓰면 `cd functions && npm install`).
+- **`.env.local` 생성**: `.env.example` 키 목록 참고. 값(Firebase 6종·KAKAO·VAPID)은 사용자 보유분 입력. ⚠ `REACT_APP_KAKAO_MAP_KEY`=운영 공유키 `58bf34…`(`d464b4…` 아님).
+
+### 배포 전 체크리스트 (지도 안나옴/느림 방지 — 순서대로)
+1. `.env.local` 카카오 키 = `58bf34…` 확인(`d464b4…`면 prod 지도 전체 사망).
+2. Firebase 콘솔 1회(코드무관, 미설정 시 prod `permission-denied`): Authentication→Settings→승인된 도메인에 `buslink-prod.web.app`·`buslink-prod.firebaseapp.com` 추가.
+3. `npm run build` → `npm start` → localhost에서 `/p`·`/bus` 지도 표시 확인.
+4. `firebase deploy --only hosting` (프론트 전용 — functions/rules/indexes 무관). 배포 후 prod `/p` 지도·GPS 재확인.
+5. 회귀 시: **가설-재배포 금지** → 콘솔 Hosting에서 직전 정상 빌드로 즉시 롤백 후 localhost 재현.
+
+### 미배포 (작업트리 — 위 체크리스트대로 빌드+배포 1회 필요)
+- [ ] 노선경로 4건 + 지도 흰화면 fix + (옵션)5·6단계 리디자인 — 한 번의 `firebase deploy --only hosting`로 함께.
 
 ## 백로그 / 검토 후보 (issues.md 기반)
 - [ ] `src/firestore.rules`와 루트 `firestore.rules` 일원화(중복 제거 또는 src 사본 삭제)
 - [x] functions 런타임 정렬(`firebase.json` nodejs22 → nodejs20, 2026-05-16)
 - [ ] `src/firestore.rules` `passengers` write 제약 — PartnerApp 익명 로그인화 + 규칙 재설계 동반 필요(issues.md `[보류]` 참고). 배포된 실제 규칙 vs 저장소 정본 차이 먼저 확인.
-- [ ] `.env.example` 추가(키 목록만, 값 제외)
+- [x] `.env.example` 추가 (2026-05-18, 키+가이드, 값 제외 — 어느 PC나 부트스트랩용)
 - [ ] `firebase-messaging-sw.js` 설정 env 주입 방식 검토
 - [ ] 🔑 **카카오맵 비즈앱 심사 통과 후 Kakao 키 분리** — `.env.local`을 buslink 전용 키 `d464b4…`(주석 보존)로 복구 + 전용 앱 Web 도메인 등록 + 재빌드·재배포. 현재 callcenter 키 `58bf34…` 임시 공유 중(issues.md, 일일 한도 공유).
 - [ ] ⏳ **Node.js 20 → 22 업그레이드 (데드라인 2026-10-30)** — nodejs20은 2026-04-30 deprecated, 2026-10-30 decommission(이후 배포 불가). `firebase.json` runtime `nodejs22` + `functions/package.json` `engines.node:"22"` 동시 상향 + `firebase-functions@latest` 업그레이드(breaking 검토) 후 functions 재배포·동작 점검. 동결 정렬은 임시 — 데드라인 전 필수.
@@ -45,7 +54,9 @@
 - [ ] (폐기) #10 예약 정보 관리 — 통근형 확정으로 예약코드 폐기(PLANNING §4.6), 통근 모델 유지 시 개발 불필요
 
 ## 완료
-- [x] **2026-05-18 prod 장애 → 콘솔 롤백 (이 D: PC 오늘 작업분 전량 비활성)** — 이 PC에서 ce4c5b5(주말 리디자인) 기반으로 GPS수정·main 3월 FCM/배차 이식(e522329/2ad1a31/78f95f5)·게이트/폰트 등 hosting 다회 배포 → 카카오 키(d464b4 오박힘) + 원인 미확정 Firestore `permission-denied`(익명토큰 200인데 isAuth 거부) 등 prod 연쇄 회귀. 콘솔 Hosting에서 주말 정상 빌드 **`main.d85ec794.js`로 롤백** → 라이브 복구·지도 정상(사용자 확인). ⚠ **오늘 이 PC 변경분(GPS heartbeat·FCM/배차 이식·리디자인 배포)은 전부 라이브 아님.** 재시도는 prod 직접배포 금지 — 주말 작업 PC localhost 재현·근본원인 확정 후에만. 상세·금지사항 → issues.md `[패턴] 이 D: PC 빌드·배포 금지`.
+- [x] **EmployeeApp `/p` 지도 흰화면 근본해결** (2026-05-18) — 원인 확정: `appWrap 100dvh→content flex:1→HomeTab flex:1→map flex:'0 0 55%'` 체인이라 카카오 맵 init 시점에 컨테이너 0px → 카카오는 CSS와 달리 자동 relayout 안 함 = **영구 흰화면**. `/bus`는 지도 컨테이너가 고정 `height:100vh`라 무관 → `/p`만 깨진 이유와 정확히 일치(이전 "구조상 정상·라이브 디버깅 필요"의 실제 결정타). 해법: `EmployeeApp.js` `<Map>` 2곳(HomeTab + 실시간 모달)에 `onCreate={map=>{map.relayout();setTimeout(()=>map.relayout(),300)}}` — 생성 직후 + 레이아웃 안정 후 1회씩(무위험·idempotent). 미배포(위 체크리스트로 함께 배포).
+- [x] **노선 경로 사전그리기 + 실시간 경로진행 시각화/정밀판정 + GPS콜드스타트 + 권한·설치 게이트** (2026-05-18, 4건, 소스 구현·미배포) — ①AdminApp RoutesTab: 노선별 "🛣 경로 그리기" 모달(정류장관리 동급 진입). 지도클릭=정점추가/`MapMarker draggable onDragEnd`=이동/클릭=삭제/되돌리기·전체지우기·정류장순서 자동연결, `Polyline` 미리보기 → `routes/{id}.routePath`(stops처럼 plain number, 빈배열=미설정) `updateDoc`. 자동도로라우팅 미사용(수동). ②신규 `lib/routeProgress.js`(폴리라인 누적거리/점→폴리라인 투영/haversine/구간 slice). EmployeeApp(`/p`)+PassengerApp(`/bus`): `route.routePath` 있으면 사전경로, 없으면 `stops.map` 폴백(하위호환). 버스 GPS 투영 progress 기반 passed/arriving/approaching 재작성, 수직거리>70m 이탈좌표 제외(직전 progress 유지), 지나온경로 회색·남은 파랑 `Polyline` 2분할(폴백시 단일). 표시문구 불변. ③`lib/gps.js`: `startGPS` 즉시 `getCurrentPosition` 1회 선발행+watch옵션 완화(timeout 30s)+TIMEOUT 1회 재시작가드+`onGpsError` 콜백(하위호환). DriverApp `handleStart` 권한 사전점검+"GPS 신호 확보 중…/권한" 안내. ④신규 `lib/usePermissions.js`+`components/PermissionGate.js`(위치/알림 배너·차단안내 모달·`beforeinstallprompt` 설치버튼, 콜센터 driver.html 패턴 React화·라이트토큰). EmployeeApp홈·DriverApp 상단 적용. `index.js` SW 1회 선등록(idempotent). 보존 로직 HEAD=NOW(gps/Employee/Passenger/Driver/Admin 정밀 카운트, calcETA +1은 주석 단어매칭·실호출 동일, `<Polyline>` 증가는 분할 의도). 각 파일 babel parse OK·JSX균형. 미배포(주말 PC). 후속: routePath는 신규/편집 노선부터 점진(기존 노선 미설정=stops 폴백 자동).
+- [x] **2026-05-18 prod 장애 → 콘솔 롤백 (이 D: PC 오늘 작업분 전량 비활성)** — 이 PC에서 ce4c5b5(주말 리디자인) 기반으로 GPS수정·main 3월 FCM/배차 이식(e522329/2ad1a31/78f95f5)·게이트/폰트 등 hosting 다회 배포 → 카카오 키(d464b4 오박힘) + 원인 미확정 Firestore `permission-denied`(익명토큰 200인데 isAuth 거부) 등 prod 연쇄 회귀. 콘솔 Hosting에서 주말 정상 빌드 **`main.d85ec794.js`로 롤백** → 라이브 복구·지도 정상(사용자 확인). 교훈: prod 가설-재배포 금지 — 빌드 전 카카오 키 확인 + localhost 검증 + 회귀 시 콘솔 롤백 우선(상세 → 위 "배포 전 체크리스트", issues.md `[패턴] 배포 안전 절차`).
 - [x] **직원앱(`/p`) 노선 변경 + 지도 정류장 이름/클릭정보** (2026-05-17) — EmployeeApp HomeTab 한정 3건. ①헤더 "🔄 노선 변경" 모달(전체 노선=기존 `getDocs(routes)` 재사용, >6개 검색)→`chooseRoute`→`onSessionUpdate({routeId})`(부모 `saveSession` localStorage 영속=기준노선)→`session.routeId` effect가 `activeRouteId`/`myStopIdx` 재바인딩→정류장/지도/GPS 연쇄. RoutesTab은 기준노선 변경 미지원이라 HomeTab 신규 모달 구현(PassengerApp 톤 준용). ②지도 전 정류장 이름 라벨(출/도/내정류장 기존 강조 유지, 중간은 소형 흰라벨 `maxWidth:88` 말줄임·`yAnchor` 분리). ③마커/라벨 클릭→정류장 정보 바텀시트(주소/사진/설명/없을때 안내+"내 정류장 설정"). strip 클릭(내정류장 지정) 기존동작 무손상. 보존 로직 24항목 HEAD=NOW(`saveSession`만 HomeTab prop 배선+주석 +2 의도분), `EmployeeApp.js` 단독 격리, 빌드 `main.d85ec794.js` 통과·신규 경고 0(기존 8건 줄번호만 이동). 미배포(hosting 단독 대기)
 - [x] **승객앱 노선 자가 선택 + 기준노선 localStorage** (2026-05-17) — PassengerApp `routeId` const→`selectedRouteId` state. 노선 결정 우선순위 ①URL `route`/`r`(딥링크 보존) ②localStorage `buslink_passenger_route_{companyId}` ③null(노선 선택 화면). `companies/{cid}/routes` onSnapshot 목록(클라 `departTime` 정렬, 복합인덱스 불요)→미선택 시 풀스크린 선택 화면(노선명·구분·출발시간·거래처, >6개 검색), 상단 카드 "노선 변경" 버튼→바텀시트 모달. 선택 시 localStorage 저장+노선/정류장/버스 재바인딩(effect 의존성 `selectedRouteId`). 보존 로직 HEAD=NOW(실호출 동일, 증가분은 헤더주석 단어매칭), `PassengerApp.js` 단독 격리, 빌드 `main.fe216510.js` 통과·신규 경고 0. 미배포(hosting 단독 대기)
 - [x] **정류장 관리 패널 스크롤 버그 수정** (2026-05-17) — 패널 flex컬럼에서 목록div(자체스크롤)·폼div가 형제라 폼 길면 패널 밖 넘쳐 잘림. 헤더 `flexShrink:0` + 목록·폼을 단일 스크롤 영역(`flex:1,overflowY:auto,minHeight:0`)으로 래핑 → 저장버튼까지 스크롤 도달. div 3곳 조정, 로직 보존·JSX균형 통과·라이브 `main.b9ab2b18.js`

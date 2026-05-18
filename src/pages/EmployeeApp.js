@@ -10,9 +10,23 @@ import {
 } from "firebase/firestore";
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { calcETA } from "../lib/gps";
+import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom } from "../lib/routeProgress";
+
 import { validateAndBoard } from "../lib/boarding";
 import { hashPin } from "../lib/partner";
 import { BusLinkLogo, StatusDot } from "../components/ui";
+import PermissionGate from "../components/PermissionGate";
+
+// ── 경로 진행 판정 임계값 (작업2, 2026-05-18) ──
+// 버스 투영 수직거리가 이 값 초과면 경로 이탈로 보고 진행거리 갱신·지나온경로 그리기에서 제외
+// (직전 유효 progress 유지) — 우회/잡신호로 진행이 튀는 것 방지(고객 신뢰도 보호).
+const OFF_ROUTE_M = 70;
+// 버스 progress가 내 정류장 progress + 이 마진을 넘으면 '지나감'(passed) 확정.
+const PASSED_MARGIN_M = 40;
+// 남은 경로거리가 이 값 미만이면 '곧 도착'(arriving).
+const ARRIVING_M = 150;
+// 지나온 경로(회색) 색상 — Polyline strokeColor는 SDK prop이라 토큰값 직접.
+const TRAVELED_COLOR = "#9AA3B2";
 
 // ─── URL 파라미터 ──────────────────────────────────────
 function getParam(k) {
@@ -136,7 +150,12 @@ export default function EmployeeApp() {
         </div>
       )}
       <div style={{ ...S.content, marginTop: activeNotice ? 60 : 0 }}>
-        {tab === "home"     && <HomeTab companyId={companyId} session={session} onScanTab={() => setTab("scan")} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />}
+        {tab === "home"     && (
+          <>
+            <PermissionGate containerStyle={{ flexShrink: 0, padding: "8px 12px 0" }} />
+            <HomeTab companyId={companyId} session={session} onScanTab={() => setTab("scan")} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />
+          </>
+        )}
         {tab === "routes"   && <RoutesTab companyId={companyId} session={session} onSessionUpdate={(s) => { saveSession({...session,...s}); setSession(p=>({...p,...s})); }} />}
         {tab === "scan"     && <ScanTab companyId={companyId} session={session} />}
         {tab === "settings" && <SettingsTab companyId={companyId} session={session} onLogout={handleLogout} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />}
@@ -228,6 +247,7 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
   const [stopInfo, setStopInfo]     = useState(null);  // 지도 정류장 클릭 정보 카드
   const buses = useAnimatedPositions(rawBuses);
   const favorites = session.favorites || [];
+  const lastBusProgressRef = useRef(null); // 경로 이탈 시 직전 유효 진행거리 유지
 
   useEffect(() => {
     const t = setInterval(() => setTick(x => x + 1), 1000);
@@ -297,12 +317,38 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
 
   const mainBus   = buses[0] || null;
   const myStop    = myStopIdx !== null ? stops[myStopIdx] : null;
-  const routePath = stops.map(s => ({ lat: s.lat, lng: s.lng }));
   const activeRoute = routes.find(r => r.id === activeRouteId) || allRoutes.find(r => r.id === activeRouteId);
 
-  // ── 노선 순서 기반 ETA 상태 계산 ──────────────────────
-  // 버스 → 가장 가까운 정류장 인덱스 (이미 아래에 busStopIdx로 계산됨)
-  // busStopIdx를 먼저 계산해서 etaStatus에서 사용
+  // ── 사전 경로(routePath) 우선, 없으면 stops 직선 폴백(하위호환 필수) ──
+  // 노선 문서 routePath = [{lat,lng}, ...] (작업1에서 관리자가 그림). 유효 좌표 ≥2면 채택.
+  const preDrawnPath = Array.isArray(activeRoute?.routePath)
+    ? activeRoute.routePath.filter(p => typeof p?.lat === 'number' && typeof p?.lng === 'number')
+    : [];
+  const usePathProgress = preDrawnPath.length >= 2;
+  const routePath = usePathProgress
+    ? preDrawnPath
+    : stops.map(s => ({ lat: s.lat, lng: s.lng }));
+  const routeCum = usePathProgress ? buildCumulativeLengths(routePath) : null;
+  const routeTotal = routeCum ? routeCum[routeCum.length - 1] : 0;
+
+  // 버스를 경로에 투영 — 이탈(수직거리>OFF_ROUTE_M) 시 직전 유효 진행거리 유지
+  const busProj = (usePathProgress && mainBus)
+    ? projectToPolyline({ lat: mainBus.lat, lng: mainBus.lng }, routePath, routeCum) : null;
+  let busProgress = null;
+  if (busProj) {
+    if (busProj.perpDist <= OFF_ROUTE_M) {
+      busProgress = busProj.progress;
+      lastBusProgressRef.current = busProgress;
+    } else {
+      busProgress = lastBusProgressRef.current; // 이탈 좌표 제외 — 직전 유효값 유지
+    }
+  }
+  // 내 정류장도 경로에 투영해 진행거리 산출
+  const myStopProgress = (usePathProgress && myStop)
+    ? projectToPolyline({ lat: myStop.lat, lng: myStop.lng }, routePath, routeCum)?.progress
+    : null;
+
+  // ── 노선 순서 기반(폴백용) — 버스→가장 가까운 정류장 인덱스 ──
   const _busStopIdx = (() => {
     if (!mainBus || stops.length === 0) return -1;
     let minDist = Infinity, idx = 0;
@@ -313,7 +359,7 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
     return idx;
   })();
 
-  // 버스와 내 정류장의 직선 거리(m) 계산
+  // 버스와 내 정류장의 직선 거리(m) 계산 (폴백용)
   const _distToMyStop = mainBus && myStop ? (() => {
     const R = 6371000;
     const dLat = (myStop.lat - mainBus.lat) * Math.PI / 180;
@@ -322,9 +368,19 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
   })() : null;
 
-  // ★ 핵심 — 노선 순서로 상태 판단
+  // ★ 핵심 — routePath 있으면 경로 진행거리 기반, 없으면 노선 순서(기존) 폴백
   const etaStatus = (() => {
     if (!mainBus || myStopIdx === null) return { type: 'waiting' };        // 버스 없음
+    if (usePathProgress && busProgress !== null && myStopProgress !== null) {
+      const remain = myStopProgress - busProgress;          // 내 정류장까지 남은 경로거리(m)
+      if (busProgress > myStopProgress + PASSED_MARGIN_M) return { type: 'passed' };
+      if (remain < ARRIVING_M) return { type: 'arriving' };
+      // ETA = 남은 경로거리/속도 (calcETA 시그니처 재사용 — 거리 입력만 경로거리로)
+      const speed = (mainBus.speed > 5 ? mainBus.speed : 30);
+      const eta = Math.ceil((Math.max(remain, 0) / 1000) / speed * 60);
+      return { type: 'approaching', eta };
+    }
+    // ── 폴백(routePath 없음): 기존 노선 순서 로직 그대로 ──
     if (_distToMyStop !== null && _distToMyStop < 150) return { type: 'arriving' }; // 150m 이내 = 곧 도착
     if (_busStopIdx > myStopIdx) return { type: 'passed' };               // 버스가 내 정류장 지남
     if (_busStopIdx < myStopIdx) {
@@ -362,8 +418,22 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
     return s < 10 ? '방금' : s < 60 ? `${s}초 전` : `${Math.floor(s/60)}분 전`;
   };
 
-  // _busStopIdx 는 위 etaStatus 블록에서 이미 계산됨
-  const busStopIdx = _busStopIdx;
+  // 정류장별 경로 진행거리(routePath 모드) — 노선도 스트립 progress 정합용
+  const stopProgresses = (usePathProgress && stops.length > 0)
+    ? stops.map(s => projectToPolyline({ lat: s.lat, lng: s.lng }, routePath, routeCum)?.progress ?? 0)
+    : null;
+
+  // 노선도 스트립의 버스 위치 인덱스 — progress 모드면 진행거리로 통일, 아니면 기존 최근접
+  const busStopIdx = (usePathProgress && busProgress !== null && stopProgresses)
+    ? (() => {
+        // 버스 progress가 지난 마지막 정류장 인덱스(없으면 0)
+        let idx = 0;
+        for (let i = 0; i < stopProgresses.length; i++) {
+          if (stopProgresses[i] <= busProgress + PASSED_MARGIN_M) idx = i;
+        }
+        return idx;
+      })()
+    : _busStopIdx;
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--color-bg-alt)' }}>
@@ -411,13 +481,27 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
 
       {/* ── 지도 (상단 55%) ── */}
       <div style={{ flex: '0 0 55%', minHeight: 0, position: 'relative' }}>
+        {/* onCreate relayout: 이 지도 컨테이너는 100dvh→flex:1→flex:1→flex:'0 0 55%' 체인.
+            카카오 맵이 dvh/flex 확정 전 0px로 초기화되면 CSS와 달리 자동 복구 안 함(영구 흰화면).
+            생성 직후 + 레이아웃 안정 후 relayout 1회씩 = /bus(고정 100vh)와 동등한 안정성. */}
         <Map center={center} style={{ width: '100%', height: '100%' }} level={mapLevel}
+          onCreate={map => { map.relayout(); setTimeout(() => map.relayout(), 300); }}
           onZoomChanged={map => setMapLevel(map.getLevel())}>
 
           {/* 노선 폴리라인 */}
-          {routePath.length >= 2 && (
+          {/* 노선 폴리라인 — routePath 진행 모드면 지나온(회색)/남은(파랑) 분할, 아니면 단일 파랑(폴백) */}
+          {routePath.length >= 2 && usePathProgress && busProgress !== null ? (
+            <>
+              {(() => { const t = pathUpTo(routePath, routeCum, busProgress); return t.length >= 2 ? (
+                <Polyline path={t} strokeWeight={5} strokeColor={TRAVELED_COLOR} strokeOpacity={0.7} strokeStyle="solid" />
+              ) : null; })()}
+              {(() => { const r = pathFrom(routePath, routeCum, busProgress); return r.length >= 2 ? (
+                <Polyline path={r} strokeWeight={5} strokeColor="#0066FF" strokeOpacity={0.85} strokeStyle="solid" />
+              ) : null; })()}
+            </>
+          ) : routePath.length >= 2 ? (
             <Polyline path={routePath} strokeWeight={5} strokeColor="#0066FF" strokeOpacity={0.75} strokeStyle="solid" />
-          )}
+          ) : null}
 
           {/* 정류장 마커 — 클릭 시 정류장 정보 카드 */}
           {stops.map((s, i) => {
@@ -971,6 +1055,7 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
             {modalMapView && (
               <div style={{ flex:1, minHeight:300, position:"relative" }}>
                 <Map center={modalCenter} style={{ width:"100%", height:"100%" }} level={9}
+                  onCreate={map => { map.relayout(); setTimeout(() => map.relayout(), 300); }}
                   onCenterChanged={map => setModalCenter({ lat: map.getCenter().getLat(), lng: map.getCenter().getLng() })}>
 
                   {/* 노선 폴리라인 */}
