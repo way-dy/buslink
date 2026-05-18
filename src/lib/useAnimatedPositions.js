@@ -59,6 +59,7 @@ export function useAnimatedPositions(rawVehicles) {
   const animate = useCallback(() => {
     const now = performance.now();
     const raw = rawRef.current;
+    let hasActiveAnimation = false; // ★ 진행 중인 애니메이션 추적
 
     const updated = raw.map((v) => {
       if (!v.lat || !v.lng) return v;
@@ -75,6 +76,8 @@ export function useAnimatedPositions(rawVehicles) {
       const progress = Math.min(elapsed / ANIM_DURATION, 1);
       const eased = easeInOutCubic(progress);
 
+      if (progress < 1) hasActiveAnimation = true; // ★ 아직 움직이는 차량 있음
+
       return {
         ...v,
         lat: lerp(prev.lat, target.lat, eased),
@@ -83,8 +86,21 @@ export function useAnimatedPositions(rawVehicles) {
     });
 
     setDisplayVehicles(updated);
-    rafRef.current = requestAnimationFrame(animate);
+
+    // ★ 진행 중인 애니메이션이 있을 때만 다음 프레임 요청
+    if (hasActiveAnimation) {
+      rafRef.current = requestAnimationFrame(animate);
+    } else {
+      rafRef.current = null;
+    }
   }, []);
+
+  // ★ rawVehicles 변경 시 rAF 루프 재시작 (멈춰있을 수 있으므로)
+  useEffect(() => {
+    if (rawVehicles.length > 0 && !rafRef.current) {
+      rafRef.current = requestAnimationFrame(animate);
+    }
+  }, [rawVehicles, animate]);
 
   useEffect(() => {
     rafRef.current = requestAnimationFrame(animate);
