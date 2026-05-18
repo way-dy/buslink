@@ -18,6 +18,11 @@
 > **어느 PC든** `git pull` + `.env.local`(↓부트스트랩)만 맞추면 이어작업·빌드·배포 가능.
 > prod 라이브 = 콘솔 롤백된 정상 빌드. 아래 미배포분을 빌드→localhost 확인→배포하면 끝.
 
+### git 원격 상태 (2026-05-18)
+- `origin/main` 은 2026-03-23에 끊겼던 폐갈래였음(3월 운영수정은 5월 갈래로 이미 이식 완료 `e522329`/`78f95f5`). 로컬 `main`(5월 정본·prod 배포본)으로 정렬 진행.
+- **3월 원격상태 영구 백업**: `origin/archive/remote-march-2026`(`f63321c`) — 필요 시 복구 가능.
+- 정렬 완료 명령(자동가드가 막아 사용자 1회 실행 필요): `git -C E:\dev\app\buslink push --force-with-lease origin main` (백업 있으니 안전). 이후 어느 PC나 `git pull` 로 이어작업.
+
 ### 새 PC 부트스트랩 (이어작업 시 1회)
 - `git pull` → 프로젝트 폴더(`app/buslink`) 존재 확인 → `npm install` (functions 쓰면 `cd functions && npm install`).
 - **`.env.local` 생성**: `.env.example` 키 목록 참고. 값(Firebase 6종·KAKAO·VAPID)은 사용자 보유분 입력. ⚠ `REACT_APP_KAKAO_MAP_KEY`=운영 공유키 `58bf34…`(`d464b4…` 아님).
