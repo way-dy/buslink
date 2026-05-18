@@ -29,7 +29,7 @@
 
 ### 배포 전 체크리스트 (지도 안나옴/느림 방지 — 순서대로)
 1. `.env.local` 카카오 키 = `58bf34…` 확인(`d464b4…`면 prod 지도 전체 사망).
-2. Firebase 콘솔 1회(코드무관, 미설정 시 prod `permission-denied`): Authentication→Settings→승인된 도메인에 `buslink-prod.web.app`·`buslink-prod.firebaseapp.com` 추가.
+2. (조치 불필요·2026-05-18 확인) Firebase Auth 승인 도메인 `buslink-prod.web.app`·`firebaseapp.com`은 **Firebase가 기본 자동 등록** — 처음부터 존재. 지난 "문제 A=도메인 누락" 진단은 **오진**(실원인은 ⓐ 카카오 키). prod 권한오류 재발 시 도메인 아님 → 다른 원인 조사.
 3. `npm run build` → `npm start` → localhost에서 `/p`·`/bus` 지도 표시 확인.
 4. `firebase deploy --only hosting` (프론트 전용 — functions/rules/indexes 무관). 배포 후 prod `/p` 지도·GPS 재확인.
 5. 회귀 시: **가설-재배포 금지** → 콘솔 Hosting에서 직전 정상 빌드로 즉시 롤백 후 localhost 재현.
