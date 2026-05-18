@@ -74,10 +74,11 @@ export async function listenForegroundMessages(callback) {
   const { onMessage } = await import("firebase/messaging");
   return onMessage(messaging, payload => {
     console.log("[FCM] 포그라운드 메시지:", payload);
+    // ★ data-only 메시지 대응: data에서 먼저 추출
     callback({
-      title: payload.notification?.title || payload.data?.title || "공지",
-      body:  payload.notification?.body  || payload.data?.body  || "",
-      type:  payload.data?.type || "normal",
+      title: payload.data?.title || payload.notification?.title || "공지",
+      body:  payload.data?.body  || payload.notification?.body  || "",
+      type:  payload.data?.type  || "normal",
     });
   });
 }
