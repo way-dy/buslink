@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Map, MapMarker, Polyline, CustomOverlayMap } from "react-kakao-maps-sdk";
 import { db, auth } from "../firebase";
 import { signInAnonymously } from "firebase/auth";
@@ -128,6 +128,16 @@ export default function PassengerApp() {
     });
   }, [companyId, routeId, ready]);
 
+  // 노선 미선택 첫 진입 시 노선 선택 모달 1회 자동 노출(리디자인 의도 보존).
+  // 지도는 이미 렌더됨 — 모달은 비차단 오버레이라 닫으면 전체 버스 지도.
+  const pickerAutoOpened = useRef(false);
+  useEffect(() => {
+    if (ready && !routeId && !pickerAutoOpened.current) {
+      pickerAutoOpened.current = true;
+      setShowPicker(true);
+    }
+  }, [ready, routeId]);
+
   const timeSince = (date) => {
     if (!date) return "";
     const sec = Math.floor((new Date() - date) / 1000);
@@ -224,19 +234,12 @@ export default function PassengerApp() {
     </div>
   );
 
-  // 노선 미선택(URL 파라미터·저장 기준노선 모두 없음) → 노선 선택 화면
-  if (!routeId) return (
-    <div style={S.pickerScreen}>
-      <div style={S.pickerHead}>
-        <BusLinkLogo size={20} />
-        <div style={{ marginTop: 14 }}>
-          <div style={S.pickerTitle}>{company?.name || "BusLink"}</div>
-          <div style={S.pickerSub}>탑승하실 노선을 선택하세요</div>
-        </div>
-      </div>
-      <div style={S.pickerBody}>{renderRouteList()}</div>
-    </div>
-  );
+  // 노선 미선택 시: 풀스크린 지도(전 노선 버스 표시 — 구버전 동작)는 그대로
+  // 렌더하고, 그 위에 노선 선택 모달을 1회 자동 노출(리디자인 의도=자가 선택·
+  // 기준노선 기억 보존). 닫으면 전체 버스 지도만 본다(딥링크/QR 무 파라미터 호환).
+  // 회귀: 기존 `if(!routeId) return <picker전용화면>` 하드 게이트가 무 파라미터
+  // /bus 진입 시 지도를 아예 막던 것을 제거(증상1 원인) — 지도 경로는 routeId
+  // null 을 이미 전 구간 가드(폴리라인/필터/center)하므로 로직 추가 없음.
 
   const eta = getMyETA();
   const myStop = myStopIdx !== null ? stops[myStopIdx] : null;
