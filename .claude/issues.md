@@ -28,5 +28,8 @@
 - `[패턴]` 실 테스트/별도 lint 없음 — 수동 검증. 배포는 사용자 명시 요청 시에만.
 - `[패턴]` **Kakao 키 판독은 줄머리 앵커 grep만**: `grep -nE '^REACT_APP_KAKAO_MAP_KEY=' .env.local` → 활성=10번 `58bf34`(운영 공유키, 정상). 9번 `# … d464b4`는 비활성 복구값 주석 — STOP 사유 아님. `grep -i kakao | head -1` 류는 주석 9번을 매칭해 `d464b4` 오독→불필요 STOP 유발(2026-05-19 직전 에이전트 오탐). 활성 키가 `d464b4`로 시작할 때만 STOP.
 
+- `[패턴]` **앱별 PWA 아이콘 = manifest 3종 + 마운트 동적 교체**: 정적 path-scope 는 `/p` 만 가능하고 기사앱은 `/`에서 Auth 역할 분기 마운트라 단일 정적 manifest 불가 → `manifest.json`(관제·기본/favicon·apple-touch) + `manifest-employee.json`(scope `/p`) + `manifest-driver.json` 3종, `src/lib/pwaManifest.js applyAppManifest`(순수·idempotent)를 EmployeeApp/DriverApp 마운트 `useEffect`(빈 deps)에서 1회 호출해 `link[rel=manifest]`/`apple-touch-icon`/`meta[apple-mobile-web-app-title]` 교체(beforeinstallprompt·iOS 홈추가 모두 마운트 후라 충분). **이 PC 로컬 래스터 도구(ImageMagick/sharp/resvg) 부재** → manifest 아이콘은 SVG(`sizes:"any"`)를 정본·1024 PNG는 raster/iOS apple-touch fallback(PNG 리사이즈 금지). **purpose 는 `any`만**(maskable 미지정 — Route 라인이 풀블리드 가장자리까지라 maskable safe-zone 크롭 시 잘림, 풀디자인 보존 의도된 트레이드오프). `design/`(\_in/\_x·Buslink2.zip)은 gitignore 스크래치 — `public/icons/`로만 복사·원본 읽기전용.
+- `[패턴]` `<InstallPrompt/>`·PWA용 SW 등록은 커밋 f2aa1a2에서 이미 EmployeeApp·DriverApp 양쪽 마운트됨 — PWA 후속 작업 시 재추가 금지, 기존 SW-register `useEffect` 직후에 manifest 교체 effect 만 추가.
+
 ## 저장소 메모
 - `src.zip` git 추적되나 작업트리 삭제 상태(소스 백업 산출물, 빌드 미사용).
