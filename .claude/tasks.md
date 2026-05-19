@@ -2,9 +2,9 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
-## 현재 상태 (2026-05-20 머지 직후)
+## 현재 상태 (2026-05-20 머지 prod 재배포 완료)
 > 이 저장소가 작업 정본. **어느 PC든** `git pull` + `.env.local`(↓부트스트랩)이면 빌드·배포 가능.
-> prod 라이브 = `main.80d0f31e.js`(머지 전 master HEAD `0095e16`). 본 머지 후 재배포로 갱신 예정.
+> prod 라이브 = `main.dc99419e.js`(master HEAD `d06bb7f`, 머지본 적용 — 노선 그리기 회귀 복구).
 
 ### git 원격
 - `origin/master` = 작업 정본(2026-05-20 main 4커밋 머지). 3월 폐갈래는 `origin/archive/remote-march-2026`(`f63321c`)에 영구 백업.
@@ -21,7 +21,7 @@
 - ※ Firebase Auth 승인 도메인은 기본 자동등록 — 조치 불필요(지난 "문제 A" 오진, issues.md).
 
 ## 다음 할 일
-- [ ] **본 머지 prod 재배포** — 노선 그리기·routeProgress·PermissionGate·gps 콜드스타트 복구(2026-05-20 회귀 보고 → 머지로 복원). 이어그리기는 `openPathDraw`가 이미 `route.routePath`를 초기 로드해 자동 지원.
+- [x] **본 머지 prod 재배포** — 노선 그리기·routeProgress·PermissionGate·gps 콜드스타트 복구(2026-05-20 회귀 보고 → 머지로 복원). 이어그리기는 `openPathDraw`가 이미 `route.routePath`를 초기 로드해 자동 지원.
 - [ ] (선택) 운영 노선에 `routePath` 실제 그리기 — 안 그린 노선은 stops 직선 폴백(정상).
 
 ## 백로그 / 검토 후보
@@ -39,6 +39,7 @@
 - [ ] (보류·SaaS) #17 슈퍼관리자·빌링 / #16 멀티테넌트(dy001 하드코딩) / #15 SMS인증 — PLANNING §7·§8. (폐기) #10 예약관리(통근 확정)
 
 ## 완료 (요약·시간역순, 상세는 issues.md 패턴·redesign-log.md)
+- [x] **2026-05-20 머지 prod 배포 — 노선 그리기 회귀 복구·번들해시·curl 6항목 실측** — master HEAD `d06bb7f` 배포(`main.dc99419e.js`). curl ⓐ `appkey=58bf34` ⓑ manifest/apple-meta/autoload=false 전부 유지 ⓒ manifest 3종 200·scope `/`·`/p`·`/` ⓓ 아이콘 6종 200/올바른 ct ⓔ 새 번들 ≠ 옛 3해시(`d85ec794`/`1614fa6b`/`80d0f31e`) ⓕ 머지 실증: `정류장 순서대로 자동 연결`(\\u esc) 1건·`routePath` 10건·`노선`(\\ub178\\uc120) 67건. 신규 경고 0(기존 LoginApp/PartnerApp/AdminApp/DriverApp/EmployeeApp no-unused-vars만). 회귀 0.
 - [x] **2026-05-20 main→master 머지** — origin/main 4커밋(`5fa0737`·`2ec17c0`·`c970c07`·`0495924`) 통합: 노선 사전경로 그리기 UI + `lib/routeProgress.js` + `components/PermissionGate.js`·`lib/usePermissions.js` + gps 콜드스타트 + `.env.example` + 문제 A 오진 정정 docs. 코드 충돌 3건(EmployeeApp/DriverApp imports + EmployeeApp `<Map onCreate>` — main 더블 relayout 채택) + 문서 2건 해결. 흰화면 보강: 제 autoload=false(1597097) + main의 onCreate `relayout()+setTimeout 300ms` 공존 = 더 견고.
 - [x] **2026-05-19 앱별 PWA 아이콘 (Route Family) 적용·배포** `8b3e37e`/`0095e16` — `public/icons/` 6종(승객/기사/관제 svg+1024png) + manifest 3종(기본·`-employee` scope `/p`·`-driver`) + `src/lib/pwaManifest.js applyAppManifest`(순수 DOM·idempotent) + EmployeeApp/DriverApp 마운트 1회 동적 교체. 로컬 래스터 도구 부재로 manifest 아이콘은 SVG(`sizes:"any"`) 정본 + 1024 PNG raster/iOS apple-touch fallback. purpose `any`만(maskable 미지정=Route 풀블리드 보존). curl 검증 통과.
 - [x] **2026-05-19 prod 배포 — master HEAD `f2aa1a2` 라이브** `3032c6d` — 게이트 ⓑ(Kakao prod 도메인) 확인 후 `CI=false npm run build`→`firebase deploy --only hosting`(hosting 단독). 라이브=ETA 목적지도착(`55112aa`)·`/p` 지도 흰화면 근본수정(`1597097`)·정리(`82399d5`)·PWA(`f2aa1a2`) + 누적 GPS heartbeat(`2ad1a31`). 롤백본 `main.d85ec794.js` 대체, 번들 `main.1614fa6b.js`. curl 5항목 회귀 0.
