@@ -229,6 +229,15 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
   const buses = useAnimatedPositions(rawBuses);
   const favorites = session.favorites || [];
 
+  /* [DIAG-B 제거예정] 지도 흰화면 1회 확정용 — grep "DIAG-B" 로 통째 제거 */
+  const diagMapRef = useRef(null);
+  const [diagSize, setDiagSize] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = diagMapRef.current;
+    if (el) setDiagSize({ w: el.clientWidth, h: el.clientHeight });
+  }, [stops.length]);
+  /* [/DIAG-B] */
+
   useEffect(() => {
     const t = setInterval(() => setTick(x => x + 1), 1000);
     return () => clearInterval(t);
@@ -377,6 +386,15 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--color-bg-alt)' }}>
 
+      {/* [DIAG-B 제거예정] 지도 흰화면 1회 확정용 진단 박스 — grep "DIAG-B" 로 통째 제거 */}
+      <div style={{ position: 'absolute', top: 0, left: 0, zIndex: 9999, background: 'rgba(0,0,0,.72)', color: '#0f0', font: '11px/1.45 monospace', padding: '5px 8px', maxWidth: '70%', borderBottomRightRadius: 6, pointerEvents: 'none', whiteSpace: 'pre-wrap' }}>
+        {`kakao=${!!window.kakao} maps=${!!window.kakao?.maps} Map=${!!window.kakao?.maps?.Map}\n`}
+        {`mapBox=${diagSize.w}x${diagSize.h}\n`}
+        {`center=${center.lat.toFixed(4)},${center.lng.toFixed(4)}\n`}
+        {`stops=${stops.length} level=${mapLevel}`}
+      </div>
+      {/* [/DIAG-B] */}
+
       {/* ── 상단 헤더 ── */}
       <div style={{ background: 'var(--color-bg)', padding: '10px 14px', flexShrink: 0, borderBottom: '1px solid var(--color-line)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -419,8 +437,9 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
       </div>
 
       {/* ── 지도 (상단 55%) ── */}
-      <div style={{ flex: '0 0 55%', minHeight: 0, position: 'relative' }}>
+      <div ref={diagMapRef} style={{ flex: '0 0 55%', minHeight: 0, position: 'relative' }}>
         <Map center={center} style={{ width: '100%', height: '100%' }} level={mapLevel}
+          onCreate={map => setTimeout(() => map.relayout(), 0)}
           onZoomChanged={map => setMapLevel(map.getLevel())}>
 
           {/* 노선 폴리라인 */}

@@ -23,23 +23,30 @@ function App() {
   const [loading, setLoading] = useState(
     !isPassengerRoute && !isBoardingRoute && !isPartnerRoute && !isEmployeeRoute
   );
-  const [kakaoReady, setKakaoReady] = useState(!!window.kakao?.maps);
+  // autoload=false 이므로 window.kakao.maps 가 truthy 여도 엔진/services 는
+  // window.kakao.maps.load(cb) 콜백 전까지 미초기화 → truthy ≠ ready.
+  const [kakaoReady, setKakaoReady] = useState(false);
 
-  // 카카오 SDK 로드 대기
+  // 카카오 SDK 로드 대기 — autoload=false: maps.load() 콜백에서만 ready
   useEffect(() => {
-    if (window.kakao?.maps) { setKakaoReady(true); return; }
+    let done = false;
+    const finish = () => { if (!done) { done = true; setKakaoReady(true); } };
+
+    // 캐시·autoload 케이스 방어: 엔진이 이미 초기화돼 있으면 즉시 ready
+    if (window.kakao?.maps?.Map) { finish(); return; }
 
     const check = setInterval(() => {
-      if (window.kakao?.maps) {
+      if (window.kakao && window.kakao.maps && typeof window.kakao.maps.load === 'function') {
         clearInterval(check);
-        setKakaoReady(true);
+        if (window.kakao.maps.Map) { finish(); return; }   // 이미 초기화됨
+        window.kakao.maps.load(() => finish());             // 엔진/services 초기화 완료 후 ready
       }
     }, 100);
 
-    // 5초 타임아웃 — 로드 실패해도 앱은 정상 표시
+    // 5초 타임아웃 — 로드 실패해도 앱은 정상 표시(이 경우 지도만 흰화면일 수 있음, 기존 동작 동일)
     const timeout = setTimeout(() => {
       clearInterval(check);
-      setKakaoReady(true);
+      finish();
     }, 5000);
 
     return () => { clearInterval(check); clearTimeout(timeout); };
