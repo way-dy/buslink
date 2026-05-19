@@ -27,6 +27,9 @@ yarn-error.log*
 # 대용량 참조 산출물 (앱 코드 아님 — 정수는 docs/PLANNING.md·.claude/redesign*.md에 반영됨)
 /reference/
 /design/Buslink.zip
+/design/Buslink2.zip
+/design/_in/
+/design/_x/
 /design/src/_slices/
 /design/src/_probe/
 

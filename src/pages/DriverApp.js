@@ -7,6 +7,7 @@ import { createBoardingToken, getBoardingUrl } from "../lib/boarding";
 import QRCode from "qrcode";
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 import InstallPrompt from "../components/InstallPrompt";
+import { applyAppManifest } from "../lib/pwaManifest";
 
 // 리디자인 2단계(2026-05-16): 라이트 테마 리스킨.
 // ── 로직 100% 불변: state/effect·init(driver/dispatch/stops 로드)·loadDispatch
@@ -53,6 +54,16 @@ export default function DriverApp({ companyId: propCompanyId }) {
         .register("/firebase-messaging-sw.js")
         .catch(() => {});
     }
+  }, []);
+
+  // 앱별 PWA 설치 아이콘(기사앱) — DriverApp 은 / 에서 Auth 역할 분기로 마운트되므로
+  // 정적 path-scope 불가 → 마운트 시점에 manifest/apple-touch/제목 교체. 1회.
+  useEffect(() => {
+    applyAppManifest({
+      manifestHref: "/manifest-driver.json",
+      appleTouchHref: "/icons/driver-1024.png",
+      title: "BusLink 기사",
+    });
   }, []);
 
   useEffect(() => {

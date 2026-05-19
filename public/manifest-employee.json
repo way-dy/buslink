@@ -1,22 +1,22 @@
 {
-  "short_name": "BusLink",
-  "name": "BusLink 통근버스 관제시스템",
+  "short_name": "BusLink 직원",
+  "name": "BusLink 직원",
   "icons": [
     {
-      "src": "/icons/admin.svg",
+      "src": "/icons/passenger.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "/icons/admin-1024.png",
+      "src": "/icons/passenger-1024.png",
       "sizes": "1024x1024",
       "type": "image/png",
       "purpose": "any"
     }
   ],
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "/p",
+  "scope": "/p",
   "display": "standalone",
   "theme_color": "#0066FF",
   "background_color": "#FFFFFF",

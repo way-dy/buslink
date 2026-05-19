@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 200 200">
+    <rect width="200" height="200" fill="#0B1020"></rect>
+    <g opacity="0.06" stroke="rgba(255,255,255,1)" stroke-width="1"><line x1="0" y1="0" x2="200" y2="0"></line><line x1="0" y1="0" x2="0" y2="200"></line><line x1="0" y1="25" x2="200" y2="25"></line><line x1="25" y1="0" x2="25" y2="200"></line><line x1="0" y1="50" x2="200" y2="50"></line><line x1="50" y1="0" x2="50" y2="200"></line><line x1="0" y1="75" x2="200" y2="75"></line><line x1="75" y1="0" x2="75" y2="200"></line><line x1="0" y1="100" x2="200" y2="100"></line><line x1="100" y1="0" x2="100" y2="200"></line><line x1="0" y1="125" x2="200" y2="125"></line><line x1="125" y1="0" x2="125" y2="200"></line><line x1="0" y1="150" x2="200" y2="150"></line><line x1="150" y1="0" x2="150" y2="200"></line><line x1="0" y1="175" x2="200" y2="175"></line><line x1="175" y1="0" x2="175" y2="200"></line></g>
+    <path d="M60 40 L130 40 Q160 40 160 70 Q160 95 130 100 L80 100 L130 100 Q160 105 160 130 Q160 160 130 160 L60 160 Z" fill="none" stroke="#0066FF" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" opacity="0.25"></path>
+    <path d="M60 40 L130 40 Q160 40 160 70 Q160 95 130 100 L80 100 L130 100 Q160 105 160 130 Q160 160 130 160 L60 160 Z" fill="none" stroke="#3385FF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></path>
+    <circle cx="60" cy="40" r="9" fill="#fff"></circle><circle cx="60" cy="40" r="4" fill="#0066FF"></circle>
+    <circle cx="60" cy="160" r="9" fill="#fff"></circle><circle cx="60" cy="160" r="4" fill="#0066FF"></circle>
+    <g transform="translate(140 76)">
+      <rect x="-13" y="-8" width="26" height="16" rx="4" fill="#fff"></rect>
+      <rect x="-9" y="-4" width="7" height="5" rx="1" fill="#0066FF"></rect>
+      <rect x="2" y="-4" width="7" height="5" rx="1" fill="#0066FF"></rect>
+    </g>
+    <g transform="translate(100 100)">
+      <rect x="-13" y="-8" width="26" height="16" rx="4" fill="#fff"></rect>
+      <rect x="-9" y="-4" width="7" height="5" rx="1" fill="#0066FF"></rect>
+      <rect x="2" y="-4" width="7" height="5" rx="1" fill="#0066FF"></rect>
+    </g>
+    <g transform="translate(140 130)">
+      <rect x="-13" y="-8" width="26" height="16" rx="4" fill="#fff"></rect>
+      <rect x="-9" y="-4" width="7" height="5" rx="1" fill="#0066FF"></rect>
+      <rect x="2" y="-4" width="7" height="5" rx="1" fill="#0066FF"></rect>
+    </g>
+  </svg>

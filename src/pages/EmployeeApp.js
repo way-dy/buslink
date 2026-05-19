@@ -14,6 +14,7 @@ import { validateAndBoard } from "../lib/boarding";
 import { hashPin } from "../lib/partner";
 import { BusLinkLogo, StatusDot } from "../components/ui";
 import InstallPrompt from "../components/InstallPrompt";
+import { applyAppManifest } from "../lib/pwaManifest";
 
 // ─── URL 파라미터 ──────────────────────────────────────
 function getParam(k) {
@@ -62,6 +63,15 @@ export default function EmployeeApp() {
         .register("/firebase-messaging-sw.js")
         .catch(() => {});
     }
+  }, []);
+
+  // 앱별 PWA 설치 아이콘(직원앱) — /p 전용 manifest/apple-touch/제목 교체. 마운트 1회.
+  useEffect(() => {
+    applyAppManifest({
+      manifestHref: "/manifest-employee.json",
+      appleTouchHref: "/icons/passenger-1024.png",
+      title: "BusLink 직원",
+    });
   }, []);
 
   // 저장된 세션 복원
