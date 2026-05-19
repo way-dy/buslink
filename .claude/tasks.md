@@ -14,16 +14,10 @@
 - [x] 6단계 — EmployeeApp(`/p` 직원앱) 전면 라이트 리스킨 (2026-05-16, 배포 안 함 — 단독 격리, 로직 HEAD=NOW)
 - [ ] 5·6단계 배포 — 사용자 승인 시 `firebase deploy --only hosting` 단독(프론트 전용)
 
-## 진행 중 — ⚠ 주말 작업 PC에서 이어서 (이 D: PC 작업 금지: issues.md `[패턴]`)
-> 2026-05-18 세션 종결. prod=롤백된 주말 빌드 `main.d85ec794.js`(정상). origin/master HEAD=ce4c5b5+오늘커밋(e522329 FCM/2ad1a31 GPS/78f95f5 배차/게이트·폰트 revert/docs) **전부 미배포**. 문제 2개로 분리 확정:
-- [ ] **문제 A (prod 전용·코드무관)**: `buslink-prod.web.app` 가 **Firebase Auth 승인 도메인 누락** → prod에서 Firestore `permission-denied`(공지구독·fcmToken·gps). localhost는 기본 허용이라 정상(`[FCM] Firestore 저장 완료 ✅` 확인). **해결: Firebase 콘솔 → Authentication → Settings → 승인된 도메인 → `buslink-prod.web.app`·`buslink-prod.firebaseapp.com` 추가**(즉시 반영, 배포 불필요).
-- [~] **문제 B (진짜 "지도 안나옴")** — **근본원인 확정·수정 적용·미배포·localhost 육안확인 대기** (2026-05-19, 이 D: PC 코드수정만): 원인 = `public/index.html` 카카오 SDK가 **`autoload=false` 없이** `libraries=services` 로드 → `App.js`의 `window.kakao?.maps` 단순 truthy 폴링이 엔진/services 초기화 **완료 전** ready 처리 → `<Map>`이 미완성 엔진에 생성돼 흰화면(콘솔 무에러·#14-B services 추가 후 발현 전부 설명됨). 수정 3건: ①index.html SDK src `&autoload=false` ②App.js 게이팅 = `window.kakao.maps.load(cb)` 콜백에서만 `kakaoReady=true`(초기 state false, 캐시방어, 5초 폴백·중복가드 유지) ③EmployeeApp.js HomeTab `<Map onCreate>` 0-size-init relayout 방어(컨테이너 늦은 reflow). babel parse-only OK, 3파일+문서 격리, GPS/onSnapshot/calcETA/auth/라우팅 불변. **미배포(이 D: PC 빌드·배포 금지) — 사용자 localhost 육안확인 대기.**
-  - 확인 절차: `npm start` → `http://localhost:3000/p` 사번+PIN 로그인 → 홈탭 지도 정상 표시 + 좌상단 `DIAG-B` 박스 값 확인(`kakao/maps/Map` 모두 true, `mapBox=`가 0x0 아님).
-  - [ ] **TODO(확인 후): 진단오버레이 DIAG-B 제거** — `grep -rn "DIAG-B" src/pages/EmployeeApp.js` 로 2블록(ref/effect + 박스 JSX) 통째 삭제. 지도 정상 확인되면 즉시.
-- [ ] 원래 의뢰 **기사앱 GPS 실시간**(commit `2ad1a31`, origin/master 있음·미배포) — A·B 해결·재배포 시 함께.
-
-## 다음 할 일
-- (없음 — 위 진행 중 우선)
+## 다음 할 일 (배포 게이트 잔존 — env 동기화·검증 완료 시 이 D: PC 빌드·localhost 가능, 배포 전 ⓐⓑⓒ 필수)
+> 2026-05-18 세션 prod 장애 → 콘솔 롤백(`main.d85ec794.js` 정상). origin/master HEAD=ce4c5b5+커밋(e522329 FCM/2ad1a31 GPS/78f95f5 배차/게이트·폰트 revert/docs) **전부 미배포**. 2026-05-19 `.env.local` 주말정본 동기화·검증 완료(Kakao `58bf34`) → 이 PC 빌드·localhost 가능. **배포 전 필수 게이트**: ⓐ문제 A Auth 승인도메인 ⓑKakao 앱 prod 도메인 ⓒ배포 후 curl(issues.md `[패턴]` 2026-05-19 갱신).
+- [ ] **문제 A (prod 전용·코드무관·미배포)**: `buslink-prod.web.app` 가 **Firebase Auth 승인 도메인 누락** → prod에서 Firestore `permission-denied`(공지구독·fcmToken·gps). localhost는 기본 허용이라 정상(`[FCM] Firestore 저장 완료 ✅` 확인). **해결: Firebase 콘솔 → Authentication → Settings → 승인된 도메인 → `buslink-prod.web.app`·`buslink-prod.firebaseapp.com` 추가**(즉시 반영, 배포 불필요).
+- [ ] 원래 의뢰 **기사앱 GPS 실시간**(commit `2ad1a31`, origin/master 있음·미배포) — A 해결·재배포 시 함께.
 
 ## 백로그 / 검토 후보 (issues.md 기반)
 - [ ] `src/firestore.rules`와 루트 `firestore.rules` 일원화(중복 제거 또는 src 사본 삭제)
@@ -47,6 +41,7 @@
 - [ ] (폐기) #10 예약 정보 관리 — 통근형 확정으로 예약코드 폐기(PLANNING §4.6), 통근 모델 유지 시 개발 불필요
 
 ## 완료
+- [x] **문제 B `/p` 지도 흰화면 근본수정 + localhost 실증 + DIAG-B 제거** (2026-05-19) — 원인=`public/index.html` 카카오 SDK `autoload=false` 누락 + `App.js` truthy 폴링(엔진/services 초기화 전 ready). 수정 3건: ①index.html `&autoload=false` ②App.js 게이팅 `window.kakao.maps.load(cb)` 콜백 only ③EmployeeApp HomeTab `<Map onCreate>` relayout 0-size 방어(영구 유지). 사용자 localhost 육안확인 통과(지도 렌더, DIAG-B `Map=true mapBox=1920x436`) → 임시 진단 DIAG-B 3곳(ref/effect·박스 JSX·컨테이너 ref) 전량 제거, babel parse-only OK, grep 0건. 격리=EmployeeApp.js+index.html+App.js(①②는 커밋 1597097 기반). **미배포 — 배포 게이트 ⓐⓑⓒ 잔존(issues.md `[패턴]` 2026-05-19)**
 - [x] **마지막 정류장=도착지일 때 ETA "목적지 도착" 류 대체 (`/p`·`/bus`)** (2026-05-19) — 탑승자 없는 회사 종점 대응. `EmployeeApp.js`(HomeTab 하단 ETA 패널)·`PassengerApp.js`(부유 ETA 카드) 단독 2파일. `isDestStop = stops.length>=2 && myStopIdx===stops.length-1` 게이트로 **표시 문자열·부가줄만 분기** — `etaStatus`/`calcETA`/`getMyETA`/`_busStopIdx`/`_distToMyStop`/`etaColor` 정의·onSnapshot·정렬 전부 불변, 비-도착지(첫~중간)는 픽셀 동일(모든 ternary가 원본 리터럴로 폴백). Employee: passed→"목적지 도착 완료"·부가줄 제거, arriving→"🏁 목적지 도착"/"하차해 주세요", approaching→"목적지까지 약 N분"+"목적지로 이동 중", passed 색상만 `--color-positive`(`etaDisplayColor` 신설, 원 `etaColor` 미변경), waiting 불변. Passenger: Pill "목적지", eta>1→"목적지까지 약 N분"/eta<=1→"🏁 목적지 도착"+하차 안내, `eta<=5` 빨강 유지, eta===null 불변, progressMeta "도착지". Babel parse-only OK(이 D: PC 빌드·배포 금지 준수), git diff 2파일 한정. 미배포(hosting 단독 승인 대기 — 주말 작업 PC에서 배포)
 - [x] **2026-05-18 prod 장애 → 콘솔 롤백 (이 D: PC 오늘 작업분 전량 비활성)** — 이 PC에서 ce4c5b5(주말 리디자인) 기반으로 GPS수정·main 3월 FCM/배차 이식(e522329/2ad1a31/78f95f5)·게이트/폰트 등 hosting 다회 배포 → 카카오 키(d464b4 오박힘) + 원인 미확정 Firestore `permission-denied`(익명토큰 200인데 isAuth 거부) 등 prod 연쇄 회귀. 콘솔 Hosting에서 주말 정상 빌드 **`main.d85ec794.js`로 롤백** → 라이브 복구·지도 정상(사용자 확인). ⚠ **오늘 이 PC 변경분(GPS heartbeat·FCM/배차 이식·리디자인 배포)은 전부 라이브 아님.** 재시도는 prod 직접배포 금지 — 주말 작업 PC localhost 재현·근본원인 확정 후에만. 상세·금지사항 → issues.md `[패턴] 이 D: PC 빌드·배포 금지`.
 - [x] **직원앱(`/p`) 노선 변경 + 지도 정류장 이름/클릭정보** (2026-05-17) — EmployeeApp HomeTab 한정 3건. ①헤더 "🔄 노선 변경" 모달(전체 노선=기존 `getDocs(routes)` 재사용, >6개 검색)→`chooseRoute`→`onSessionUpdate({routeId})`(부모 `saveSession` localStorage 영속=기준노선)→`session.routeId` effect가 `activeRouteId`/`myStopIdx` 재바인딩→정류장/지도/GPS 연쇄. RoutesTab은 기준노선 변경 미지원이라 HomeTab 신규 모달 구현(PassengerApp 톤 준용). ②지도 전 정류장 이름 라벨(출/도/내정류장 기존 강조 유지, 중간은 소형 흰라벨 `maxWidth:88` 말줄임·`yAnchor` 분리). ③마커/라벨 클릭→정류장 정보 바텀시트(주소/사진/설명/없을때 안내+"내 정류장 설정"). strip 클릭(내정류장 지정) 기존동작 무손상. 보존 로직 24항목 HEAD=NOW(`saveSession`만 HomeTab prop 배선+주석 +2 의도분), `EmployeeApp.js` 단독 격리, 빌드 `main.d85ec794.js` 통과·신규 경고 0(기존 8건 줄번호만 이동). 미배포(hosting 단독 대기)
