@@ -6,6 +6,7 @@ import { startGPS, stopGPS, clearGPS } from "../lib/gps";
 import { createBoardingToken, getBoardingUrl } from "../lib/boarding";
 import QRCode from "qrcode";
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
+import InstallPrompt from "../components/InstallPrompt";
 
 // 리디자인 2단계(2026-05-16): 라이트 테마 리스킨.
 // ── 로직 100% 불변: state/effect·init(driver/dispatch/stops 로드)·loadDispatch
@@ -41,6 +42,16 @@ export default function DriverApp({ companyId: propCompanyId }) {
   useEffect(() => {
     if ("Notification" in window && Notification.permission === "default") {
       Notification.requestPermission();
+    }
+  }, []);
+
+  // 설치형 앱(PWA) 조건용 SW 등록 1회 — 브라우저가 URL+scope 로 dedupe.
+  // DriverApp 은 FCM 미사용이나 설치 가능 조건 충족 위해 등록만 추가. 실패 무해 처리.
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker
+        .register("/firebase-messaging-sw.js")
+        .catch(() => {});
     }
   }, []);
 
@@ -222,6 +233,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
 
   return (
     <div style={S.container}>
+      <InstallPrompt />
       <div style={S.card}>
         {/* 헤더 */}
         <div style={S.header}>

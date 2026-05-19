@@ -15,6 +15,12 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
+// ── 설치형 앱(PWA) 조건 충족용 no-op fetch 리스너 ──
+// respondWith 없음 = 모든 요청을 네트워크로 그대로 통과시킴(캐시/오프라인/precache 일절 없음).
+// 브라우저가 SW에 fetch 핸들러가 있어야 "설치 가능"으로 판정하므로 비어 있는 핸들러만 등록.
+// ⚠ 여기에 캐시·respondWith·workbox 추가 금지 — stale shell 로 인한 prod 장애 방지.
+self.addEventListener("fetch", () => {});
+
 // 백그라운드 메시지 처리 (data-only 메시지 대응)
 messaging.onBackgroundMessage(payload => {
   // ★ data-only: data에서 먼저 추출, fallback으로 notification

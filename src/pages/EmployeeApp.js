@@ -13,6 +13,7 @@ import { calcETA } from "../lib/gps";
 import { validateAndBoard } from "../lib/boarding";
 import { hashPin } from "../lib/partner";
 import { BusLinkLogo, StatusDot } from "../components/ui";
+import InstallPrompt from "../components/InstallPrompt";
 
 // ─── URL 파라미터 ──────────────────────────────────────
 function getParam(k) {
@@ -50,6 +51,17 @@ export default function EmployeeApp() {
   // 익명 인증
   useEffect(() => {
     signInAnonymously(auth).finally(() => setReady(true));
+  }, []);
+
+  // 설치형 앱(PWA) 조건용 SW 등록 1회 — 브라우저가 URL+scope 로 dedupe 하므로
+  // FCM SDK(lib/notifications)가 같은 파일을 다시 등록해도 충돌·이중등록 없음.
+  // 캐시 추가 없음(no-op fetch 핸들러만). 실패는 무해 처리.
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker
+        .register("/firebase-messaging-sw.js")
+        .catch(() => {});
+    }
   }, []);
 
   // 저장된 세션 복원
@@ -110,6 +122,7 @@ export default function EmployeeApp() {
 
   return (
     <div style={S.appWrap}>
+      <InstallPrompt />
       {/* ── 공지 배너 ── */}
       {activeNotice && (
         <div style={{

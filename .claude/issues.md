@@ -24,6 +24,7 @@
 - `[패턴]` 루트 `CLOUD_FUNCTION_FCM.js`는 v1 문법 옛 참고 스니펫 — 실배포 코드 아님. 실제는 `functions/index.js`(v2).
 - `[패턴]` `boardingTokens`/`partnerCodes`는 규칙상 read 공개(`true`) — 토큰 추측·코드 유출 주의.
 - `[패턴]` 카카오 `services`(Geocoder/Places) 사용 시 `window.kakao?.maps?.services` + 콜백 `status` 가드 필수 — SDK 미로드/한도초과(공유 키 callcenter와 일일 한도 공유, `[미해결] Kakao 키 임시 공유`)면 우아 실패하고 수동 경로(지도선택/좌표직접/자유텍스트) 보존. RoutesTab 정류장 검색이 이 패턴(`handleAddrSearch`).
+- `[패턴]` **PWA 설치형 SW(`firebase-messaging-sw.js`)에 캐시 절대 금지**: 설치 가능 조건은 *fetch 핸들러 존재*만 요구 → `self.addEventListener('fetch',()=>{})`(respondWith 없음=네트워크 통과)로 충분. precache/respondWith/workbox 추가 시 옛 빌드 shell 영구 서빙(이 PC 빌드배포 stale 장애 계열). SW 등록은 FCM(`lib/notifications`)이 같은 파일을 이미 등록하나 브라우저가 URL+scope dedupe하므로 앱 마운트 시 무권한 1회 추가 등록(`/firebase-messaging-sw.js`)해도 충돌·이중등록 없음. `<InstallPrompt/>`는 순수 프레젠테이션(Firebase/로직 import 금지), 재노출은 localStorage 14일 스누즈, standalone/appinstalled 영구비표시.
 - `[패턴]` 실 테스트/별도 lint 없음 — 수동 검증. 배포는 사용자 명시 요청 시에만.
 
 ## 저장소 메모
