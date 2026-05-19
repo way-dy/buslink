@@ -3,11 +3,13 @@ import { auth, db } from "../firebase";
 import { signOut } from "firebase/auth";
 import { collection, query, where, getDocs, doc, updateDoc, orderBy } from "firebase/firestore";
 import { startGPS, stopGPS, clearGPS } from "../lib/gps";
+import { ensureGeolocationPermission } from "../lib/usePermissions";
 import { createBoardingToken, getBoardingUrl } from "../lib/boarding";
 import QRCode from "qrcode";
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 import InstallPrompt from "../components/InstallPrompt";
 import { applyAppManifest } from "../lib/pwaManifest";
+import PermissionGate from "../components/PermissionGate";
 
 // 리디자인 2단계(2026-05-16): 라이트 테마 리스킨.
 // ── 로직 100% 불변: state/effect·init(driver/dispatch/stops 로드)·loadDispatch
@@ -37,6 +39,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [companyId, setCompanyId] = useState(propCompanyId || "dy001");
+  const [gpsStatus, setGpsStatus] = useState("");   // GPS 신호 안내 ("" | "확보중" | "권한")
   const wakeLockRef = useRef(null);
 
   // 알림 권한 요청
@@ -128,6 +131,19 @@ export default function DriverApp({ companyId: propCompanyId }) {
     }
   };
 
+  // 운행 중 "GPS 신호 확보 중…" 안내 자동 해제 — 실제 측위가 들어오면 표시 끔.
+  // (startGPS 파이프라인을 건드리지 않고 동일 위치권한으로 1회 확인 — 권한 거부는 유지)
+  useEffect(() => {
+    if (!driving || gpsStatus !== "확보중") return;
+    let cancelled = false;
+    const w = navigator.geolocation.watchPosition(
+      () => { if (!cancelled) setGpsStatus(""); },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 }
+    );
+    return () => { cancelled = true; navigator.geolocation.clearWatch(w); };
+  }, [driving, gpsStatus]);
+
   // Wake Lock 재획득
   useEffect(() => {
     const fn = async () => {
@@ -153,6 +169,15 @@ export default function DriverApp({ companyId: propCompanyId }) {
       alert("배정된 차량이 없습니다.\n관리자에게 차량 배정을 요청하세요.");
       return;
     }
+    // 위치 권한 사전 점검(작업4 헬퍼 재사용) — 미허용이면 startGPS 전에 권한 요청 흐름.
+    // ensureGeolocationPermission: granted|prompt면 OS 팝업 유도, denied면 false 반환.
+    setGpsStatus("확보중");
+    const ok = await ensureGeolocationPermission();
+    if (!ok) {
+      setGpsStatus("권한");
+      alert("GPS 권한이 필요합니다.\n위치 권한을 허용해주세요.");
+      return;
+    }
     if ("wakeLock" in navigator) {
       try { wakeLockRef.current = await navigator.wakeLock.request("screen"); } catch {}
     }
@@ -167,6 +192,10 @@ export default function DriverApp({ companyId: propCompanyId }) {
       onStopReached: (stop, dist) => {
         setCurrentStopIdx(stops.findIndex(s => s.id === stop.id));
         sendNotification(stop, dist);
+      },
+      onGpsError: (err) => {
+        // err.code 1=PERMISSION_DENIED, 3=TIMEOUT — 화면 안내(작업4 권한 UI와 연동)
+        setGpsStatus(err.code === 1 ? "권한" : "확보중");
       },
     });
     setWatchId(id);
@@ -187,6 +216,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
     if (tokenTimerRef.current) { clearInterval(tokenTimerRef.current); tokenTimerRef.current = null; }
     setDriving(false);
     setWatchId(null);
+    setGpsStatus("");
     setCurrentStopIdx(-1);
     setBoardingToken(null);
     setQrUrl(null);
@@ -251,6 +281,24 @@ export default function DriverApp({ companyId: propCompanyId }) {
           <BusLinkLogo size={18} sub="기사" />
           <button style={S.logoutBtn} onClick={handleLogout}>로그아웃</button>
         </div>
+
+        {/* 권한 경고 배너 + 앱 설치 버튼 (운행 화면 상단) */}
+        <PermissionGate />
+
+        {/* GPS 신호 안내 — 운행 시작 시 측위 확보 전/권한 미허용일 때만 */}
+        {gpsStatus && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "9px 12px", borderRadius: "var(--radius-12)",
+            background: gpsStatus === "권한" ? "#FDECEC" : "var(--color-primary-soft)",
+            border: gpsStatus === "권한" ? "1px solid var(--color-destructive)" : "1px solid var(--color-primary)",
+            color: gpsStatus === "권한" ? "var(--color-destructive)" : "var(--color-primary-deep)",
+            fontSize: 13, fontWeight: 700,
+          }}>
+            <StatusDot tone={gpsStatus === "권한" ? "danger" : "primary"} size={8} pulse />
+            {gpsStatus === "권한" ? "GPS 권한을 허용해주세요" : "GPS 신호 확보 중…"}
+          </div>
+        )}
 
         {/* 인사 */}
         <div>

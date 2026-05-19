@@ -661,6 +661,12 @@ function RoutesTab({ companyId }) {
   const [addrResults, setAddrResults] = useState([]);          // 검색 결과 드롭다운(최대 5)
   const [addrSearching, setAddrSearching] = useState(false);   // 검색 중 표시
   const [addrMsg, setAddrMsg] = useState("");                  // 검색 불가/실패 안내
+  // 노선 경로 그리기(수동 폴리라인 편집) — 정류장 관리와 같은 진입 레벨
+  const [pathRoute, setPathRoute] = useState(null);            // 경로 그리는 중인 노선
+  const [pathPoints, setPathPoints] = useState([]);            // routePath 정점 [{lat,lng}]
+  const [pathStops, setPathStops] = useState([]);              // 해당 노선 정류장(자동연결 시드용)
+  const [pathLoading, setPathLoading] = useState(false);       // 저장 중
+  const [pathCenter, setPathCenter] = useState({ lat: 37.3894, lng: 126.9522 });
 
   useEffect(() => {
     if (!companyId) return;
@@ -881,6 +887,66 @@ function RoutesTab({ companyId }) {
     await updateDoc(doc(db, "companies", companyId, "routes", stopsRoute.id, "stops", newStops[target].id), { order: newStops[idx].order });
   };
 
+  // ─── 노선 경로 그리기 (수동 폴리라인) ────────────────────
+  // 정류장 관리와 같은 진입 레벨. 카카오 <Map> 위에서 수동 편집:
+  //   지도 클릭=정점 추가 / 마커 드래그=이동 / 마커 클릭=삭제 /
+  //   되돌리기 / 전체 지우기 / 정류장 순서대로 자동 연결(stops 좌표 시드).
+  // ⚠ 자동 도로 라우팅(Kakao Mobility) 미사용 — 순수 수동 드로잉(키 한도 공유 이슈).
+  const openPathDraw = async (route) => {
+    setPathRoute(route);
+    // 기존 routePath 로드(plain number 배열, GeoPoint 아님)
+    const init = Array.isArray(route.routePath)
+      ? route.routePath.filter(p => typeof p?.lat === "number" && typeof p?.lng === "number")
+      : [];
+    setPathPoints(init);
+    // 해당 노선 정류장 로드 — 자동 연결 시드 + 지도 참고 마커 + 초기 중심
+    let sList = [];
+    try {
+      const snap = await getDocs(query(
+        collection(db, "companies", companyId, "routes", route.id, "stops"),
+        orderBy("order", "asc")
+      ));
+      sList = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch (e) {
+      console.warn("[BusLink] 경로용 정류장 로드 실패:", e.message);
+    }
+    setPathStops(sList);
+    const seed = init[0] || (sList[0] && { lat: sList[0].lat, lng: sList[0].lng });
+    if (seed) setPathCenter({ lat: seed.lat, lng: seed.lng });
+  };
+  const closePathDraw = () => { setPathRoute(null); setPathPoints([]); setPathStops([]); };
+  const pathAddPoint = (lat, lng) => setPathPoints(p => [...p, { lat, lng }]);
+  const pathMovePoint = (idx, lat, lng) =>
+    setPathPoints(p => p.map((pt, i) => i === idx ? { lat, lng } : pt));
+  const pathDeletePoint = (idx) => setPathPoints(p => p.filter((_, i) => i !== idx));
+  const pathUndo = () => setPathPoints(p => p.slice(0, -1));
+  const pathClear = () => setPathPoints([]);
+  // 정류장 순서대로 자동 연결 — stops 좌표를 초기 시드(이후 수동 보정 전제)
+  const pathSeedFromStops = () => {
+    const seed = pathStops
+      .filter(s => typeof s.lat === "number" && typeof s.lng === "number")
+      .map(s => ({ lat: s.lat, lng: s.lng }));
+    if (seed.length === 0) { alert("좌표가 있는 정류장이 없습니다"); return; }
+    if (pathPoints.length > 0 &&
+        !window.confirm("현재 경로를 정류장 순서 연결로 대체하시겠습니까?")) return;
+    setPathPoints(seed);
+  };
+  const handlePathSave = async () => {
+    if (!pathRoute) return;
+    setPathLoading(true);
+    try {
+      // stops와 동일하게 plain number 배열로 저장(GeoPoint 아님). 빈 배열=미설정 취급.
+      const routePath = pathPoints.map(p => ({
+        lat: parseFloat(p.lat.toFixed(6)), lng: parseFloat(p.lng.toFixed(6)),
+      }));
+      await updateDoc(doc(db, "companies", companyId, "routes", pathRoute.id), {
+        routePath, updatedAt: new Date().toISOString(),
+      });
+      closePathDraw();
+    } catch (e) { alert("경로 저장 오류: " + e.message); }
+    setPathLoading(false);
+  };
+
   const filtered = routes.filter(r => {
     if (filter !== "전체" && r.type !== filter) return false;
     if (partnerFilter !== "전체" && r.partnerCode !== partnerFilter) return false;
@@ -939,10 +1005,16 @@ function RoutesTab({ companyId }) {
                 <td style={S.td}>{r.seats?`${r.seats}석`:"–"}</td>
                 <td style={S.td}><span style={S.timeBadge}>{r.departTime}</span></td>
                 <td style={S.td}>
-                  <button onClick={()=>setStopsRoute(r)}
-                    style={{...S.editBtn, background:stopsRoute?.id===r.id?"var(--color-primary-soft)":"var(--color-bg-soft)", color:stopsRoute?.id===r.id?"var(--color-primary-deep)":"var(--color-label-mute)", border:stopsRoute?.id===r.id?"1px solid var(--color-primary)":"1px solid var(--color-line)"}}>
-                    정류장 관리
-                  </button>
+                  <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+                    <button onClick={()=>setStopsRoute(r)}
+                      style={{...S.editBtn, background:stopsRoute?.id===r.id?"var(--color-primary-soft)":"var(--color-bg-soft)", color:stopsRoute?.id===r.id?"var(--color-primary-deep)":"var(--color-label-mute)", border:stopsRoute?.id===r.id?"1px solid var(--color-primary)":"1px solid var(--color-line)"}}>
+                      정류장 관리
+                    </button>
+                    <button onClick={()=>openPathDraw(r)}
+                      style={{...S.editBtn, background:pathRoute?.id===r.id?"var(--color-primary-soft)":"var(--color-bg-soft)", color:pathRoute?.id===r.id?"var(--color-primary-deep)":"var(--color-label-mute)", border:pathRoute?.id===r.id?"1px solid var(--color-primary)":"1px solid var(--color-line)"}}>
+                      🛣 경로 그리기{Array.isArray(r.routePath)&&r.routePath.length>=2?` (${r.routePath.length})`:""}
+                    </button>
+                  </div>
                 </td>
                 <td style={S.td}>
                   <button style={S.editBtn} onClick={()=>openEdit(r)}>수정</button>
@@ -1181,6 +1253,87 @@ function RoutesTab({ companyId }) {
           <div style={{ background:"var(--color-bg)", padding:"10px 16px", borderTop:"1px solid var(--color-line)", flexShrink:0 }}>
             <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center" }}>
               지도를 클릭하면 핀이 찍힙니다 · 빨간 마커는 기존 정류장 위치입니다
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 노선 경로 그리기 모달 (수동 폴리라인) ── */}
+      {pathRoute && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.7)", zIndex:200, display:"flex", flexDirection:"column" }}>
+          {/* 헤더 */}
+          <div style={{ background:"var(--color-bg)", padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", flexShrink:0, gap:12 }}>
+            <div style={{ minWidth:0 }}>
+              <div style={{ fontSize:14, fontWeight:700 }}>🛣 경로 그리기</div>
+              <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:"60vw" }}>
+                {pathRoute.name} · 정점 {pathPoints.length}개
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:8, flexShrink:0 }}>
+              <button onClick={handlePathSave} disabled={pathLoading}
+                style={{ background:"var(--color-primary)", border:"none", borderRadius:8, padding:"8px 16px", color:"#fff", fontSize:13, fontWeight:700, cursor:pathLoading?"default":"pointer", fontFamily:"inherit", opacity:pathLoading?0.6:1 }}>
+                {pathLoading ? "저장 중..." : "경로 저장"}
+              </button>
+              <button onClick={closePathDraw}
+                style={{ background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:8, padding:"8px 14px", color:"var(--color-label-mute)", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>
+                취소
+              </button>
+            </div>
+          </div>
+
+          {/* 편집 도구 */}
+          <div style={{ background:"var(--color-bg)", padding:"8px 16px", borderTop:"1px solid var(--color-line)", display:"flex", flexWrap:"wrap", gap:6, alignItems:"center", flexShrink:0 }}>
+            <button onClick={pathUndo} disabled={pathPoints.length===0}
+              style={{...S.editBtn, opacity:pathPoints.length===0?0.4:1}}>↶ 되돌리기</button>
+            <button onClick={pathClear} disabled={pathPoints.length===0}
+              style={{...S.editBtn, opacity:pathPoints.length===0?0.4:1}}>전체 지우기</button>
+            <button onClick={pathSeedFromStops} style={S.editBtn}>📍 정류장 순서대로 자동 연결</button>
+            <span style={{ fontSize:11, color:"var(--color-label-alt)", marginLeft:"auto" }}>
+              지도 클릭=정점 추가 · 핀 드래그=이동 · 핀 클릭=삭제
+            </span>
+          </div>
+
+          {/* 지도 */}
+          <div style={{ flex:1, minHeight:0 }}>
+            <Map
+              center={pathCenter}
+              style={{ width:"100%", height:"100%" }}
+              level={6}
+              onClick={(_, e) => {
+                // 자동 도로 라우팅 미사용 — 클릭 좌표를 그대로 정점으로 추가
+                pathAddPoint(e.latLng.getLat(), e.latLng.getLng());
+              }}
+            >
+              {/* 진행 중 경로 미리보기 */}
+              {pathPoints.length >= 2 && (
+                <Polyline path={pathPoints} strokeWeight={5} strokeColor="#0066FF" strokeOpacity={0.85} strokeStyle="solid" />
+              )}
+              {/* 정점 마커 — 드래그 이동, 클릭 삭제 */}
+              {pathPoints.map((pt, i) => (
+                <MapMarker key={`pp-${i}`} position={pt}
+                  draggable={true}
+                  onDragEnd={(marker) => {
+                    const p = marker.getPosition();
+                    pathMovePoint(i, p.getLat(), p.getLng());
+                  }}
+                  onClick={() => pathDeletePoint(i)}
+                  image={{ src:"https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png", size:{ width: i===0||i===pathPoints.length-1?22:16, height: i===0||i===pathPoints.length-1?32:24 } }}
+                />
+              ))}
+              {/* 정류장 참고 마커(빨강) — 경로 그릴 때 위치 가이드 */}
+              {pathStops.map(s => s.lat && s.lng && (
+                <MapMarker key={`ps-${s.id}`} position={{ lat:s.lat, lng:s.lng }}
+                  image={{ src:"https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/marker_red.png", size:{ width:14, height:20 } }}
+                  onClick={() => setPathCenter({ lat:s.lat, lng:s.lng })}
+                />
+              ))}
+            </Map>
+          </div>
+
+          {/* 하단 안내 */}
+          <div style={{ background:"var(--color-bg)", padding:"10px 16px", borderTop:"1px solid var(--color-line)", flexShrink:0 }}>
+            <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center" }}>
+              빨간 마커는 정류장 위치(참고용)입니다 · 경로는 도로를 따라 직접 그려주세요 (자동 도로 연결 없음)
             </div>
           </div>
         </div>

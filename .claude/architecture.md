@@ -10,7 +10,7 @@
 - `functions/`는 독립 npm 패키지(CommonJS) — 루트와 별도 `npm install` 필요.
 
 ## 환경변수
-`REACT_APP_*`는 `.env.local`(gitignore, 미커밋, `.env.example` 없음): `FIREBASE_*` 6종, `KAKAO_MAP_KEY`, `VAPID_KEY`. 빌드 필수 — 값은 사용자에게 확인.
+`REACT_APP_*`는 `.env.local`(gitignore, 미커밋): `FIREBASE_*` 6종, `KAKAO_MAP_KEY`(운영 공유키 `58bf34…` — `d464b4…`면 prod 지도 사망), `VAPID_KEY`. 템플릿=**`.env.example`**(키+가이드, 값 제외 — 어느 PC나 부트스트랩). 빌드타임 치환 — 변경 시 재빌드 필수.
 
 ## 외부 SDK (npm 아님, `<script>` 주입)
 - 카카오맵: `public/index.html`에서 `REACT_APP_KAKAO_MAP_KEY`로 로드. App.js가 `window.kakao` 5초 폴링 대기(실패해도 진행).
@@ -21,7 +21,11 @@
 - 공통 UI 라이브러리: `src/components/ui/`(ESM 프리미티브 + `tokens.js` JS 미러 + 배럴). 순수 프레젠테이션, Firebase/로직 import 금지. 기존 페이지 인라인 S 객체와 점진 공존(화면별 단계에서 채택).
 
 ## 데이터 흐름 — GPS 파이프라인
-`lib/gps.js startGPS` = `watchPosition` + 5m/5초 스로틀 + 100m 정류장 도착 감지 → `gps/{companyId}_{vehicleId}`(덮어쓰기) + `gpsHistory`(누적). PassengerApp/EmployeeApp/AdminApp이 `onSnapshot` 구독 → `lib/useAnimatedPositions.js`(rAF lerp)로 마커 보간. AdminApp 시뮬레이터 탭은 `sendGPS` 직접 호출.
+`lib/gps.js startGPS` = `watchPosition` + 5m/5초 스로틀 + 100m 정류장 도착 감지 → `gps/{companyId}_{vehicleId}`(덮어쓰기) + `gpsHistory`(누적). PassengerApp/EmployeeApp/AdminApp이 `onSnapshot` 구독 → `lib/useAnimatedPositions.js`(rAF lerp)로 마커 보간. AdminApp 시뮬레이터 탭은 `sendGPS` 직접 호출. **콜드스타트**: 진입 시 `getCurrentPosition` 1회 선발행(출발 직후 공백 방지) + `onGpsError` 콜백(권한/TIMEOUT 상위 전파, DriverApp 안내).
+
+## 경로 / 권한·설치 (2026-05-18)
+- `lib/routeProgress.js` — 폴리라인 누적거리·점 투영. `routes/{id}.routePath`(수동 그린 경로) 기반 승객앱(`/p`·`/bus`) 진행 시각화·정밀 도착판정. **미설정 시 stops 직선 폴백**(하위호환). 상세 @.claude/issues.md.
+- 권한·PWA설치: `lib/usePermissions.js` + `components/PermissionGate.js`(순수 브라우저 API, Firebase import 금지 — `components/ui` 관례 일관). `index.js`가 `firebase-messaging-sw.js` 1회 선등록(`beforeinstallprompt` 활성화, idempotent).
 
 ## 데이터 흐름 — 공지/FCM
 AdminApp → `lib/notifications.js sendNotice` → `notices` + `fcmQueue` 문서 생성 → CF `sendNoticeToCompany`가 멀티캐스트 발송. 상세 @.claude/functions.md.

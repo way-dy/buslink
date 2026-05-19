@@ -4,6 +4,7 @@
 
 ## 컬렉션 구조
 `companies/{companyId}/`:
+- `routes/{routeId}` — `name/code/type/shift/seats/departTime/partnerCode…` + (선택) **`routePath: [{lat,lng}]`**(관리자가 수동으로 그린 경로 폴리라인, plain number·GeoPoint 아님. 빈배열/없음=미설정→승객앱 stops 직선 폴백)
 - `routes/{routeId}/stops/{stopId}` — `name/address/lat/lng/order` + (선택) `photo`(클라 압축 JPEG data URI 문자열, Storage 미사용)·`description`(승객 안내문)
 - `dispatches/{date}/list/{dispatchId}`
 - `drivers/{driverId}`, `vehicles/{vehicleId}`
