@@ -667,6 +667,8 @@ function RoutesTab({ companyId }) {
   const [pathStops, setPathStops] = useState([]);              // 해당 노선 정류장(자동연결 시드용)
   const [pathLoading, setPathLoading] = useState(false);       // 저장 중
   const [pathCenter, setPathCenter] = useState({ lat: 37.3894, lng: 126.9522 });
+  const [selectedIdx, setSelectedIdx] = useState(null);        // 선택된 정점 인덱스(없으면 null)
+  const [prependMode, setPrependMode] = useState(false);       // true=지도클릭 시 출발점 앞에 추가
 
   useEffect(() => {
     if (!companyId) return;
@@ -914,13 +916,22 @@ function RoutesTab({ companyId }) {
     const seed = init[0] || (sList[0] && { lat: sList[0].lat, lng: sList[0].lng });
     if (seed) setPathCenter({ lat: seed.lat, lng: seed.lng });
   };
-  const closePathDraw = () => { setPathRoute(null); setPathPoints([]); setPathStops([]); };
+  const closePathDraw = () => { setPathRoute(null); setPathPoints([]); setPathStops([]); setSelectedIdx(null); setPrependMode(false); };
   const pathAddPoint = (lat, lng) => setPathPoints(p => [...p, { lat, lng }]);
   const pathMovePoint = (idx, lat, lng) =>
     setPathPoints(p => p.map((pt, i) => i === idx ? { lat, lng } : pt));
   const pathDeletePoint = (idx) => setPathPoints(p => p.filter((_, i) => i !== idx));
   const pathUndo = () => setPathPoints(p => p.slice(0, -1));
-  const pathClear = () => setPathPoints([]);
+  const pathClear = () => { setPathPoints([]); setSelectedIdx(null); setPrependMode(false); };
+  // 신규: idx 위치에 삽입(0=맨앞, length=끝), 선택 기반 삭제, 출발점 앞 추가
+  const pathInsertPoint = (idx, lat, lng) =>
+    setPathPoints(p => [...p.slice(0, idx), { lat, lng }, ...p.slice(idx)]);
+  const pathPrependPoint = (lat, lng) => pathInsertPoint(0, lat, lng);
+  const pathDeleteSelected = () => {
+    if (selectedIdx == null) return;
+    pathDeletePoint(selectedIdx);
+    setSelectedIdx(null);
+  };
   // 정류장 순서대로 자동 연결 — stops 좌표를 초기 시드(이후 수동 보정 전제)
   const pathSeedFromStops = () => {
     const seed = pathStops
@@ -1266,7 +1277,7 @@ function RoutesTab({ companyId }) {
             <div style={{ minWidth:0 }}>
               <div style={{ fontSize:14, fontWeight:700 }}>🛣 경로 그리기</div>
               <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:"60vw" }}>
-                {pathRoute.name} · 정점 {pathPoints.length}개
+                {pathRoute.name} · 정점 {pathPoints.length}개{selectedIdx!=null ? ` · 선택 #${selectedIdx+1}` : ""}
               </div>
             </div>
             <div style={{ display:"flex", gap:8, flexShrink:0 }}>
@@ -1288,8 +1299,18 @@ function RoutesTab({ companyId }) {
             <button onClick={pathClear} disabled={pathPoints.length===0}
               style={{...S.editBtn, opacity:pathPoints.length===0?0.4:1}}>전체 지우기</button>
             <button onClick={pathSeedFromStops} style={S.editBtn}>📍 정류장 순서대로 자동 연결</button>
+            <button onClick={pathDeleteSelected} disabled={selectedIdx==null}
+              style={{...S.editBtn, opacity:selectedIdx==null?0.4:1}}>
+              🗑 선택점 삭제{selectedIdx!=null ? ` (#${selectedIdx+1})` : ""}
+            </button>
+            <button onClick={()=>setPrependMode(m=>!m)}
+              style={{...S.editBtn, background:prependMode?"var(--color-primary)":undefined, color:prependMode?"#fff":undefined, borderColor:prependMode?"var(--color-primary)":undefined}}>
+              {prependMode ? "✓ 앞에 추가 모드" : "↟ 앞에 추가"}
+            </button>
             <span style={{ fontSize:11, color:"var(--color-label-alt)", marginLeft:"auto" }}>
-              지도 클릭=정점 추가 · 핀 드래그=이동 · 핀 클릭=삭제
+              {prependMode
+                ? "지도 클릭=출발점 앞에 추가 · ⊕=중간 삽입 · 핀 드래그=이동 · 핀 클릭=선택"
+                : "지도 클릭=뒤에 추가 · ⊕=중간 삽입 · 핀 드래그=이동 · 핀 클릭=선택"}
             </span>
           </div>
 
@@ -1300,26 +1321,65 @@ function RoutesTab({ companyId }) {
               style={{ width:"100%", height:"100%" }}
               level={6}
               onClick={(_, e) => {
-                // 자동 도로 라우팅 미사용 — 클릭 좌표를 그대로 정점으로 추가
-                pathAddPoint(e.latLng.getLat(), e.latLng.getLng());
+                // 자동 도로 라우팅 미사용 — 클릭 좌표를 정점으로 추가
+                // 첫 점은 항상 append, 이후엔 prependMode면 앞에 추가
+                const lat = e.latLng.getLat(), lng = e.latLng.getLng();
+                if (pathPoints.length === 0 || !prependMode) pathAddPoint(lat, lng);
+                else pathPrependPoint(lat, lng);
               }}
             >
               {/* 진행 중 경로 미리보기 */}
               {pathPoints.length >= 2 && (
                 <Polyline path={pathPoints} strokeWeight={5} strokeColor="#0066FF" strokeOpacity={0.85} strokeStyle="solid" />
               )}
-              {/* 정점 마커 — 드래그 이동, 클릭 삭제 */}
-              {pathPoints.map((pt, i) => (
-                <MapMarker key={`pp-${i}`} position={pt}
-                  draggable={true}
-                  onDragEnd={(marker) => {
-                    const p = marker.getPosition();
-                    pathMovePoint(i, p.getLat(), p.getLng());
-                  }}
-                  onClick={() => pathDeletePoint(i)}
-                  image={{ src:"https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png", size:{ width: i===0||i===pathPoints.length-1?22:16, height: i===0||i===pathPoints.length-1?32:24 } }}
-                />
-              ))}
+              {/* 세그먼트 중점 ⊕ — 클릭=중간 삽입(작은 마커, 정점보다 시각적 우선순위 낮음) */}
+              {pathPoints.length >= 2 && pathPoints.slice(0,-1).map((p, i) => {
+                const mid = { lat:(p.lat + pathPoints[i+1].lat)/2, lng:(p.lng + pathPoints[i+1].lng)/2 };
+                return (
+                  <MapMarker key={`mid-${i}`} position={mid}
+                    image={{
+                      src: "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="6" fill="#fff" stroke="#0066FF" stroke-width="1.5"/><path d="M7 3v8M3 7h8" stroke="#0066FF" stroke-width="1.5" stroke-linecap="round"/></svg>'),
+                      size: { width: 14, height: 14 }
+                    }}
+                    onClick={() => { pathInsertPoint(i+1, mid.lat, mid.lng); setSelectedIdx(i+1); }}
+                  />
+                );
+              })}
+              {/* 정점 마커 — 출발(초록)/도착(빨강)/중간(파랑), 선택 시 검정 외곽선. 클릭=선택, 드래그=이동 */}
+              {pathPoints.map((pt, i) => {
+                const isStart = i === 0;
+                const isEnd = i === pathPoints.length-1 && pathPoints.length > 1;
+                const color = isStart ? "#00BF40" : isEnd ? "#FF4D6A" : "#0066FF";
+                const w = (isStart || isEnd) ? 22 : 18;
+                const h = (isStart || isEnd) ? 32 : 26;
+                const stroke = i === selectedIdx ? ' stroke="#171719" stroke-width="3"' : "";
+                const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'" viewBox="0 0 22 32"><path d="M11 0C5 0 0 5 0 11c0 8 11 21 11 21s11-13 11-21C22 5 17 0 11 0z" fill="'+color+'"'+stroke+'/><circle cx="11" cy="11" r="4" fill="#fff"/></svg>';
+                return (
+                  <MapMarker key={`pp-${i}`} position={pt}
+                    draggable={true}
+                    onDragEnd={(marker) => {
+                      const p = marker.getPosition();
+                      pathMovePoint(i, p.getLat(), p.getLng());
+                      setSelectedIdx(i);
+                    }}
+                    onClick={() => setSelectedIdx(i)}
+                    image={{ src: "data:image/svg+xml;utf8," + encodeURIComponent(svg), size: { width: w, height: h } }}
+                  />
+                );
+              })}
+              {/* 정점 번호/역할 라벨 — 출발/도착은 한국어, 중간은 #N */}
+              {pathPoints.map((pt, i) => {
+                const isStart = i === 0;
+                const isEnd = i === pathPoints.length-1 && pathPoints.length > 1;
+                const label = isStart ? "출발" : isEnd ? "도착" : `#${i+1}`;
+                return (
+                  <CustomOverlayMap key={`lbl-${i}`} position={pt} yAnchor={2.6}>
+                    <div style={{ fontSize:10, padding:"2px 6px", borderRadius:999, background:"#fff", border:"1px solid var(--color-line)", boxShadow:"0 1px 3px rgba(0,0,0,.15)", color:"var(--color-label)", whiteSpace:"nowrap", fontFamily:"inherit" }}>
+                      {label}
+                    </div>
+                  </CustomOverlayMap>
+                );
+              })}
               {/* 정류장 참고 마커(빨강) — 경로 그릴 때 위치 가이드 */}
               {pathStops.map(s => s.lat && s.lng && (
                 <MapMarker key={`ps-${s.id}`} position={{ lat:s.lat, lng:s.lng }}
