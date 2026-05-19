@@ -365,6 +365,15 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
   // _busStopIdx 는 위 etaStatus 블록에서 이미 계산됨
   const busStopIdx = _busStopIdx;
 
+  // 마지막 정류장 = 도착지(=회사, 탑승자 없음). 이 정류장을 내 정류장으로
+  // 선택했을 때만 하단 ETA 패널 문구를 "목적지 도착" 류로 대체(표시 문자열만 분기).
+  const isDestStop = stops.length >= 2 && myStopIdx === stops.length - 1;
+  // 표시 색상: 도착지에서 passed(=목적지 도착 완료)는 cautionary가 부적절 → positive.
+  // 그 외는 기존 etaColor 로직 그대로(비-도착지 픽셀 불변).
+  const etaDisplayColor = isDestStop && etaStatus.type === 'passed'
+    ? 'var(--color-positive)'
+    : etaColor;
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--color-bg-alt)' }}>
 
@@ -574,24 +583,29 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
               <div style={{ fontSize: 11, color: 'var(--color-label-mute)', marginBottom: 2, fontWeight: 600 }}>
                 📍 {myStop.name}
               </div>
-              <div style={{ fontSize: 24, fontWeight: 900, color: etaColor, lineHeight: 1.1 }}>
+              <div style={{ fontSize: 24, fontWeight: 900, color: etaDisplayColor, lineHeight: 1.1 }}>
                 {etaStatus.type === 'passed'
-                  ? '이미 지나침'
+                  ? (isDestStop ? '목적지 도착 완료' : '이미 지나침')
                   : etaStatus.type === 'arriving'
-                    ? '🚌 곧 도착!'
+                    ? (isDestStop ? '🏁 목적지 도착' : '🚌 곧 도착!')
                     : etaStatus.type === 'approaching' && etaStatus.eta !== undefined
-                      ? `약 ${etaStatus.eta}분 후 도착`
+                      ? (isDestStop ? `목적지까지 약 ${etaStatus.eta}분` : `약 ${etaStatus.eta}분 후 도착`)
                       : '버스 대기 중'}
               </div>
               {/* 부가 정보 */}
-              {etaStatus.type === 'passed' && (
+              {etaStatus.type === 'passed' && !isDestStop && (
                 <div style={{ fontSize: 11, color: 'var(--color-cautionary)', marginTop: 3, fontWeight: 600 }}>
                   다음 버스를 기다려주세요
                 </div>
               )}
               {etaStatus.type === 'arriving' && (
                 <div style={{ fontSize: 11, color: 'var(--color-destructive)', marginTop: 3, fontWeight: 700 }}>
-                  탑승 준비하세요!
+                  {isDestStop ? '하차해 주세요' : '탑승 준비하세요!'}
+                </div>
+              )}
+              {etaStatus.type === 'approaching' && isDestStop && (
+                <div style={{ fontSize: 11, color: 'var(--color-label-mute)', marginTop: 3, fontWeight: 600 }}>
+                  목적지로 이동 중
                 </div>
               )}
               {mainBus && etaStatus.type === 'approaching' && (

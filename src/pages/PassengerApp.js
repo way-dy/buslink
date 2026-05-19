@@ -240,6 +240,9 @@ export default function PassengerApp() {
 
   const eta = getMyETA();
   const myStop = myStopIdx !== null ? stops[myStopIdx] : null;
+  // 마지막 정류장 = 도착지(=회사, 탑승자 없음). 이 정류장 선택 시에만
+  // ETA 카드 문구를 "목적지 도착" 류로 대체(표시 문자열만 분기, eta 로직 불변).
+  const isDestStop = stops.length >= 2 && myStopIdx === stops.length - 1;
   // 진행률 — 노선 모드에서 내 정류장 기준(시각 전용, 실제 stops 인덱스 기반)
   const progressPct = (myStopIdx !== null && stops.length > 1)
     ? Math.round((myStopIdx / (stops.length - 1)) * 100)
@@ -358,7 +361,7 @@ export default function PassengerApp() {
         <div style={S.etaCard}>
           <div style={S.etaTop}>
             <Pill tone={eta !== null && eta <= 5 ? "danger" : "primary"} dot>
-              도착 카운트다운
+              {isDestStop ? "목적지" : "도착 카운트다운"}
             </Pill>
             <span style={S.etaLive}>
               {lastUpdate ? `${timeSince(lastUpdate)} 갱신` : "실시간"}
@@ -366,11 +369,22 @@ export default function PassengerApp() {
           </div>
 
           {eta !== null ? (
+            isDestStop ? (
+              <div style={{ ...S.etaBig, alignItems: "center", flexDirection: "column", gap: 4 }}>
+                <span style={{ fontSize: 22, fontWeight: 800, color: eta <= 5 ? "var(--color-destructive)" : "var(--color-primary)" }}>
+                  {eta > 1 ? `목적지까지 약 ${eta}분` : "🏁 목적지 도착"}
+                </span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-label-mute)" }}>
+                  {eta > 1 ? "목적지로 이동 중" : "하차해 주세요"}
+                </span>
+              </div>
+            ) : (
             <div style={S.etaBig}>
               <span style={{ ...S.etaNum, color: eta <= 5 ? "var(--color-destructive)" : "var(--color-primary)" }}>{eta}</span>
               <span style={S.etaUnit}>분</span>
               <span style={S.etaSub}>후 도착 예정</span>
             </div>
+            )
           ) : (
             <div style={{ ...S.etaBig, alignItems: "center" }}>
               <span style={{ fontSize: 22, fontWeight: 700, color: "var(--color-label-mute)" }}>버스 운행 대기 중</span>
@@ -390,7 +404,7 @@ export default function PassengerApp() {
             </div>
           </div>
           <div style={S.progressMeta}>
-            <span>출발 정류장</span>
+            <span>{isDestStop ? "도착지" : "출발 정류장"}</span>
             <span>{myStopIdx + 1} / {stops.length} 정류장</span>
           </div>
         </div>
