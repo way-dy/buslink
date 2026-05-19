@@ -12,12 +12,11 @@
 - [x] 배포 — 1·2·3·4단계 + QA안정화 buslink-prod 라이브 (2026-05-16, `main.28978312.js`, hosting 단독)
 - [x] 5단계 — AdminApp 사이드바 메뉴 세련화 (2026-05-16, 배포 안 함 — 승인 대기)
 - [x] 6단계 — EmployeeApp(`/p` 직원앱) 전면 라이트 리스킨 (2026-05-16, 배포 안 함 — 단독 격리, 로직 HEAD=NOW)
-- [ ] 5·6단계 배포 — 사용자 승인 시 `firebase deploy --only hosting` 단독(프론트 전용)
+- [x] 5·6단계 배포 — master HEAD f2aa1a2 prod 라이브에 포함 (2026-05-19, 아래 배포 항목)
 
-## 다음 할 일 (배포 게이트 잔존 — env 동기화·검증 완료 시 이 D: PC 빌드·localhost 가능, 배포 전 ⓐⓑⓒ 필수)
-> 2026-05-18 세션 prod 장애 → 콘솔 롤백(`main.d85ec794.js` 정상). origin/master HEAD=ce4c5b5+커밋(e522329 FCM/2ad1a31 GPS/78f95f5 배차/게이트·폰트 revert/docs) **전부 미배포**. 2026-05-19 `.env.local` 주말정본 동기화·검증 완료(Kakao `58bf34`) → 이 PC 빌드·localhost 가능. **배포 전 필수 게이트**: ⓐ문제 A Auth 승인도메인 ⓑKakao 앱 prod 도메인 ⓒ배포 후 curl(issues.md `[패턴]` 2026-05-19 갱신).
-- [ ] **문제 A (prod 전용·코드무관·미배포)**: `buslink-prod.web.app` 가 **Firebase Auth 승인 도메인 누락** → prod에서 Firestore `permission-denied`(공지구독·fcmToken·gps). localhost는 기본 허용이라 정상(`[FCM] Firestore 저장 완료 ✅` 확인). **해결: Firebase 콘솔 → Authentication → Settings → 승인된 도메인 → `buslink-prod.web.app`·`buslink-prod.firebaseapp.com` 추가**(즉시 반영, 배포 불필요).
-- [ ] 원래 의뢰 **기사앱 GPS 실시간**(commit `2ad1a31`, origin/master 있음·미배포) — A 해결·재배포 시 함께.
+## 다음 할 일
+> 2026-05-19 게이트 ⓐⓑ 사용자 완료 확인 → master HEAD `f2aa1a2` 전체 prod 배포 완료(아래 완료 섹션, curl ⓐ~ⓔ 검증). 롤백본 `main.d85ec794.js` 대체. 잔여 배포 게이트 없음.
+- [ ] 🔑 카카오맵 비즈앱 심사 통과 후 Kakao 키 분리(백로그 참조 — 현 `58bf34` 임시 공유 유지)
 
 ## 백로그 / 검토 후보 (issues.md 기반)
 - [ ] `src/firestore.rules`와 루트 `firestore.rules` 일원화(중복 제거 또는 src 사본 삭제)
@@ -41,6 +40,7 @@
 - [ ] (폐기) #10 예약 정보 관리 — 통근형 확정으로 예약코드 폐기(PLANNING §4.6), 통근 모델 유지 시 개발 불필요
 
 ## 완료
+- [x] **2026-05-19 prod 배포 — master HEAD `f2aa1a2` 라이브** — 게이트 ⓐ(Firebase Auth 승인도메인)·ⓑ(Kakao prod 도메인) 사용자 완료 확인 후 이 D: PC에서 `CI=false npm run build`→`firebase deploy --only hosting`(hosting 단독, functions/rules/indexes 미배포). 라이브 내용 = ETA 목적지도착(55112aa)·`/p` 지도 흰화면 근본수정(1597097)·정리(82399d5)·PWA(f2aa1a2) + 누적 GPS heartbeat(2ad1a31) 등 — 롤백본 `main.d85ec794.js` 대체. 빌드 신규 경고 0(기존 no-unused-vars/exhaustive-deps만). **curl 검증 실측**: ⓐ `appkey=58bf34`(회귀 없음) ⓑ `rel="manifest"`·`apple-mobile-web-app-capable` 존재 ⓒ `firebase-messaging-sw.js` 200·`addEventListener("fetch"` 포함 ⓓ 번들 `main.1614fa6b.js`(≠d85ec794) ⓔ project `buslink-prod`. 회귀 0.
 - [x] **PWA 설치형 앱 지원 (`/p` EmployeeApp + 기사앱 DriverApp)** (2026-05-19) — iOS 메타 3종+theme-color `#0066FF`(`public/index.html`), `firebase-messaging-sw.js` no-op `fetch` 리스너만 추가(캐시·respondWith·workbox 無 — stale shell 방지), 신규 `src/components/InstallPrompt.js`(순수 프레젠테이션, beforeinstallprompt 안드 배너 / iOS Safari 공유→홈추가 안내 / standalone·appinstalled 영구비표시 / localStorage `buslink_pwa_prompt` 14일 스누즈, `Btn` 재사용·CSS var 토큰), EmployeeApp·DriverApp 최상위 SW 등록 1회+`<InstallPrompt/>` 마운트. 보존 로직 HEAD=NOW(추가만), 격리=명시 5파일(diff 35줄, App.js/PassengerApp/manifest/lib/ui 0줄), babel-preset-react-app parse OK. **배포 게이트 ⓐⓑⓒ(issues.md `[패턴]` 2026-05-19)는 그대로 잔존 — 빌드·배포는 게이트 확인 후.**
 - [x] **문제 B `/p` 지도 흰화면 근본수정 + localhost 실증 + DIAG-B 제거** (2026-05-19) — 원인=`public/index.html` 카카오 SDK `autoload=false` 누락 + `App.js` truthy 폴링(엔진/services 초기화 전 ready). 수정 3건: ①index.html `&autoload=false` ②App.js 게이팅 `window.kakao.maps.load(cb)` 콜백 only ③EmployeeApp HomeTab `<Map onCreate>` relayout 0-size 방어(영구 유지). 사용자 localhost 육안확인 통과(지도 렌더, DIAG-B `Map=true mapBox=1920x436`) → 임시 진단 DIAG-B 3곳(ref/effect·박스 JSX·컨테이너 ref) 전량 제거, babel parse-only OK, grep 0건. 격리=EmployeeApp.js+index.html+App.js(①②는 커밋 1597097 기반). **미배포 — 배포 게이트 ⓐⓑⓒ 잔존(issues.md `[패턴]` 2026-05-19)**
 - [x] **마지막 정류장=도착지일 때 ETA "목적지 도착" 류 대체 (`/p`·`/bus`)** (2026-05-19) — 탑승자 없는 회사 종점 대응. `EmployeeApp.js`(HomeTab 하단 ETA 패널)·`PassengerApp.js`(부유 ETA 카드) 단독 2파일. `isDestStop = stops.length>=2 && myStopIdx===stops.length-1` 게이트로 **표시 문자열·부가줄만 분기** — `etaStatus`/`calcETA`/`getMyETA`/`_busStopIdx`/`_distToMyStop`/`etaColor` 정의·onSnapshot·정렬 전부 불변, 비-도착지(첫~중간)는 픽셀 동일(모든 ternary가 원본 리터럴로 폴백). Employee: passed→"목적지 도착 완료"·부가줄 제거, arriving→"🏁 목적지 도착"/"하차해 주세요", approaching→"목적지까지 약 N분"+"목적지로 이동 중", passed 색상만 `--color-positive`(`etaDisplayColor` 신설, 원 `etaColor` 미변경), waiting 불변. Passenger: Pill "목적지", eta>1→"목적지까지 약 N분"/eta<=1→"🏁 목적지 도착"+하차 안내, `eta<=5` 빨강 유지, eta===null 불변, progressMeta "도착지". Babel parse-only OK(이 D: PC 빌드·배포 금지 준수), git diff 2파일 한정. 미배포(hosting 단독 승인 대기 — 주말 작업 PC에서 배포)
