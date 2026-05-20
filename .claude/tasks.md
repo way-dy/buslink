@@ -2,9 +2,9 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
-## 현재 상태 (2026-05-20 기사앱 설치팝업 BIP stash + 다중배차 선택 칩 배포 완료)
+## 현재 상태 (2026-05-20 기사앱 배차 모달 + DIAG-INSTALL 진단 배포 완료)
 > 이 저장소가 작업 정본. **어느 PC든** `git pull` + `.env.local`(↓부트스트랩)이면 빌드·배포 가능.
-> prod 라이브 = `main.6c626f25.js`(master HEAD `ac6fbf3`, 기사앱 BIP 글로벌 stash·다중배차 칩).
+> prod 라이브 = `main.cb747e1c.js`(master HEAD `e690b41`, 기사앱 배차 선택 모달 + InstallPrompt DIAG-INSTALL 임시 진단).
 
 ### git 원격
 - `origin/master` = 작업 정본(2026-05-20 main 4커밋 머지). 3월 폐갈래는 `origin/archive/remote-march-2026`(`f63321c`)에 영구 백업.
@@ -21,6 +21,7 @@
 - ※ Firebase Auth 승인 도메인은 기본 자동등록 — 조치 불필요(지난 "문제 A" 오진, issues.md).
 
 ## 다음 할 일
+- [ ] **DIAG-INSTALL 진단 결과 확인 후 제거** — 사용자 기기에서 설치팝업 미표시 원인 5후보(snoozed/standalone/engagement/in-app browser/SW idle) 확정 후 `grep "DIAG-INSTALL"` 로 InstallPrompt.js 통째 제거+재배포.
 - [x] **노선 그리기 편집 UX 개선·배포** (2026-05-20, `1849cce`/`main.7d89705e.js`) — 중간 삽입(⊕)·앞에 추가 모드·선택 기반 삭제·출발/도착 색·번호 라벨.
 - [x] **본 머지 prod 재배포** — 노선 그리기·routeProgress·PermissionGate·gps 콜드스타트 복구(2026-05-20 회귀 보고 → 머지로 복원). 이어그리기는 `openPathDraw`가 이미 `route.routePath`를 초기 로드해 자동 지원.
 - [ ] (선택) 운영 노선에 `routePath` 실제 그리기 — 안 그린 노선은 stops 직선 폴백(정상).
@@ -40,6 +41,7 @@
 - [ ] (보류·SaaS) #17 슈퍼관리자·빌링 / #16 멀티테넌트(dy001 하드코딩) / #15 SMS인증 — PLANNING §7·§8. (폐기) #10 예약관리(통근 확정)
 
 ## 완료 (요약·시간역순, 상세는 issues.md 패턴·redesign-log.md)
+- [x] **2026-05-20 기사앱 배차 선택 칩→모달(EmployeeApp 패턴) + DIAG-INSTALL 임시 진단** `e690b41`/`main.cb747e1c.js` — 2파일(+145/-44) src/pages/DriverApp.js·src/components/InstallPrompt.js. (1) DriverApp 가로 스크롤 칩 제거(스타일 8개 dispatchPicker/Label/Chips/Chip/ChipActive/ChipTime/ChipRoute/ChipVeh 전부 삭제), hero 카드 "오늘 배차" Pill 옆 작은 "🔄 배차 변경 (N건)" 버튼(>1 한정), 풀모달 오버레이 routePicker 패턴 차용(헤더·6초과 검색·카드 리스트·시간/구분/노선/차량/거래처/현재 뱃지·클릭=setActiveDispatchId+닫기). 신규 state pickerOpen/dispatchQuery + filteredDispatches derived. 신규 스타일 13키(dispatchChangeBtn + picker 12종). dispatches/activeDispatchId/loadDispatch/derived dispatch/loadStops/영속 useEffect/refreshToken/startGPS/createBoardingToken 0줄. 1건 이하 회귀 0. (2) InstallPrompt [DIAG-INSTALL] 임시 진단 박스(mode/BIP/standalone/snoozed/LS/SW/UA 7항목, 우상단 top:60·#0f0 mono·pointerEvents:none·zIndex 9999) — return null→return diagBox, 정상 렌더 `<>{diagBox}{기존UI}</>` 감쌈. 설치팝업 미표시 5후보(스누즈/standalone/engagement/인앱 브라우저/SW미등록) 한 번에 가시화. 다음 커밋에 grep 제거 예정. curl ⓐ `appkey=58bf34` ⓑ manifest/apple-meta/autoload=false 유지 ⓒ 새 번들 ≠ 옛 5해시(6c626f25/7d89705e/dc99419e/80d0f31e/1614fa6b/d85ec794) ⓓ 적용 실증: `DIAG-INSTALL` 1건 / `__buslinkDeferredBIP` 7건 / `buslink_driver_active_dispatch_` 2건 / `dispatchChipActive` 0건(옛 칩 제거) / `dispatchChangeBtn` 2건 / `pickerBack` 2건 / `pickerModal` 10건. parse-only OK. 신규 경고 0(boardingToken/nextStopDist L46/51은 HEAD 원본 잔존).
 - [x] **2026-05-20 기사앱 설치 가이드 BIP 글로벌 stash + 다중 배차 선택 칩** `ac6fbf3`/`main.6c626f25.js` — 3파일(+97/-7) src/index.js·components/InstallPrompt.js·pages/DriverApp.js. (1) `beforeinstallprompt`는 페이지 로드 직후 한 번 발생 → `index.js`에 `window.__buslinkDeferredBIP` 글로벌 stash, `InstallPrompt` mount 시 회수+비움. DriverApp early-return(loading/error)에도 `<InstallPrompt/>` 추가(안전망). 기사앱 Firebase Auth+driver/dispatch 로드 동안 마운트 지연으로 BIP 미캐치 → EmployeeApp(`/p`) 익명로그인만 동작하던 원인 제거. (2) `loadDispatch` `snap.docs[0]` 단일 → `dispatches[]` + `activeDispatchId` 칩 선택, derived dispatch 로 기존 참조 100% 호환, localStorage `buslink_driver_active_dispatch_{today}` 영속(재진입 복원), 활성 변경 시 stops 재로드 useEffect. 배차 1건 이하 회귀 0(picker 미표시). curl ⓐ `appkey=58bf34` ⓑ manifest/apple-meta/autoload=false 유지 ⓒ 새 번들 ≠ 옛 5해시 ⓓ 적용 실증: `__buslinkDeferredBIP` 6건 / `\\uc624\\ub298 \\ubc30\\ucc28`(오늘 배차) 6건 / `\\ub178\\uc120`(노선) 68건 / `\\ub178\\uc120?` 1건 / `buslink_driver_active_dispatch_` 2건 / `dispatches` 7건 / `routeId` 46건. 신규 경고 0.
 - [x] **2026-05-20 노선 그리기 편집 UX 개선·배포 — 중간 삽입(⊕)·앞에 추가·선택 삭제·3색 핀·번호 라벨** `1849cce`/`main.7d89705e.js` — AdminApp.js 단독 +78/-18(parse OK). 신규 state `selectedIdx`/`prependMode`, 신규 핸들러 `pathInsertPoint`/`pathPrependPoint`/`pathDeleteSelected`(기존 add/move/delete/undo/clear/seed/save 본체 불변). 정점 마커: 노란 별→SVG 핀 출발 `#00BF40`/도착 `#FF4D6A`/중간 `#0066FF`, 선택 시 검정 외곽선. CustomOverlayMap 번호/역할 라벨(출발/도착/#N). 세그먼트 중점 ⊕ 클릭=중간 삽입+자동 선택. 마커 onClick 즉시삭제→선택(오삭제 방지). curl ⓐ `appkey=58bf34` ⓑ manifest/apple-meta/autoload=false 유지 ⓒ 새 번들 ≠ 옛 4해시 ⓓ prod 번들에 색 코드 16건(`00BF40`×3+`FF4D6A`×13) 인라인 — 적용 실증. 신규 경고 0.
 - [x] **2026-05-20 머지 prod 배포 — 노선 그리기 회귀 복구·번들해시·curl 6항목 실측** — master HEAD `d06bb7f` 배포(`main.dc99419e.js`). curl ⓐ `appkey=58bf34` ⓑ manifest/apple-meta/autoload=false 전부 유지 ⓒ manifest 3종 200·scope `/`·`/p`·`/` ⓓ 아이콘 6종 200/올바른 ct ⓔ 새 번들 ≠ 옛 3해시(`d85ec794`/`1614fa6b`/`80d0f31e`) ⓕ 머지 실증: `정류장 순서대로 자동 연결`(\\u esc) 1건·`routePath` 10건·`노선`(\\ub178\\uc120) 67건. 신규 경고 0(기존 LoginApp/PartnerApp/AdminApp/DriverApp/EmployeeApp no-unused-vars만). 회귀 0.
