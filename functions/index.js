@@ -1,6 +1,8 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
+const { HOLIDAY_SET } = require("./holidays");
 admin.initializeApp();
 
 // ════════════════════════════════════════════════════════
@@ -193,6 +195,138 @@ exports.updateDriverPassword = onCall(async (request) => {
 // ════════════════════════════════════════════════════════
 // 기존 기사에 Auth 계정 생성
 // ════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+// 배차 일정 자동 펼침
+// dispatchSchedules → 매일 새벽 KST 00:30 향후 7일치 dispatches 생성 (멱등 ID)
+// 즉시 펼침: AdminApp 운영자가 onCall expandDispatchSchedulesNow 호출
+// ════════════════════════════════════════════════════════
+
+const LOOKAHEAD_DAYS = 7; // 오늘 + 6일 = 7일치(안전 마진)
+
+/**
+ * 'YYYY-MM-DD' string 을 KST 기준 yyyy-mm-dd / dayOfWeek(일=0~토=6) 로 반환.
+ * Date 객체를 직접 만들지 않고 KST formatter 로만 처리(서버 UTC 영향 차단).
+ */
+function ymdKST(d) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(d);
+}
+function dayOfWeekKST(dateStr) {
+  // dateStr 의 KST 자정으로 Date 만들기: ISO에 +09:00 부착하면 안전
+  const dt = new Date(`${dateStr}T00:00:00+09:00`);
+  return dt.getDay(); // 0=일 ... 6=토 (KST 자정 시각이라 ts 변환 후에도 동일)
+}
+
+/**
+ * 한 schedule + day 가 펼침 대상인지 판정.
+ */
+function shouldExpand(schedule, day) {
+  if (schedule.startDate && day < schedule.startDate) return false;
+  if (schedule.endDate && day > schedule.endDate) return false;
+  if (!Array.isArray(schedule.weekdays) || schedule.weekdays.length === 0) return false;
+  const dow = dayOfWeekKST(day);
+  if (!schedule.weekdays.includes(dow)) return false;
+  if (Array.isArray(schedule.excludeDates) && schedule.excludeDates.includes(day)) return false;
+  if (schedule.excludeHolidays !== false && HOLIDAY_SET.has(day)) return false;
+  return true;
+}
+
+/**
+ * 단일 회사 전체 schedule 펼침. 멱등 dispatchId = `${scheduleId}_${day}`.
+ * exists() 시 skip(일별 수정 보존). 결과 카운트 반환.
+ */
+async function expandCompany(companyId) {
+  const db = admin.firestore();
+  const today = new Date();
+  const days = [];
+  for (let i = 0; i < LOOKAHEAD_DAYS; i++) {
+    const d = new Date(today.getTime() + i * 86400000);
+    days.push(ymdKST(d));
+  }
+
+  const schedSnap = await db
+    .collection("companies").doc(companyId)
+    .collection("dispatchSchedules")
+    .where("active", "==", true)
+    .get();
+
+  let created = 0, skipped = 0;
+  for (const sdoc of schedSnap.docs) {
+    const schedule = sdoc.data();
+    const scheduleId = sdoc.id;
+    for (const day of days) {
+      if (!shouldExpand(schedule, day)) continue;
+      const dispatchId = `${scheduleId}_${day}`;
+      const dispRef = db
+        .collection("companies").doc(companyId)
+        .collection("dispatches").doc(day)
+        .collection("list").doc(dispatchId);
+      const existing = await dispRef.get();
+      if (existing.exists) { skipped++; continue; }
+      await dispRef.set({
+        driverId: schedule.driverId || "",
+        driverName: schedule.driverName || "",
+        routeId: schedule.routeId || "",
+        routeName: schedule.routeName || "",
+        vehicleNo: schedule.vehicleNo || "",
+        vehicleId: schedule.vehicleId || "",
+        departTime: schedule.departTime || "",
+        date: day,
+        scheduleId,
+        source: "schedule",
+        createdAt: new Date().toISOString(),
+      });
+      created++;
+    }
+  }
+  return { companyId, schedules: schedSnap.size, created, skipped };
+}
+
+/**
+ * 전체 회사 펼침. companies 컬렉션 순회(현재 dy001 1개지만 멀티테넌트 대비).
+ */
+async function expandAllCompanies() {
+  const companiesSnap = await admin.firestore().collection("companies").get();
+  const results = [];
+  for (const c of companiesSnap.docs) {
+    try {
+      results.push(await expandCompany(c.id));
+    } catch (e) {
+      console.error(`[펼침] 회사 ${c.id} 오류:`, e.message);
+      results.push({ companyId: c.id, error: e.message });
+    }
+  }
+  return results;
+}
+
+// 매일 KST 00:30 자동 펼침
+exports.expandDispatchSchedules = onSchedule(
+  {
+    schedule: "30 0 * * *",
+    timeZone: "Asia/Seoul",
+    region: "us-central1",
+  },
+  async () => {
+    console.log("[배차펼침] 자동 트리거 시작");
+    const results = await expandAllCompanies();
+    console.log("[배차펼침] 완료:", JSON.stringify(results));
+  }
+);
+
+// 운영자 즉시 펼침 — AdminApp "지금 펼치기" 버튼
+exports.expandDispatchSchedulesNow = onCall(async (request) => {
+  await assertAdmin(request);
+  const { companyId } = request.data || {};
+  if (!companyId) throw new HttpsError("invalid-argument", "companyId가 필요합니다");
+  console.log(`[배차펼침] 즉시 트리거 회사=${companyId} 호출자=${request.auth.uid}`);
+  try {
+    const result = await expandCompany(companyId);
+    return { success: true, ...result };
+  } catch (e) {
+    console.error("[배차펼침] 즉시 오류:", e.message);
+    throw new HttpsError("internal", e.message);
+  }
+});
+
 exports.createDriverAuth = onCall(async (request) => {
   await assertAdmin(request);
   const { companyId, driverId, empNo, name, pin } = request.data;

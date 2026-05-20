@@ -48,6 +48,12 @@ service cloud.firestore {
         }
       }
 
+      // ─── 배차 일정 (반복 패턴 정본 — Cloud Function 이 dispatches 로 펼침) ─
+      match /dispatchSchedules/{scheduleId} {
+        allow read:  if isAuth();
+        allow write: if isAdmin(companyId);
+      }
+
       match /dispatches/{date}/list/{dispatchId} {
         allow read: if isAuth() && (isAdmin(companyId) || isDriverOf(companyId));
         // 관리자: 전체 write 가능(기존 동작 유지)

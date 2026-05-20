@@ -20,6 +20,8 @@
 
 ## 주의할 패턴
 
+- `[패턴]` **배차 일정 자동 펼침**(2026-05-20): `dispatchSchedules`(반복 패턴 정본) + CF `expandDispatchSchedules`(onSchedule `30 0 * * *` KST·`us-central1`)가 향후 7일치 dispatches 펼침 + `expandDispatchSchedulesNow`(onCall) 즉시 트리거. **멱등 dispatchId=`${scheduleId}_${day}`** → exists() skip → 일별 수동 수정·기사교체 영구 보존. 한국 공휴일=정적 배열 `functions/holidays.js`+`src/lib/holidays.js`(2026~2028, **매년 갱신 책임=운영자**, 양쪽 동기화). 자연흐름: 일정 변경 시 이미 펼친 미래 dispatch는 그대로 → 다음 새벽이 새 조건으로 보충. Cloud Scheduler API 첫 배포 시 자동 enable(`cloudscheduler.googleapis.com`). 회사별 휴무일=`excludeDates:string[]`. weekdays는 일=0~토=6.
+
 - `[패턴]` **정류장 진입시각 음수=입력오류**(2026-05-20): AdminApp 정류장 폼은 HH:MM 입력→`offsetMinFromPlanTime(departTime,planned)` 변환 저장. **`planned<depart`이면 null 반환·저장 거부**(자정 넘김 보정 폐기 — 통근버스 모델). 자정 보정을 두면 1번 정류장(06:50) < 노선 departTime(06:55) → `-5분`이 `+1435분`으로 폭증해 카드/승객앱 표시 깨짐(과천라인 실회귀, 2026-05-20). 첫 정류장은 노선 출발시각과 동일해야 0분 — `openStopAdd`가 `stops.length===0 && route.departTime` 시 `plannedTime`을 `route.departTime`으로 prefill. 야간/자정 넘김 노선이 필요해지면 별도 모델 (예: `dispatches.departTime` per dispatch + crossesMidnight 플래그)로 처리.
 
 - `[패턴]` **정류장 계획·예상시각**(2026-05-20): stops `offsetMin`(분) 옵션 + `dispatches/.../list/{id}.stopArrivals.{stopId}={actualAt:serverTimestamp,plannedAt,delaySec}` 누적기록. 공용 헬퍼=`src/lib/stopSchedule.js` 순수함수(`planTimeForStop/computeStopEstimates/formatDelayLabel`, Firebase import 금지). 알고리즘: ① arrived(실측있음) → actual ② 미통과 정류장 = 마지막 통과 정류장의 누적지연(actual-planned) 적용(`plan+delay`) ③ '다음 1개' 정류장만 GPS 잔여거리/속도와 50:50 가중평균(`gps`) ④ `offsetMin` 미설정=`status='unplanned'`, 페이지가 calcETA 폴백. 표시 임계 ±2분=정시·≥3분=지연(danger)·≤-3분=조기(warn). 기사 도착감지(`onStopReached`)는 첫 도착만 `updateDoc({[`stopArrivals.${stopId}`]:...})` 멱등 가드. Firestore 룰: `dispatches` update를 admin 전체 OR (기사 본인+stopArrivals 필드 한정)로 좁힘.

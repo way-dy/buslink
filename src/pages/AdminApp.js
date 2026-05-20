@@ -16,8 +16,8 @@ import { planTimeForStop, offsetMinFromPlanTime } from "../lib/stopSchedule";
 // 리디자인 3단계 — 실시간 관제(MapTab) 라이트 리스킨 전용. 타 탭 미사용.
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 
-const TABS = ["대시보드", "실시간 관제", "배차 관리", "노선 관리", "기사 관리", "차량 관리", "시뮬레이터", "운행 이력", "협력사 관리", "공지 발송"];
-const TAB_ICONS = ["grid", "pin", "flag", "route", "user", "bus", "play", "clock", "globe", "bell"];
+const TABS = ["대시보드", "실시간 관제", "배차 관리", "배차 일정", "노선 관리", "기사 관리", "차량 관리", "시뮬레이터", "운행 이력", "협력사 관리", "공지 발송"];
+const TAB_ICONS = ["grid", "pin", "flag", "calendar", "route", "user", "bus", "play", "clock", "globe", "bell"];
 const functions = getFunctions(undefined, "us-central1");
 const getToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 
@@ -137,13 +137,14 @@ export default function AdminApp({ user, companyId }) {
         {tab === 0 && <DashboardTab companyId={companyId} drivers={drivers} vehicles={vehicles} onNav={setTab} />}
         {tab === 1 && <MapTab companyId={companyId} />}
         {tab === 2 && <DispatchTab companyId={companyId} vehicles={vehicles} drivers={drivers} />}
-        {tab === 3 && <RoutesTab companyId={companyId} />}
-        {tab === 4 && <DriverTab companyId={companyId} vehicles={vehicles} />}
-        {tab === 5 && <VehicleTab companyId={companyId} vehicles={vehicles} />}
-        {tab === 6 && <SimulatorTab companyId={companyId} vehicles={vehicles} drivers={drivers} />}
-        {tab === 7 && <HistoryTab companyId={companyId} vehicles={vehicles} />}
-        {tab === 8 && <PartnerTab companyId={companyId} />}
-        {tab === 9 && <NoticeTab companyId={companyId} />}
+        {tab === 3 && <DispatchScheduleTab companyId={companyId} vehicles={vehicles} drivers={drivers} />}
+        {tab === 4 && <RoutesTab companyId={companyId} />}
+        {tab === 5 && <DriverTab companyId={companyId} vehicles={vehicles} />}
+        {tab === 6 && <VehicleTab companyId={companyId} vehicles={vehicles} />}
+        {tab === 7 && <SimulatorTab companyId={companyId} vehicles={vehicles} drivers={drivers} />}
+        {tab === 8 && <HistoryTab companyId={companyId} vehicles={vehicles} />}
+        {tab === 9 && <PartnerTab companyId={companyId} />}
+        {tab === 10 && <NoticeTab companyId={companyId} />}
       </div>
     </div>
   );
@@ -242,7 +243,7 @@ function DashboardTab({ companyId, drivers, vehicles, onNav }) {
           <div style={{ background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:12, overflow:"hidden", boxShadow:"var(--shadow-emphasize)" }}>
             <div style={{ padding:"14px 18px", borderBottom:"1px solid var(--color-line)", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <span style={{ fontWeight:700, color:"var(--color-label)" }}>기사 현황</span>
-              <button style={S.editBtn} onClick={() => onNav(4)}>기사 관리</button>
+              <button style={S.editBtn} onClick={() => onNav(5)}>기사 관리</button>
             </div>
             {drivers.length === 0 ? (
               <div style={S.empty}>등록된 기사가 없습니다</div>
@@ -634,7 +635,363 @@ function DispatchTab({ companyId, vehicles, drivers }) {
   );
 }
 
-// 탭3: 노선 관리
+// 탭3: 배차 일정 (반복 패턴 정본 — Cloud Function 이 매일 새벽 dispatches 로 펼침)
+// ═══════════════════════════════════════════════════════
+const WEEKDAY_LABELS = ["일","월","화","수","목","금","토"];
+const blankScheduleForm = () => ({
+  name:"", routeId:"", routeName:"", driverId:"", driverName:"",
+  vehicleId:"", vehicleNo:"", departTime:"",
+  startDate: new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul'}).format(new Date()),
+  endDate:"", endOpen:true,
+  weekdays:[1,2,3,4,5],
+  excludeDates:[], excludeInput:"",
+  excludeHolidays:true, active:true,
+});
+
+function DispatchScheduleTab({ companyId, vehicles, drivers }) {
+  const [schedules, setSchedules] = useState([]);
+  const [routes, setRoutes] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [form, setForm] = useState(blankScheduleForm());
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!companyId) return;
+    return onSnapshot(collection(db, "companies", companyId, "dispatchSchedules"), snap => {
+      setSchedules(snap.docs.map(d => ({ id:d.id, ...d.data() })));
+    });
+  }, [companyId]);
+
+  useEffect(() => {
+    if (!companyId) return;
+    return onSnapshot(collection(db, "companies", companyId, "routes"), snap => {
+      setRoutes(snap.docs.map(d => ({ id:d.id, ...d.data() })));
+    });
+  }, [companyId]);
+
+  const openAdd = () => { setEditId(null); setForm(blankScheduleForm()); setShowForm(true); };
+  const openEdit = (s) => {
+    setEditId(s.id);
+    setForm({
+      name: s.name || "",
+      routeId: s.routeId || "", routeName: s.routeName || "",
+      driverId: s.driverId || "", driverName: s.driverName || "",
+      vehicleId: s.vehicleId || "", vehicleNo: s.vehicleNo || "",
+      departTime: s.departTime || "",
+      startDate: s.startDate || "",
+      endDate: s.endDate || "",
+      endOpen: !s.endDate,
+      weekdays: Array.isArray(s.weekdays) ? [...s.weekdays].sort((a,b)=>a-b) : [1,2,3,4,5],
+      excludeDates: Array.isArray(s.excludeDates) ? [...s.excludeDates].sort() : [],
+      excludeInput: "",
+      excludeHolidays: s.excludeHolidays !== false,
+      active: s.active !== false,
+    });
+    setShowForm(true);
+  };
+
+  const handleRouteSelect = (routeId) => {
+    if (!routeId) { setForm(f => ({...f, routeId:"", routeName:"", departTime:""})); return; }
+    const r = routes.find(x => x.id === routeId);
+    setForm(f => ({...f, routeId, routeName:r?.name||"", departTime:f.departTime || r?.departTime || ""}));
+  };
+  const handleDriverSelect = (driverId) => {
+    if (!driverId) { setForm(f => ({...f, driverId:"", driverName:""})); return; }
+    const d = drivers.find(x => x.id === driverId);
+    setForm(f => {
+      const next = {...f, driverId, driverName: d?.name || ""};
+      // 기사에 차량 매핑 있으면 prefill (운영자가 수정 가능)
+      if (d?.vehicleId && !f.vehicleId) {
+        const v = vehicles.find(x => x.id === d.vehicleId);
+        next.vehicleId = d.vehicleId;
+        next.vehicleNo = v?.plateNo || d.vehicleNo || "";
+      }
+      return next;
+    });
+  };
+  const handleVehicleSelect = (vehicleId) => {
+    if (!vehicleId) { setForm(f => ({...f, vehicleId:"", vehicleNo:""})); return; }
+    const v = vehicles.find(x => x.id === vehicleId);
+    setForm(f => ({...f, vehicleId, vehicleNo: v?.plateNo || ""}));
+  };
+
+  const toggleWeekday = (dow) => {
+    setForm(f => {
+      const has = f.weekdays.includes(dow);
+      const next = has ? f.weekdays.filter(x => x !== dow) : [...f.weekdays, dow];
+      return {...f, weekdays: next.sort((a,b)=>a-b)};
+    });
+  };
+  const setWeekdaysPreset = (preset) => {
+    setForm(f => ({...f, weekdays: preset.slice().sort((a,b)=>a-b)}));
+  };
+
+  const addExcludeDate = () => {
+    const v = (form.excludeInput || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return alert("YYYY-MM-DD 형식으로 입력해주세요");
+    if (form.excludeDates.includes(v)) { setForm(f => ({...f, excludeInput:""})); return; }
+    setForm(f => ({...f, excludeDates:[...f.excludeDates, v].sort(), excludeInput:""}));
+  };
+  const removeExcludeDate = (v) => {
+    setForm(f => ({...f, excludeDates: f.excludeDates.filter(x => x !== v)}));
+  };
+
+  const handleSave = async () => {
+    if (!form.name?.trim()) return alert("일정 이름을 입력해주세요");
+    if (!form.routeId && !form.routeName?.trim()) return alert("노선을 선택해주세요");
+    if (!form.driverId) return alert("기사를 선택해주세요");
+    if (!form.departTime) return alert("출발 시각을 입력해주세요");
+    if (!form.startDate) return alert("시작일을 입력해주세요");
+    if (form.weekdays.length === 0) return alert("운행 요일을 1개 이상 선택해주세요");
+    if (!form.endOpen && form.endDate && form.endDate < form.startDate) return alert("종료일은 시작일 이후여야 합니다");
+
+    setLoading(true);
+    const payload = {
+      name: form.name.trim(),
+      routeId: form.routeId,
+      routeName: form.routeName,
+      driverId: form.driverId,
+      driverName: form.driverName,
+      vehicleId: form.vehicleId,
+      vehicleNo: form.vehicleNo,
+      departTime: form.departTime,
+      startDate: form.startDate,
+      endDate: form.endOpen ? null : (form.endDate || null),
+      weekdays: form.weekdays,
+      excludeDates: form.excludeDates,
+      excludeHolidays: !!form.excludeHolidays,
+      active: !!form.active,
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      if (editId) {
+        await updateDoc(doc(db, "companies", companyId, "dispatchSchedules", editId), payload);
+      } else {
+        await addDoc(collection(db, "companies", companyId, "dispatchSchedules"), {
+          ...payload, createdAt: new Date().toISOString(),
+        });
+      }
+      setShowForm(false);
+    } catch (e) {
+      alert("저장 오류: " + e.message);
+    }
+    setLoading(false);
+  };
+
+  const handleDelete = async (s) => {
+    if (!window.confirm(`일정 "${s.name}"을(를) 삭제하시겠습니까?\n\n※ 이미 생성된 미래 배차(dispatches)는 그대로 유지됩니다. 필요시 배차 관리 탭에서 수동 삭제하세요.`)) return;
+    try {
+      await deleteDoc(doc(db, "companies", companyId, "dispatchSchedules", s.id));
+    } catch (e) {
+      alert("삭제 오류: " + e.message);
+    }
+  };
+
+  const handleToggleActive = async (s) => {
+    try {
+      await updateDoc(doc(db, "companies", companyId, "dispatchSchedules", s.id), {
+        active: !s.active, updatedAt: new Date().toISOString(),
+      });
+    } catch (e) {
+      alert("토글 오류: " + e.message);
+    }
+  };
+
+  const handleExpandNow = async () => {
+    if (!window.confirm("지금 즉시 향후 7일치 배차를 펼치시겠습니까?\n\n이미 펼쳐진 배차는 건너뜁니다.")) return;
+    setLoading(true);
+    try {
+      const callable = httpsCallable(functions, "expandDispatchSchedulesNow");
+      const res = await callable({ companyId });
+      const r = res.data || {};
+      alert(`펼침 완료\n· 일정 ${r.schedules || 0}건 검토\n· 신규 생성 ${r.created || 0}건\n· 이미 존재 ${r.skipped || 0}건`);
+    } catch (e) {
+      alert("펼침 오류: " + (e.message || e.code));
+    }
+    setLoading(false);
+  };
+
+  const weekdaysLabel = (arr) => {
+    if (!Array.isArray(arr) || arr.length === 0) return "–";
+    const sorted = [...arr].sort((a,b)=>a-b);
+    if (sorted.length === 5 && sorted.every((v,i) => v === i+1)) return "평일";
+    if (sorted.length === 2 && sorted[0] === 0 && sorted[1] === 6) return "주말";
+    if (sorted.length === 7) return "매일";
+    return sorted.map(d => WEEKDAY_LABELS[d]).join(",");
+  };
+  const periodLabel = (s) => `${s.startDate || "–"} ~ ${s.endDate || "무기한"}`;
+
+  return (
+    <div style={S.panel}>
+      <div style={S.panelHeader}>
+        <span style={{ fontSize:16, fontWeight:700 }}>배차 일정 (반복 패턴)</span>
+        <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+          <span style={{ fontSize:11, color:"var(--color-label-alt)" }}>매일 새벽 00:30 자동 펼침 · 향후 7일치</span>
+          <button style={{...S.editBtn, fontSize:12, padding:"6px 10px"}} onClick={handleExpandNow} disabled={loading}>지금 펼치기</button>
+          <button style={S.addBtn} onClick={openAdd}>+ 일정 등록</button>
+        </div>
+      </div>
+      <div style={S.tableWrap}>
+        <table style={S.table}>
+          <thead><tr>{["이름","노선","기사","차량","출발","요일","기간","제외","상태"].map(h=><th key={h} style={S.th}>{h}</th>)}<th style={S.th}>관리</th></tr></thead>
+          <tbody>
+            {schedules.length === 0 ? <tr><td colSpan={10} style={{...S.td,textAlign:"center",color:"var(--color-label-alt)"}}>등록된 배차 일정이 없습니다 — "+ 일정 등록"으로 시작하세요</td></tr>
+            : [...schedules].sort((a,b)=>(a.name||"").localeCompare(b.name||"")).map(s => (
+              <tr key={s.id} style={S.tr}>
+                <td style={{...S.td, fontWeight:600}}>{s.name || "(이름 없음)"}</td>
+                <td style={{...S.td, color:"var(--color-primary)", fontWeight:600}}>{s.routeName || "–"}</td>
+                <td style={S.td}>{s.driverName || "–"}</td>
+                <td style={S.td}>{s.vehicleNo || "–"}</td>
+                <td style={S.td}><span style={S.timeBadge}>{s.departTime || "–"}</span></td>
+                <td style={S.td}>{weekdaysLabel(s.weekdays)}</td>
+                <td style={{...S.td, fontSize:11, color:"var(--color-label-mute)"}}>{periodLabel(s)}</td>
+                <td style={{...S.td, fontSize:11, color:"var(--color-label-mute)"}}>
+                  {s.excludeHolidays !== false ? "공휴일✓" : "공휴일✗"} · 휴무 {Array.isArray(s.excludeDates) ? s.excludeDates.length : 0}일
+                </td>
+                <td style={S.td}>
+                  <button
+                    style={{
+                      ...S.editBtn,
+                      background: s.active !== false ? "#E6F7EB" : "var(--color-bg-soft)",
+                      borderColor: s.active !== false ? "#B7E6C7" : "var(--color-line)",
+                      color: s.active !== false ? "#007A29" : "var(--color-label-mute)",
+                    }}
+                    onClick={()=>handleToggleActive(s)}>
+                    {s.active !== false ? "활성" : "정지"}
+                  </button>
+                </td>
+                <td style={S.td}>
+                  <button style={S.editBtn} onClick={()=>openEdit(s)}>수정</button>
+                  <button style={S.delBtn} onClick={()=>handleDelete(s)}>삭제</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {showForm && (
+        <div style={S.overlay}><div style={S.modal}>
+          <div style={S.modalTitle}>{editId?"배차 일정 수정":"배차 일정 등록"}</div>
+
+          <label style={S.label}>일정 이름 *</label>
+          <input style={S.input} placeholder="예) 과천라인 평일 출근" value={form.name}
+                 onChange={e=>setForm({...form, name:e.target.value})} />
+
+          <label style={S.label}>노선 *</label>
+          <select style={S.input} value={form.routeId} onChange={e=>handleRouteSelect(e.target.value)}>
+            <option value="">노선 선택</option>
+            {routes.map(r => <option key={r.id} value={r.id}>[{r.shift}] {r.name} ({r.departTime})</option>)}
+          </select>
+
+          <label style={S.label}>기사 *</label>
+          <select style={S.input} value={form.driverId} onChange={e=>handleDriverSelect(e.target.value)}>
+            <option value="">기사 선택</option>
+            {drivers.map(d => <option key={d.id} value={d.id}>{d.name} ({d.empNo??d.id})</option>)}
+          </select>
+
+          <label style={S.label}>차량 (선택)</label>
+          <select style={S.input} value={form.vehicleId} onChange={e=>handleVehicleSelect(e.target.value)}>
+            <option value="">차량 선택</option>
+            {vehicles.map(v => <option key={v.id} value={v.id}>{v.plateNo} ({v.model||v.id})</option>)}
+          </select>
+
+          <label style={S.label}>출발 시각 *</label>
+          <input style={S.input} type="time" value={form.departTime}
+                 onChange={e=>setForm({...form, departTime:e.target.value})} />
+
+          <div style={{display:"flex", gap:8}}>
+            <div style={{flex:1}}>
+              <label style={S.label}>시작일 *</label>
+              <input style={S.input} type="date" value={form.startDate}
+                     onChange={e=>setForm({...form, startDate:e.target.value})} />
+            </div>
+            <div style={{flex:1}}>
+              <label style={S.label}>종료일</label>
+              <input style={S.input} type="date" value={form.endDate} disabled={form.endOpen}
+                     onChange={e=>setForm({...form, endDate:e.target.value})} />
+              <label style={{display:"flex", alignItems:"center", gap:6, marginTop:6, fontSize:12, color:"var(--color-label-mute)"}}>
+                <input type="checkbox" checked={form.endOpen}
+                       onChange={e=>setForm({...form, endOpen:e.target.checked, endDate: e.target.checked ? "" : form.endDate})} />
+                무기한
+              </label>
+            </div>
+          </div>
+
+          <label style={S.label}>운행 요일 *</label>
+          <div style={{display:"flex", gap:6, flexWrap:"wrap"}}>
+            {WEEKDAY_LABELS.map((label, dow) => (
+              <button key={dow} type="button"
+                style={{
+                  ...S.editBtn,
+                  padding:"6px 12px", fontSize:12,
+                  background: form.weekdays.includes(dow) ? "var(--color-primary)" : "var(--color-bg-soft)",
+                  color: form.weekdays.includes(dow) ? "#fff" : "var(--color-label-mute)",
+                  borderColor: form.weekdays.includes(dow) ? "var(--color-primary)" : "var(--color-line)",
+                  fontWeight:700,
+                }}
+                onClick={()=>toggleWeekday(dow)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div style={{display:"flex", gap:6, marginTop:6}}>
+            <button type="button" style={{...S.editBtn, fontSize:11}} onClick={()=>setWeekdaysPreset([1,2,3,4,5])}>평일만</button>
+            <button type="button" style={{...S.editBtn, fontSize:11}} onClick={()=>setWeekdaysPreset([0,6])}>주말만</button>
+            <button type="button" style={{...S.editBtn, fontSize:11}} onClick={()=>setWeekdaysPreset([0,1,2,3,4,5,6])}>매일</button>
+          </div>
+
+          <label style={S.label}>휴무일 (회사별 — 운행 안 함)</label>
+          <div style={{display:"flex", gap:6}}>
+            <input style={{...S.input, flex:1}} type="date" value={form.excludeInput}
+                   onChange={e=>setForm({...form, excludeInput:e.target.value})} />
+            <button type="button" style={S.addBtn} onClick={addExcludeDate}>추가</button>
+          </div>
+          {form.excludeDates.length > 0 && (
+            <div style={{display:"flex", flexWrap:"wrap", gap:6, marginTop:6}}>
+              {form.excludeDates.map(d => (
+                <span key={d} style={{
+                  display:"inline-flex", alignItems:"center", gap:6,
+                  background:"var(--color-bg-soft)", border:"1px solid var(--color-line)",
+                  borderRadius:14, padding:"3px 10px", fontSize:11, color:"var(--color-label-mute)",
+                }}>
+                  {d}
+                  <button type="button" onClick={()=>removeExcludeDate(d)}
+                    style={{background:"none", border:"none", color:"var(--color-destructive)", cursor:"pointer", fontSize:14, lineHeight:1, padding:0}}>×</button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          <label style={{display:"flex", alignItems:"center", gap:8, marginTop:10, fontSize:13, color:"var(--color-label)"}}>
+            <input type="checkbox" checked={form.excludeHolidays}
+                   onChange={e=>setForm({...form, excludeHolidays:e.target.checked})} />
+            한국 공휴일 자동 제외 (2026~2028 정적 — 매년 갱신 필요)
+          </label>
+
+          <label style={{display:"flex", alignItems:"center", gap:8, marginTop:4, fontSize:13, color:"var(--color-label)"}}>
+            <input type="checkbox" checked={form.active}
+                   onChange={e=>setForm({...form, active:e.target.checked})} />
+            활성 (펼침 대상)
+          </label>
+
+          <div style={{display:"flex", gap:8, marginTop:12}}>
+            <button style={{...S.addBtn, flex:1}} onClick={handleSave} disabled={loading}>{loading?"저장 중...":"저장"}</button>
+            <button style={{...S.closeBtn, flex:1}} onClick={()=>setShowForm(false)} disabled={loading}>취소</button>
+          </div>
+          {editId && (
+            <div style={{fontSize:11, color:"var(--color-label-alt)", marginTop:4, lineHeight:1.5}}>
+              ※ 변경사항은 다음 새벽 펼침부터 반영. 이미 펼쳐진 미래 배차는 그대로 유지(필요시 배차 관리에서 개별 수정).
+            </div>
+          )}
+        </div></div>
+      )}
+    </div>
+  );
+}
+
+// 탭4: 노선 관리
 // ═══════════════════════════════════════════════════════
 function RoutesTab({ companyId }) {
   const [routes, setRoutes] = useState([]);
