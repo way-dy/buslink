@@ -57,6 +57,19 @@ export default function DriverApp({ companyId: propCompanyId }) {
   const [companyId, setCompanyId] = useState(propCompanyId || "dy001");
   const [gpsStatus, setGpsStatus] = useState("");   // GPS 신호 안내 ("" | "확보중" | "권한")
   const wakeLockRef = useRef(null);
+  const currentStopRowRef = useRef(null);
+
+  // 현재 정류장 변경 시 리스트에서 자동 스크롤(중앙 정렬) — 운행 시작 전/리스트 없음/이미 보임 케이스는 skip
+  useEffect(() => {
+    if (currentStopIdx < 0) return;
+    const el = currentStopRowRef.current;
+    if (!el || typeof el.scrollIntoView !== "function") return;
+    // 약간의 지연 — 카드 배경 전환 직후 위치 안정 후 스크롤
+    const t = setTimeout(() => {
+      try { el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch { /* 일부 구형 브라우저 무해 */ }
+    }, 80);
+    return () => clearTimeout(t);
+  }, [currentStopIdx]);
 
   // 알림 권한 요청
   useEffect(() => {
@@ -570,19 +583,39 @@ export default function DriverApp({ companyId: propCompanyId }) {
                   : isCurrent ? '1px solid var(--color-primary)'
                   : '1px solid transparent';
                 return (
-                  <div key={stop.id} style={{
-                    ...S.stopRow,
-                    background: rowBg, border: rowBorder,
-                  }}>
-                    <div style={{
-                      ...S.stopDot,
-                      background: arrived ? "var(--color-positive)"
-                        : isCurrent ? "var(--color-primary)"
-                        : isDone ? "var(--color-primary)" : "#fff",
-                      border: `3px solid ${arrived ? "var(--color-positive)"
-                        : (isCurrent || isDone) ? "var(--color-primary)"
-                        : "var(--color-atomic-coolNeutral-90)"}`,
-                    }} />
+                  <div key={stop.id}
+                    ref={isCurrent ? currentStopRowRef : null}
+                    style={{
+                      ...S.stopRow,
+                      background: rowBg, border: rowBorder,
+                      // 현재 정류장 글로우 — 어르신 기사 시인성
+                      boxShadow: isCurrent ? "0 0 0 4px rgba(0,102,255,0.18), 0 4px 14px rgba(0,102,255,0.20)" : "none",
+                      transition: "box-shadow .25s ease, background .25s ease",
+                      // 현재 정류장은 살짝 padding 더(더 큰 카드 느낌)
+                      padding: isCurrent ? "18px 14px" : "14px 10px",
+                    }}>
+                    {/* 현재 정류장 dot은 펄스 ring으로 강조(buspulse 재사용) */}
+                    <div style={{ position: "relative", flexShrink: 0 }}>
+                      <div style={{
+                        ...S.stopDot,
+                        // 현재 정류장은 한 단계 더 큼
+                        width: isCurrent ? 18 : 14, height: isCurrent ? 18 : 14,
+                        background: arrived ? "var(--color-positive)"
+                          : isCurrent ? "var(--color-primary)"
+                          : isDone ? "var(--color-primary)" : "#fff",
+                        border: `3px solid ${arrived ? "var(--color-positive)"
+                          : (isCurrent || isDone) ? "var(--color-primary)"
+                          : "var(--color-atomic-coolNeutral-90)"}`,
+                      }} />
+                      {isCurrent && (
+                        <div style={{
+                          position: "absolute", inset: -3,
+                          borderRadius: "50%", background: "var(--color-primary)",
+                          animation: "buspulse 2s ease-out infinite",
+                          pointerEvents: "none",
+                        }} />
+                      )}
+                    </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       {/* 정류장 이름 — 통과한 정류장(도착 제외)은 흐리되, 시각·지연 정보는 또렷 유지 */}
                       <div style={{
