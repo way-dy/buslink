@@ -37,6 +37,7 @@
 - [ ] (보류·SaaS) #17 슈퍼관리자·빌링 / #16 멀티테넌트(dy001 하드코딩) / #15 SMS. (폐기) #10 예약관리
 
 ## 완료 (최근·시간역순. 옛 누적은 @.claude/tasks-log.md)
+- [x] **2026-05-20** 정류장 진입시각 입력 UX — 오프셋(분) → **시각(HH:MM) 직접 입력**으로 변경 (`main.0a94e306.js`). AdminApp 정류장 폼: `type="time"` 입력칸 + 미리보기를 "→ 노선 출발 07:00 기준 +25분 후"로 반전(절대시각은 카드/승객앱에 이미 표시 중). 저장 시 `offsetMinFromPlanTime(departTime, plannedTime)` 헬퍼로 분 변환(자정 넘김 +24h 보정). 노선 `departTime` 미설정/형식오류 시 저장 거부. 편집 진입은 저장된 `offsetMin` → HH:MM 역변환 prefill. 스키마 무변경(`offsetMin`이 정본). 운영자가 시각표 형태로 직접 입력 가능.
 - [x] **2026-05-20** 정류장 계획·예상시각 시스템 prod 배포 (`b122941`/`main.1cef341f.js` + `firestore.rules` 룰 동시 반영) — stops `offsetMin`(분) + `dispatches.stopArrivals` + `lib/stopSchedule.js`(공용 헬퍼). AdminApp 정류장 폼/카드에 오프셋 입력·계획시각 표시, EmployeeApp(/p) 홈 myStop 패널 + 노선 모달 정류장 목록 시간 표시, PassengerApp(/bus) 정류장 리스트 계획·예상·지연, DriverApp 히어로 다음정류장 배너 + 정류장 리스트 계획·도착·지연 라벨. 도착감지 시 dispatch `stopArrivals.{stopId}` 멱등 기록(기사). Firestore 규칙: dispatches update를 driver 본인+stopArrivals 필드 한정 update 허용으로 좁힘. 기존 데이터(offsetMin 미설정) 무파괴(calcETA/노선순서 폴백). curl 검증: 라이브 `appkey=58bf34`+`main.1cef341f.js` 200. 사용자 검증: 노선에 offsetMin 입력 후 GPS 100m 진입으로 `stopArrivals.{stopId}` 생성·DriverApp/Employee/Passenger 라벨 반영 + AdminApp 배차 CRUD 회귀 확인 잔여.
 - [x] **2026-05-20** 설치팝업 스누즈 14→3일 단축 + DIAG-INSTALL 제거 (`da24224`/`main.f0dd8be3.js`) — 사용자 LS `dismissedAt` 14일 차단 확정·종결.
 - [x] **2026-05-20** 기사앱 배차 선택 칩→모달(EmployeeApp 패턴) + DIAG-INSTALL 임시진단 (`e690b41`/`main.cb747e1c.js`).

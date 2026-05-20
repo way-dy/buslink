@@ -12,7 +12,7 @@ import { sendGPS } from "../lib/gps";
 import { createPartnerCode, getBoardingUrl } from "../lib/partner";
 import { sendNotice } from "../lib/notifications";
 import { compressImageFile } from "../lib/image";
-import { planTimeForStop } from "../lib/stopSchedule";
+import { planTimeForStop, offsetMinFromPlanTime } from "../lib/stopSchedule";
 // 리디자인 3단계 — 실시간 관제(MapTab) 라이트 리스킨 전용. 타 탭 미사용.
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 
@@ -651,7 +651,7 @@ function RoutesTab({ companyId }) {
   const [stops, setStops] = useState([]);
   const [showStopForm, setShowStopForm] = useState(false);
   const [editStop, setEditStop] = useState(null);
-  const [stopForm, setStopForm] = useState({ name:"", address:"", lat:"", lng:"", photo:"", description:"", offsetMin:"" });
+  const [stopForm, setStopForm] = useState({ name:"", address:"", lat:"", lng:"", photo:"", description:"", plannedTime:"" });
   const [stopLoading, setStopLoading] = useState(false);
   const [photoProcessing, setPhotoProcessing] = useState(false); // 사진 압축 중
   const [showMapPicker, setShowMapPicker] = useState(false);   // 지도 좌표 선택 모달
@@ -728,7 +728,7 @@ function RoutesTab({ companyId }) {
   const resetAddrSearch = () => { setAddrQuery(""); setAddrResults([]); setAddrSearching(false); setAddrMsg(""); };
   const openStopAdd = () => {
     setEditStop(null);
-    setStopForm({ name:"", address:"", lat:"", lng:"", photo:"", description:"", offsetMin:"" });
+    setStopForm({ name:"", address:"", lat:"", lng:"", photo:"", description:"", plannedTime:"" });
     setPickerPin(null);
     resetAddrSearch();
     // 기존 정류장이 있으면 첫 번째 정류장 위치로 중심 설정
@@ -737,7 +737,7 @@ function RoutesTab({ companyId }) {
   };
   const openStopEdit = (s) => {
     setEditStop(s);
-    setStopForm({ name:s.name||"", address:s.address||"", lat:s.lat?.toString()||"", lng:s.lng?.toString()||"", photo:s.photo||"", description:s.description||"", offsetMin: (typeof s.offsetMin === "number") ? String(s.offsetMin) : "" });
+    setStopForm({ name:s.name||"", address:s.address||"", lat:s.lat?.toString()||"", lng:s.lng?.toString()||"", photo:s.photo||"", description:s.description||"", plannedTime: (typeof s.offsetMin === "number") ? (planTimeForStop(stopsRoute?.departTime, s.offsetMin) || "") : "" });
     resetAddrSearch();
     if (s.lat && s.lng) {
       setPickerCenter({ lat: s.lat, lng: s.lng });
@@ -861,13 +861,15 @@ function RoutesTab({ companyId }) {
     const lat = parseFloat(stopForm.lat), lng = parseFloat(stopForm.lng);
     if (isNaN(lat) || isNaN(lng)) return alert("위도/경도는 숫자로 입력해주세요");
     setStopLoading(true);
-    // offsetMin: 빈값/공백 → null(미설정, 폴백 동작). 숫자면 정수로 저장(분).
-    const rawOff = (stopForm.offsetMin ?? "").toString().trim();
+    // plannedTime("HH:MM") → 노선 departTime 기준 offsetMin(분) 변환 저장.
+    // 빈값=null(미설정, 폴백). 노선 departTime 없거나 형식 오류면 저장 거부.
+    const rawTime = (stopForm.plannedTime ?? "").toString().trim();
     let offsetMin = null;
-    if (rawOff !== "") {
-      const n = parseInt(rawOff, 10);
-      if (isNaN(n)) { setStopLoading(false); return alert("진입 오프셋(분)은 정수로 입력하세요"); }
-      offsetMin = n;
+    if (rawTime !== "") {
+      if (!stopsRoute?.departTime) { setStopLoading(false); return alert("노선 출발시각이 먼저 설정되어야 정류장 진입시각을 계산할 수 있습니다"); }
+      const off = offsetMinFromPlanTime(stopsRoute.departTime, rawTime);
+      if (off == null) { setStopLoading(false); return alert("정류장 진입시각 형식이 올바르지 않습니다 (HH:MM)"); }
+      offsetMin = off;
     }
     const data = { name:stopForm.name.trim(), address:stopForm.address.trim(), lat, lng, photo:stopForm.photo||"", description:(stopForm.description||"").trim(), offsetMin, updatedAt:new Date().toISOString() };
     const col = collection(db, "companies", companyId, "routes", stopsRoute.id, "stops");
@@ -1171,23 +1173,24 @@ function RoutesTab({ companyId }) {
                 value={stopForm.description}
                 onChange={e=>setStopForm({...stopForm,description:e.target.value})}/>
 
-              {/* 진입 오프셋(분) (선택) — 노선 출발시각 기준 이 정류장까지 도달 분 수.
-                  예: 출발 07:00·오프셋 25 → 계획 진입 07:25. 미설정 시 폴백(직선거리 ETA). */}
-              <label style={S.label}>진입 오프셋(분) (선택)</label>
+              {/* 정류장 진입시각 (선택) — HH:MM 직접 입력. 저장 시 노선 departTime 기준
+                  offsetMin(분)으로 변환. 노선 출발시각 변경 시 정류장 절대시각이 자동 따라옴.
+                  미설정 시 직선거리 기반 ETA로 폴백. */}
+              <label style={S.label}>정류장 진입시각 (선택)</label>
               <input
                 style={{...S.input, marginBottom:4}}
-                type="number"
-                inputMode="numeric"
-                placeholder="예) 25 (출발시각 기준 25분 후 진입)"
-                value={stopForm.offsetMin}
-                onChange={e=>setStopForm({...stopForm, offsetMin: e.target.value.replace(/[^\d-]/g, "")})}
+                type="time"
+                placeholder="HH:MM"
+                value={stopForm.plannedTime}
+                onChange={e=>setStopForm({...stopForm, plannedTime: e.target.value})}
               />
               <div style={{ fontSize:11, color:"var(--color-label-alt)", marginBottom:8, lineHeight:1.45 }}>
                 {(() => {
-                  const plan = planTimeForStop(stopsRoute?.departTime, parseInt(stopForm.offsetMin, 10));
-                  return plan
-                    ? `→ 계획 진입시각 ${plan} (노선 출발 ${stopsRoute?.departTime || "-"})`
-                    : "미설정 시 직선거리 기반 ETA로 폴백";
+                  if (!stopForm.plannedTime) return "미설정 시 직선거리 기반 ETA로 폴백";
+                  if (!stopsRoute?.departTime) return "⚠ 노선 출발시각이 설정되어야 합니다";
+                  const off = offsetMinFromPlanTime(stopsRoute.departTime, stopForm.plannedTime);
+                  if (off == null) return "형식 오류";
+                  return `→ 노선 출발 ${stopsRoute.departTime} 기준 +${off}분 후`;
                 })()}
               </div>
 
