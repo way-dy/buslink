@@ -30,6 +30,17 @@ export default function DriverApp({ companyId: propCompanyId }) {
   const [dispatches, setDispatches] = useState([]);
   const [activeDispatchId, setActiveDispatchId] = useState(null);
   const dispatch = dispatches.find(d => d.id === activeDispatchId) || null;
+  // 배차 선택 모달 (EmployeeApp routePicker 패턴) — 가로 칩을 모달로 교체.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [dispatchQuery, setDispatchQuery] = useState("");
+  const filteredDispatches = dispatches.filter(d => {
+    const q = dispatchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (d.routeName || "").toLowerCase().includes(q)
+      || (d.vehicleNo || "").toLowerCase().includes(q)
+      || (d.departTime || "").includes(q)
+      || (d.partnerName || "").toLowerCase().includes(q);
+  });
   const [stops, setStops] = useState([]);
   const [currentStopIdx, setCurrentStopIdx] = useState(-1);
   const [boardingToken, setBoardingToken] = useState(null);   // 현재 탑승 토큰
@@ -333,26 +344,6 @@ export default function DriverApp({ companyId: propCompanyId }) {
           </div>
         </div>
 
-        {/* 다중 배차 선택 칩 — 2건 이상일 때만 노출(1건 이하 회귀 없음) */}
-        {dispatches.length > 1 && (
-          <div style={S.dispatchPicker}>
-            <div style={S.dispatchPickerLabel}>오늘 배차 {dispatches.length}건 — 선택</div>
-            <div style={S.dispatchChips}>
-              {dispatches.map(d => {
-                const active = d.id === activeDispatchId;
-                return (
-                  <button key={d.id} onClick={() => setActiveDispatchId(d.id)}
-                    style={{ ...S.dispatchChip, ...(active ? S.dispatchChipActive : {}) }}>
-                    <span style={S.dispatchChipTime}>{d.departTime || "--:--"}</span>
-                    <span style={S.dispatchChipRoute}>{d.routeName || "노선?"}</span>
-                    {d.vehicleNo && <span style={S.dispatchChipVeh}>· {d.vehicleNo}</span>}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
         {/* 배차 정보 — 그라데이션 히어로 카드 */}
         {dispatch ? (
           <div style={S.heroCard}>
@@ -363,9 +354,19 @@ export default function DriverApp({ companyId: propCompanyId }) {
             </svg>
             <div style={{ position: "relative" }}>
               <div style={S.heroTop}>
-                <Pill tone="dark" dot style={{ background: "rgba(255,255,255,0.18)", color: "#fff" }}>
-                  오늘 배차
-                </Pill>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <Pill tone="dark" dot style={{ background: "rgba(255,255,255,0.18)", color: "#fff" }}>
+                    오늘 배차
+                  </Pill>
+                  {dispatches.length > 1 && (
+                    <button
+                      onClick={() => { setDispatchQuery(""); setPickerOpen(true); }}
+                      style={S.dispatchChangeBtn}
+                    >
+                      🔄 배차 변경 ({dispatches.length}건)
+                    </button>
+                  )}
+                </div>
                 {driving && (
                   <span style={S.heroLiveBadge}>
                     <StatusDot tone="positive" size={6} pulse /> 운행중
@@ -531,6 +532,57 @@ export default function DriverApp({ companyId: propCompanyId }) {
           </button>
         </div>
       )}
+
+      {/* ── 배차 선택 모달 — EmployeeApp routePicker 패턴(풀모달 오버레이·검색·카드 리스트) ── */}
+      {pickerOpen && (
+        <div onClick={() => setPickerOpen(false)} style={S.pickerBack}>
+          <div onClick={e => e.stopPropagation()} style={S.pickerModal}>
+            <div style={S.pickerHead}>
+              <div style={{ width: 36, height: 4, background: "var(--color-line)", borderRadius: 2, margin: "0 auto 12px" }} />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 15, fontWeight: 800 }}>오늘 배차 선택 ({dispatches.length}건)</span>
+                <button onClick={() => setPickerOpen(false)} style={S.pickerClose}>✕</button>
+              </div>
+              {dispatches.length > 6 && (
+                <input
+                  style={{ ...S.pickerSearch, marginTop: 10 }}
+                  placeholder="🔍 노선·차량·시간·거래처 검색"
+                  value={dispatchQuery}
+                  onChange={e => setDispatchQuery(e.target.value)}
+                  autoFocus
+                />
+              )}
+            </div>
+            <div style={S.pickerBody}>
+              {filteredDispatches.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "32px 16px", color: "var(--color-label-mute)", fontSize: 13 }}>
+                  {dispatches.length === 0 ? "오늘 배차된 노선이 없습니다" : "검색 결과가 없습니다"}
+                </div>
+              ) : filteredDispatches.map(d => {
+                const cur = d.id === activeDispatchId;
+                return (
+                  <div
+                    key={d.id}
+                    onClick={() => { setActiveDispatchId(d.id); setPickerOpen(false); }}
+                    style={{ ...S.pickerCard, ...(cur ? S.pickerCardActive : {}) }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5, flexWrap: "wrap" }}>
+                      <span style={S.pickerTime}>{d.departTime || "--:--"}</span>
+                      <span style={S.pickerType}>{d.routeType || ""}</span>
+                      {cur && <span style={S.pickerCurrent}>현재</span>}
+                    </div>
+                    <div style={S.pickerRoute}>{d.routeName || "노선?"}</div>
+                    <div style={S.pickerMeta}>
+                      {d.vehicleNo && <span>🚌 {d.vehicleNo}</span>}
+                      {d.partnerName && <span> · {d.partnerName}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -547,31 +599,62 @@ const S = {
     cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: 14,
   },
 
-  // 다중 배차 선택 칩 (오늘 배차 2건 이상일 때)
-  dispatchPicker: {
-    background: "var(--color-bg)", borderRadius: "var(--radius-12)", padding: "10px 12px",
-    border: "1px solid var(--color-line)", marginBottom: 8,
+  // 배차 변경 — hero 카드 안의 작은 버튼(흰 반투명, 그라데이션 위 라이트 토큰만)
+  dispatchChangeBtn: {
+    background: "rgba(255,255,255,0.18)", border: "1px solid rgba(255,255,255,0.4)",
+    borderRadius: "var(--radius-pill)", padding: "4px 11px", color: "#fff",
+    fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+    backdropFilter: "blur(4px)",
   },
-  dispatchPickerLabel: {
-    fontSize: 11, fontWeight: 700, color: "var(--color-label-mute)", marginBottom: 6,
+
+  // 배차 선택 모달 (EmployeeApp routePicker 패턴 차용)
+  pickerBack: {
+    position: "fixed", inset: 0, background: "var(--color-overlay)", zIndex: 200,
+    display: "flex", flexDirection: "column", justifyContent: "flex-end",
   },
-  dispatchChips: { display: "flex", gap: 6, overflowX: "auto", paddingBottom: 2 },
-  dispatchChip: {
-    flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 5,
-    padding: "6px 12px", borderRadius: "var(--radius-pill)",
-    border: "1px solid var(--color-line)", background: "var(--color-bg-soft)",
-    color: "var(--color-label-mute)", fontSize: 12, fontWeight: 600,
-    cursor: "pointer", fontFamily: "inherit",
+  pickerModal: {
+    background: "var(--color-bg)", borderRadius: "20px 20px 0 0",
+    width: "100%", maxHeight: "82dvh", display: "flex", flexDirection: "column",
+    boxShadow: "var(--shadow-heavy)",
   },
-  dispatchChipActive: {
-    background: "var(--color-primary)", color: "#fff",
-    border: "1px solid var(--color-primary)", boxShadow: "var(--shadow-emphasize)",
+  pickerHead: {
+    padding: "14px 16px 12px", borderBottom: "1px solid var(--color-line)",
+    flexShrink: 0,
   },
-  dispatchChipTime: { fontWeight: 800 },
-  dispatchChipRoute: {
-    maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+  pickerClose: {
+    background: "var(--color-bg-soft)", border: "1px solid var(--color-line)",
+    borderRadius: "var(--radius-8)", padding: "6px 12px",
+    color: "var(--color-label-mute)", cursor: "pointer",
+    fontFamily: "inherit", fontSize: 12,
   },
-  dispatchChipVeh: { fontSize: 11, opacity: 0.85 },
+  pickerSearch: {
+    width: "100%", padding: "9px 12px",
+    border: "1px solid var(--color-line)", borderRadius: "var(--radius-8)",
+    fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box",
+  },
+  pickerBody: { padding: "12px 16px 22px", overflowY: "auto", flex: 1 },
+  pickerCard: {
+    display: "block", padding: "12px 14px", marginBottom: 8,
+    borderRadius: "var(--radius-12)", cursor: "pointer",
+    border: "1px solid var(--color-line)", background: "var(--color-bg)",
+  },
+  pickerCardActive: {
+    border: "1px solid var(--color-primary)", background: "var(--color-primary-soft)",
+  },
+  pickerTime: { fontSize: 13, fontWeight: 800, color: "var(--color-primary-deep)" },
+  pickerType: {
+    fontSize: 10, padding: "3px 9px", borderRadius: "var(--radius-pill)",
+    background: "var(--color-bg-soft)", color: "var(--color-label-mute)", fontWeight: 600,
+  },
+  pickerCurrent: {
+    fontSize: 10, padding: "3px 9px", borderRadius: "var(--radius-pill)",
+    background: "var(--color-primary)", color: "#fff", fontWeight: 700, marginLeft: "auto",
+  },
+  pickerRoute: {
+    fontSize: 14, fontWeight: 700, color: "var(--color-label)", marginBottom: 3,
+    wordBreak: "keep-all",
+  },
+  pickerMeta: { fontSize: 11, color: "var(--color-label-mute)" },
 
   container: {
     minHeight: "100vh", background: "var(--color-bg-alt)", display: "flex",

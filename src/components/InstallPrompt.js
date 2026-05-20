@@ -165,9 +165,26 @@ export default function InstallPrompt() {
     }
   };
 
-  if (!mode) return null;
+  // [DIAG-INSTALL 제거예정] 설치팝업 미표시 원인 5후보 가시화용(스누즈/standalone/engagement/인앱브라우저/SW미등록).
+  // 다음 커밋에서 grep "DIAG-INSTALL" 로 통째 제거. pointerEvents:none 라 UI 무방해.
+  const diagBox = (
+    <div style={{
+      position: "fixed", top: 60, right: 8, zIndex: 9999,
+      background: "rgba(0,0,0,.78)", color: "#0f0",
+      font: "10px/1.4 monospace", padding: "6px 9px",
+      borderRadius: 6, maxWidth: 240, pointerEvents: "none",
+      whiteSpace: "pre-wrap", wordBreak: "break-all",
+    }}>
+      {`DIAG-INSTALL\nmode=${mode || "null"}\nBIP=${typeof window !== "undefined" && window.__buslinkDeferredBIP ? "deferred" : "null"}\nstandalone=${isStandalone()}\nsnoozed=${isSnoozed()}\nLS=${(() => { try { return localStorage.getItem(LS_KEY) || "empty"; } catch { return "denied"; } })()}\nSW=${typeof navigator !== "undefined" && "serviceWorker" in navigator ? (navigator.serviceWorker.controller ? "active" : "idle") : "none"}\nUA=${(typeof navigator !== "undefined" ? navigator.userAgent : "").slice(0, 40)}`}
+    </div>
+  );
+  // [/DIAG-INSTALL]
+
+  if (!mode) return diagBox;
 
   return (
+    <>
+    {diagBox}
     <div
       role="dialog"
       aria-label="앱 설치 안내"
@@ -280,5 +297,6 @@ export default function InstallPrompt() {
         </div>
       </div>
     </div>
+    </>
   );
 }
