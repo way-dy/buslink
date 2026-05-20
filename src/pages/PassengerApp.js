@@ -356,36 +356,65 @@ export default function PassengerApp() {
             />
           ))}
 
-          {/* 정류장 번호 오버레이 */}
-          {stops.map((s, i) => (
-            <CustomOverlayMap key={`ov-${s.id}`} position={{ lat: s.lat, lng: s.lng }} yAnchor={2.8}>
-              <div style={{
-                background: myStopIdx === i ? "var(--color-primary)" : "#fff",
-                color: myStopIdx === i ? "#fff" : "var(--color-label)",
-                borderRadius: 999, padding: "2px 8px", fontSize: 10, fontWeight: 700,
-                border: `1px solid ${myStopIdx === i ? "var(--color-primary)" : "rgba(112,115,124,0.18)"}`,
-                whiteSpace: "nowrap", boxShadow: "0 1px 3px rgba(23,23,23,0.12)",
-              }}>
-                {i+1}. {s.name}
-              </div>
-            </CustomOverlayMap>
-          ))}
+          {/* 정류장 번호 오버레이 — 계획·예상시각(offsetMin 설정 시) 둘째 줄 표시. */}
+          {stops.map((s, i) => {
+            const isMyStop = myStopIdx === i;
+            const est = estByStopId[s.id];
+            let timeLabel = null, timeColor = null;
+            if (est) {
+              if (est.status === 'arrived' && est.estimatedAt) {
+                timeLabel = `도착 ${est.estimatedAt}`;
+                timeColor = isMyStop ? 'rgba(255,255,255,0.92)' : 'var(--color-positive)';
+              } else if (est.status === 'next' && est.estimatedAt) {
+                timeLabel = `예상 ${est.estimatedAt}`;
+                timeColor = isMyStop ? '#fff' : 'var(--color-primary-deep)';
+              } else if (est.status === 'upcoming' && est.plannedAt) {
+                timeLabel = est.plannedAt;
+                timeColor = isMyStop ? 'rgba(255,255,255,0.92)' : 'var(--color-label-mute)';
+              }
+            }
+            return (
+              <CustomOverlayMap key={`ov-${s.id}`} position={{ lat: s.lat, lng: s.lng }} yAnchor={2.8}>
+                <div style={{
+                  background: isMyStop ? "var(--color-primary)" : "#fff",
+                  color: isMyStop ? "#fff" : "var(--color-label)",
+                  borderRadius: 12, padding: "3px 9px",
+                  border: `1px solid ${isMyStop ? "var(--color-primary)" : "rgba(112,115,124,0.18)"}`,
+                  whiteSpace: "nowrap", boxShadow: "0 1px 3px rgba(23,23,23,0.12)",
+                  textAlign: "center", lineHeight: 1.25,
+                }}>
+                  <div style={{ fontSize: 10, fontWeight: 700 }}>{i+1}. {s.name}</div>
+                  {timeLabel && (
+                    <div style={{ fontSize: 11, fontWeight: 700, color: timeColor, marginTop: 1 }}>{timeLabel}</div>
+                  )}
+                </div>
+              </CustomOverlayMap>
+            );
+          })}
 
-          {/* 버스 마커 */}
+          {/* 버스 마커 — 펄스 ring + 키운 pill (정지 시에도 시인성). 클릭 색반전 유지. */}
           {buses.map(b => b.lat && b.lng && (
             <CustomOverlayMap key={b.id} position={{ lat: b.lat, lng: b.lng }} yAnchor={1.5}>
-              <div onClick={() => setSelected(b === selected ? null : b)}
-                style={{
-                  background: selected?.id === b.id ? "var(--color-primary)" : "#fff",
-                  border: `2px solid var(--color-primary)`,
-                  borderRadius: 999, padding: "5px 11px", cursor: "pointer",
-                  display: "flex", alignItems: "center", gap: 7,
-                  boxShadow: "0 4px 14px rgba(0,102,255,0.28)",
-                }}>
-                <span style={{ fontSize: 15 }}>🚌</span>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 800, color: selected?.id === b.id ? "#fff" : "var(--color-label)" }}>{b.vehicleNo || b.id}</div>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: selected?.id === b.id ? "rgba(255,255,255,0.85)" : "var(--color-label-mute)" }}>{b.speed ?? 0} km/h</div>
+              <div style={{ position: "relative", display: "inline-block" }}>
+                <span style={{
+                  position: "absolute", inset: -2, borderRadius: 999,
+                  background: "var(--color-primary)", opacity: 0.45,
+                  animation: "buspulse 2s ease-out infinite", pointerEvents: "none"
+                }} />
+                <div onClick={() => setSelected(b === selected ? null : b)}
+                  style={{
+                    position: "relative",
+                    background: selected?.id === b.id ? "var(--color-primary)" : "#fff",
+                    border: `3px solid var(--color-primary)`,
+                    borderRadius: 999, padding: "7px 14px", cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 8,
+                    boxShadow: "0 6px 20px rgba(0,102,255,0.45)",
+                  }}>
+                  <span style={{ fontSize: 22 }}>🚌</span>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: selected?.id === b.id ? "#fff" : "var(--color-label)" }}>{b.vehicleNo || b.id}</div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: selected?.id === b.id ? "rgba(255,255,255,0.85)" : "var(--color-label-mute)" }}>{b.speed ?? 0} km/h</div>
+                  </div>
                 </div>
               </div>
             </CustomOverlayMap>
@@ -740,7 +769,7 @@ const S = {
     flexShrink: 0,
   },
   stopItemName: {
-    fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+    fontSize: 17, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
   },
   stopItemAddr: {
     fontSize: 11, color: "var(--color-label-mute)", overflow: "hidden",

@@ -51,3 +51,8 @@ code {
   background: var(--color-bg-soft);
   border-color: var(--color-label-mute);
 }
+
+/* EmployeeApp(/p) 노선도 스트립 — 폰트 키움으로 가로 공간 부족 시 좌우 스크롤,
+   모바일에서 스크롤바 노출 시각 노이즈 방지(2026-05-20 승객앱 UI 강화). */
+[data-route-strip] { scrollbar-width: none; }
+[data-route-strip]::-webkit-scrollbar { display: none; }

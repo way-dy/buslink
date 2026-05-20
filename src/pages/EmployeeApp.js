@@ -596,12 +596,29 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
             );
           })}
 
-          {/* 모든 정류장 이름 레이블 — 출발/도착/내 정류장 강조, 중간 정류장 소형. 클릭 시 정보 */}
+          {/* 모든 정류장 이름 레이블 — 출발/도착/내 정류장 강조, 중간 정류장 소형. 클릭 시 정보.
+              계획·예상시각(offsetMin 설정 시) 추가 표시 — status별 색·접두어 차등. */}
           {stops.map((s, i) => {
             const isMyStop = myStopIdx === i;
             const isFirst  = i === 0;
             const isLast   = i === stops.length - 1;
             const emphasize = isMyStop || isFirst || isLast;
+            // 시각 라벨 결정: status별 우선순위(arrived 도착 / next 예상 / upcoming 계획).
+            // offsetMin 미설정(status='unplanned')이면 timeLabel=null → 이름만 표시(폴백).
+            const est = estByStopId[s.id];
+            let timeLabel = null, timeColor = null;
+            if (est) {
+              if (est.status === 'arrived' && est.estimatedAt) {
+                timeLabel = `도착 ${est.estimatedAt}`;
+                timeColor = emphasize ? 'rgba(255,255,255,0.92)' : 'var(--color-positive)';
+              } else if (est.status === 'next' && est.estimatedAt) {
+                timeLabel = `예상 ${est.estimatedAt}`;
+                timeColor = emphasize ? '#fff' : 'var(--color-primary-deep)';
+              } else if (est.status === 'upcoming' && est.plannedAt) {
+                timeLabel = est.plannedAt;
+                timeColor = emphasize ? 'rgba(255,255,255,0.92)' : 'var(--color-label-mute)';
+              }
+            }
             return (
               <CustomOverlayMap key={`lbl-${s.id}`} position={{ lat: s.lat, lng: s.lng }} yAnchor={isMyStop ? 3.6 : emphasize ? 3.1 : 2.5}>
                 <div onClick={() => setStopInfo({ ...s, idx: i })}
@@ -609,31 +626,46 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
                     background: isMyStop ? 'var(--color-primary)' : isFirst ? 'var(--color-positive)' : 'var(--color-destructive)',
                     color: '#fff', borderRadius: 10, padding: '3px 9px',
                     fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap',
-                    boxShadow: 'var(--shadow-float)', cursor: 'pointer'
+                    boxShadow: 'var(--shadow-float)', cursor: 'pointer',
+                    textAlign: 'center', lineHeight: 1.25
                   } : {
                     background: 'var(--color-bg)', color: 'var(--color-label-mute)',
                     border: '1px solid var(--color-line)', borderRadius: 8,
                     padding: '1px 6px', fontSize: 9, fontWeight: 600, whiteSpace: 'nowrap',
                     maxWidth: 88, overflow: 'hidden', textOverflow: 'ellipsis',
-                    boxShadow: 'var(--shadow-emphasize)', cursor: 'pointer'
+                    boxShadow: 'var(--shadow-emphasize)', cursor: 'pointer',
+                    textAlign: 'center', lineHeight: 1.25
                   }}>
-                  {isMyStop ? '📍 ' : isFirst ? '출 ' : isLast ? '도 ' : ''}{s.name.length > 10 ? s.name.substring(0,10)+'…' : s.name}
+                  <div>{isMyStop ? '📍 ' : isFirst ? '출 ' : isLast ? '도 ' : ''}{s.name.length > 10 ? s.name.substring(0,10)+'…' : s.name}</div>
+                  {timeLabel && (
+                    <div style={{ fontSize: emphasize ? 12 : 11, fontWeight: 700, color: timeColor, marginTop: 1 }}>
+                      {timeLabel}
+                    </div>
+                  )}
                 </div>
               </CustomOverlayMap>
             );
           })}
 
-          {/* 버스 마커 — 작은 원형 아이콘 */}
+          {/* 버스 마커 — 펄스 ring + 강조 원형 아이콘 (시인성 강화). 외부 ring 은 absolute 펄스. */}
           {buses.map(b => b.lat && b.lng && (
             <CustomOverlayMap key={b.id} position={{ lat: b.lat, lng: b.lng }} yAnchor={1.5}>
-              <div style={{
-                background: 'var(--color-primary)', border: '2px solid #fff',
-                borderRadius: '50%', width: 20, height: 20,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 11, boxShadow: '0 0 0 3px rgba(0,102,255,.30), var(--shadow-float)',
-                cursor: 'default'
-              }}>
-                🚌
+              <div style={{ position: 'relative', width: 30, height: 30 }}>
+                <span style={{
+                  position: 'absolute', inset: 0, borderRadius: '50%',
+                  background: 'var(--color-primary)', opacity: 0.5,
+                  animation: 'buspulse 2s ease-out infinite', pointerEvents: 'none'
+                }} />
+                <div style={{
+                  position: 'absolute', inset: 0,
+                  background: 'var(--color-primary)', border: '3px solid #fff',
+                  borderRadius: '50%',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 16, boxShadow: '0 0 0 4px rgba(0,102,255,.30), 0 6px 20px rgba(0,102,255,0.45)',
+                  cursor: 'default'
+                }}>
+                  🚌
+                </div>
               </div>
             </CustomOverlayMap>
           ))}
@@ -660,7 +692,8 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
             {activeRoute ? '정류장 정보가 없습니다' : '노선을 선택해주세요'}
           </div>
         ) : (
-          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: 4 }}>
+          /* 가로 스크롤 — 폰트 키움으로 가로 공간 부족 가능, 스크롤바 숨김(모바일 친화) */
+          <div data-route-strip style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: 4 }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', paddingLeft: 16, paddingRight: 16, minWidth: 'max-content', gap: 0 }}>
               {stops.map((s, i) => {
                 const isMyStop  = myStopIdx === i;
@@ -673,47 +706,54 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
 
                 return (
                   <div key={s.id} style={{ display: 'flex', alignItems: 'center' }}>
-                    {/* 정류장 노드 */}
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 64 }}
+                    {/* 정류장 노드 — 폰트/점 크기 키움(모바일 시인성) */}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 78 }}
                       onClick={() => { setMyStopIdx(i); setCenter({ lat: s.lat, lng: s.lng }); }}>
-                      {/* 버스 아이콘 (이 정류장 근처) */}
-                      <div style={{ height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 2 }}>
+                      {/* 버스 아이콘 (이 정류장 근처) — 펄스 ring + 키운 크기 */}
+                      <div style={{ height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 2 }}>
                         {isBusHere && (
-                          <div style={{ background: 'var(--color-primary)', borderRadius: '50%', width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, boxShadow: '0 0 0 3px rgba(0,102,255,.25)' }}>🚌</div>
+                          <div style={{ position: 'relative', width: 24, height: 24 }}>
+                            <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'var(--color-primary)', opacity: 0.5, animation: 'buspulse 2s ease-out infinite', pointerEvents: 'none' }} />
+                            <div style={{ position: 'absolute', inset: 0, background: 'var(--color-primary)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: '#fff', boxShadow: '0 0 0 4px rgba(0,102,255,.40), 0 4px 12px rgba(0,102,255,.45)' }}>🚌</div>
+                          </div>
                         )}
                       </div>
-                      {/* 정류장 원 */}
+                      {/* 정류장 원 — 시인성 키움(10→11, 14→15, 18→20) */}
                       <div style={{
-                        width: isMyStop ? 18 : isFirst||isLast ? 14 : 10,
-                        height: isMyStop ? 18 : isFirst||isLast ? 14 : 10,
+                        width: isMyStop ? 20 : isFirst||isLast ? 15 : 11,
+                        height: isMyStop ? 20 : isFirst||isLast ? 15 : 11,
                         borderRadius: '50%', flexShrink: 0,
                         background: isMyStop ? 'var(--color-primary)' : isBusHere ? 'var(--color-primary)' : isFirst ? 'var(--color-positive)' : isLast ? 'var(--color-destructive)' : 'var(--color-primary)',
                         border: isMyStop ? '2px solid #fff' : '2px solid var(--color-bg)',
                         boxShadow: isMyStop ? '0 0 0 3px rgba(0,102,255,.30)' : 'var(--shadow-emphasize)',
                         cursor: 'pointer'
                       }} />
-                      {/* 정류장 이름 */}
+                      {/* 정류장 이름 — 13px·700 으로 키움. 길이 길면 한 줄 ellipsis */}
                       <div style={{
-                        fontSize: 9, marginTop: 5, textAlign: 'center', width: 60,
-                        color: isMyStop ? 'var(--color-primary)' : isFirst ? 'var(--color-positive)' : isLast ? 'var(--color-destructive)' : 'var(--color-label-mute)',
-                        fontWeight: isMyStop ? 800 : isFirst||isLast ? 700 : 500,
-                        wordBreak: 'keep-all', lineHeight: 1.3
+                        fontSize: 13, marginTop: 6, textAlign: 'center', width: 72,
+                        color: isMyStop ? 'var(--color-primary)' : isFirst ? 'var(--color-positive)' : isLast ? 'var(--color-destructive)' : 'var(--color-label)',
+                        fontWeight: isMyStop ? 900 : isFirst||isLast ? 800 : 700,
+                        wordBreak: 'keep-all', lineHeight: 1.25,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
                       }}>
                         {s.name}
-                        {isMyStop && <div style={{ color: 'var(--color-primary)', fontSize: 8, fontWeight: 700 }}>내 정류장</div>}
                       </div>
+                      {isMyStop && <div style={{ color: 'var(--color-primary)', fontSize: 10, fontWeight: 800, marginTop: 1 }}>내 정류장</div>}
                     </div>
 
-                    {/* 연결선 (마지막 제외) */}
+                    {/* 연결선 (마지막 제외) — 정류장 원 위치(상단 28px[버스슬롯]+상단여백) 맞춤 */}
                     {!isLast && (
                       <div style={{
-                        width: 28, height: 3, flexShrink: 0, marginTop: -22,
+                        width: 28, height: 3, flexShrink: 0, marginTop: -28,
                         background: busStopIdx >= 0 && i < busStopIdx ? 'var(--color-primary)' : 'var(--color-line)',
                         borderRadius: 2, position: 'relative'
                       }}>
-                        {/* 버스가 이 구간(i → i+1) 이동 중 */}
+                        {/* 버스가 이 구간(i → i+1) 이동 중 — 키움 + 펄스 */}
                         {busStopIdx === i && mainBus && (
-                          <div style={{ position: 'absolute', top: -6, left: '40%', fontSize: 10, color: 'var(--color-primary)' }}>🚌</div>
+                          <div style={{ position: 'absolute', top: -10, left: '40%', width: 20, height: 20 }}>
+                            <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'var(--color-primary)', opacity: 0.5, animation: 'buspulse 2s ease-out infinite', pointerEvents: 'none' }} />
+                            <div style={{ position: 'absolute', inset: 0, background: 'var(--color-primary)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: '#fff', boxShadow: '0 0 0 3px rgba(0,102,255,.40)' }}>🚌</div>
+                          </div>
                         )}
                       </div>
                     )}

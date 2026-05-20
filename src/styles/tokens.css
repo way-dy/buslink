@@ -131,6 +131,15 @@ html, body { font-family: var(--font-base); color: var(--color-label); -webkit-f
   100% { transform: scale(2.4); opacity: 0;    }
 }
 
+/* 버스 마커 강조 펄스 — EmployeeApp(/p)·PassengerApp(/bus) 지도/노선도 버스 마커
+   외부에 primary 색 ring 으로 2초 주기 확장. GPS 정지(speed=0) 시에도 시인성 유지.
+   2026-05-20 승객앱 UI 강화 추가. */
+@keyframes buspulse {
+  0%   { transform: scale(1);   opacity: 0.55; }
+  70%  { transform: scale(1.9); opacity: 0;    }
+  100% { transform: scale(1.9); opacity: 0;    }
+}
+
 /* Type utility */
 .t-display-1 { font: var(--type-display-1-weight) var(--type-display-1-size)/var(--type-display-1-line) var(--font-base); letter-spacing: var(--type-display-1-track); }
 .t-display-2 { font: var(--type-display-2-weight) var(--type-display-2-size)/var(--type-display-2-line) var(--font-base); letter-spacing: var(--type-display-2-track); }
