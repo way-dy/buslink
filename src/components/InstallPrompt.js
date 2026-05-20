@@ -113,11 +113,12 @@ export default function InstallPrompt() {
     window.addEventListener("beforeinstallprompt", onBIP);
     window.addEventListener("appinstalled", onInstalled);
 
-    // index.js 글로벌 stash 회수 — 리스너 부착 전 이미 발화된 BIP 캐치
+    // index.js 글로벌 stash 회수 — 리스너 부착 전 이미 발화된 BIP 캐치.
+    // PermissionGate(usePermissions)도 같은 stash를 회수하므로 null로 비우지 않음 — 공유.
+    // 한 쪽이 promptInstall 호출 시 이벤트 객체가 consumed 되는 건 자연스러움(설치는 1회).
     if (typeof window !== "undefined" && window.__buslinkDeferredBIP) {
       setDeferred(window.__buslinkDeferredBIP);
       setMode("android");
-      window.__buslinkDeferredBIP = null; // 중복 방지
     }
 
     // iOS Safari 는 beforeinstallprompt 가 없으므로 약간의 지연 후 안내 노출

@@ -79,6 +79,16 @@ export function usePermissions() {
     const onInstalled = () => { setInstalled(true); setInstallable(false); deferredRef.current = null; };
     window.addEventListener("beforeinstallprompt", onBIP);
     window.addEventListener("appinstalled", onInstalled);
+
+    // index.js 글로벌 stash 회수 — 마운트 전 이미 발화된 BIP 캐치.
+    // InstallPrompt와 공유 stash이므로 비우지 않음(InstallPrompt도 동일하게 비우지 않게 변경).
+    if (typeof window !== "undefined" && window.__buslinkDeferredBIP) {
+      deferredRef.current = window.__buslinkDeferredBIP;
+      if (!(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches)) {
+        setInstallable(true);
+      }
+    }
+
     return () => {
       window.removeEventListener("beforeinstallprompt", onBIP);
       window.removeEventListener("appinstalled", onInstalled);
