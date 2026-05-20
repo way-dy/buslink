@@ -470,13 +470,18 @@ export default function DriverApp({ companyId: propCompanyId }) {
                     </div>
                     <div style={S.heroNextStop}>{next ? next.name : "운행 시작"}</div>
                     {nextEst && nextEst.plannedAt && (
-                      <div style={{ fontSize: 13, color: "#fff", opacity: 0.92, marginTop: 4, fontWeight: 700, display: "flex", flexWrap: "wrap", gap: 8 }}>
-                        <span>계획 {nextEst.plannedAt}</span>
+                      <div style={{ fontSize: 17, color: "#fff", marginTop: 8, fontWeight: 800, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
+                        <span style={{ opacity: 0.85, fontWeight: 700 }}>계획</span>
+                        <span style={{ fontSize: 20 }}>{nextEst.plannedAt}</span>
                         {nextEst.estimatedAt && nextEst.estimatedAt !== nextEst.plannedAt && (
-                          <span>· 예상 {nextEst.estimatedAt}</span>
+                          <>
+                            <span style={{ opacity: 0.55 }}>·</span>
+                            <span style={{ opacity: 0.85, fontWeight: 700 }}>예상</span>
+                            <span style={{ fontSize: 20 }}>{nextEst.estimatedAt}</span>
+                          </>
                         )}
                         {lab.label && lab.tone !== 'mute' && (
-                          <span style={{ background: "rgba(255,255,255,0.18)", border: `1px solid ${labColor}`, color: labColor, borderRadius: 999, padding: "2px 9px", fontSize: 12 }}>
+                          <span style={{ background: "rgba(255,255,255,0.22)", border: `2px solid ${labColor}`, color: labColor, borderRadius: 999, padding: "4px 13px", fontSize: 15, fontWeight: 800 }}>
                             {lab.label}
                           </span>
                         )}
@@ -553,37 +558,72 @@ export default function DriverApp({ companyId: propCompanyId }) {
                 const labColor = lab.tone === 'danger' ? 'var(--color-destructive)'
                   : lab.tone === 'warn' ? 'var(--color-cautionary)'
                   : 'var(--color-positive)';
+                const labBg = lab.tone === 'danger' ? '#FDECEC'
+                  : lab.tone === 'warn' ? '#FFF3E0'
+                  : '#E6F7EB';
                 const arrived = est && est.status === 'arrived';
+                // 행 배경 — 도착(arrived)=positive 카드, 현재=primary 카드, 그 외=투명
+                const rowBg = arrived ? '#F0FAF4'
+                  : isCurrent ? 'var(--color-primary-soft)'
+                  : 'transparent';
+                const rowBorder = arrived ? '1px solid #B6E6C6'
+                  : isCurrent ? '1px solid var(--color-primary)'
+                  : '1px solid transparent';
                 return (
-                  <div key={stop.id} style={{ ...S.stopRow, opacity: isDone ? 0.5 : 1 }}>
+                  <div key={stop.id} style={{
+                    ...S.stopRow,
+                    background: rowBg, border: rowBorder,
+                  }}>
                     <div style={{
                       ...S.stopDot,
-                      background: isCurrent ? "var(--color-primary)" : (isDone ? "var(--color-primary)" : "#fff"),
-                      border: `2px solid ${isCurrent || isDone ? "var(--color-primary)" : "var(--color-atomic-coolNeutral-90)"}`,
+                      background: arrived ? "var(--color-positive)"
+                        : isCurrent ? "var(--color-primary)"
+                        : isDone ? "var(--color-primary)" : "#fff",
+                      border: `3px solid ${arrived ? "var(--color-positive)"
+                        : (isCurrent || isDone) ? "var(--color-primary)"
+                        : "var(--color-atomic-coolNeutral-90)"}`,
                     }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
+                      {/* 정류장 이름 — 통과한 정류장(도착 제외)은 흐리되, 시각·지연 정보는 또렷 유지 */}
                       <div style={{
                         ...S.stopName,
-                        fontWeight: isCurrent ? 700 : 600,
-                        color: isCurrent ? "var(--color-primary)" : (isNext ? "var(--color-label)" : "var(--color-label)"),
+                        color: isCurrent ? "var(--color-primary-deep)" : "var(--color-label)",
+                        opacity: (isDone && !arrived) ? 0.55 : 1,
                       }}>
                         {stop.name}
                       </div>
                       {/* 계획·실제 시각 — offsetMin 설정된 정류장만(폴백은 정류장명만).
-                          예상/지연은 운행 중 또는 도착 실측이 있을 때만(운행 시작 전엔 의미 없음 — 계획만). */}
+                          예상/지연은 운행 중 또는 도착 실측이 있을 때만 — 어르신 기사 가독성 위해 크게+칩 형태. */}
                       {est && est.plannedAt && (
-                        <div style={{ fontSize: 12, marginTop: 2, fontWeight: 600, color: "var(--color-label-mute)" }}>
-                          {arrived ? "도착 " : "계획 "}
-                          <span style={{ color: arrived ? 'var(--color-positive)' : 'var(--color-primary-deep)', fontWeight: 800 }}>{arrived ? est.estimatedAt : est.plannedAt}</span>
+                        <div style={{ fontSize: 16, marginTop: 5, fontWeight: 700, color: "var(--color-label)", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+                          <span style={{ color: "var(--color-label-mute)" }}>
+                            {arrived ? "도착" : "계획"}
+                          </span>
+                          <span style={{ color: arrived ? 'var(--color-positive)' : 'var(--color-primary-deep)', fontWeight: 800, fontSize: 18 }}>
+                            {arrived ? est.estimatedAt : est.plannedAt}
+                          </span>
                           {!arrived && driving && est.estimatedAt && est.estimatedAt !== est.plannedAt && (
-                            <> · 예상 <span style={{ color: 'var(--color-primary-deep)', fontWeight: 800 }}>{est.estimatedAt}</span></>
+                            <>
+                              <span style={{ color: "var(--color-label-alt)" }}>·</span>
+                              <span style={{ color: "var(--color-label-mute)" }}>예상</span>
+                              <span style={{ color: 'var(--color-primary-deep)', fontWeight: 800, fontSize: 18 }}>{est.estimatedAt}</span>
+                            </>
                           )}
                           {(arrived || driving) && lab.label && lab.tone !== 'mute' && (
-                            <> · <span style={{ color: labColor, fontWeight: 800 }}>{lab.label}</span></>
+                            <span style={{
+                              background: labBg, color: labColor, fontWeight: 800, fontSize: 15,
+                              padding: "3px 11px", borderRadius: 999, border: `1.5px solid ${labColor}`,
+                            }}>
+                              {lab.label}
+                            </span>
                           )}
                         </div>
                       )}
-                      {stop.address && <div style={S.stopAddr}>{stop.address}</div>}
+                      {stop.address && (
+                        <div style={{ ...S.stopAddr, opacity: (isDone && !arrived) ? 0.55 : 1 }}>
+                          {stop.address}
+                        </div>
+                      )}
                     </div>
                     {isCurrent && <span style={S.tagCurrent}>현재</span>}
                     {isNext && <span style={S.tagNext}>다음</span>}
@@ -816,10 +856,10 @@ const S = {
   },
   heroProgressTop: {
     display: "flex", alignItems: "center", justifyContent: "space-between",
-    fontSize: 11, color: "rgba(255,255,255,0.8)",
+    fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.85)",
   },
-  heroProgressCount: { fontFamily: "var(--font-mono)", fontWeight: 700 },
-  heroNextStop: { fontSize: 17, fontWeight: 700, marginTop: 4 },
+  heroProgressCount: { fontFamily: "var(--font-mono)", fontWeight: 800, fontSize: 14 },
+  heroNextStop: { fontSize: 24, fontWeight: 800, marginTop: 6, letterSpacing: "-0.01em" },
   heroBar: {
     marginTop: 10, height: 6, background: "rgba(255,255,255,0.18)",
     borderRadius: 3, overflow: "hidden",
@@ -870,24 +910,25 @@ const S = {
     boxShadow: "var(--shadow-emphasize)",
   },
   listHeader: { display: "flex", alignItems: "center", justifyContent: "space-between" },
-  listTitle: { fontSize: 13, fontWeight: 700, color: "var(--color-label)" },
-  listCount: { fontSize: 12, color: "var(--color-primary)", fontWeight: 600 },
-  stopRow: { display: "flex", alignItems: "center", gap: 12, padding: "8px 0" },
-  stopDot: { width: 10, height: 10, borderRadius: "50%", flexShrink: 0 },
+  listTitle: { fontSize: 16, fontWeight: 800, color: "var(--color-label)" },
+  listCount: { fontSize: 14, color: "var(--color-primary)", fontWeight: 700 },
+  stopRow: { display: "flex", alignItems: "center", gap: 14, padding: "14px 10px", borderRadius: "var(--radius-12)" },
+  stopDot: { width: 14, height: 14, borderRadius: "50%", flexShrink: 0 },
   stopName: {
-    fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+    fontSize: 18, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+    letterSpacing: "-0.01em",
   },
   stopAddr: {
-    fontSize: 11, color: "var(--color-label-mute)", overflow: "hidden",
-    textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 1,
+    fontSize: 13, color: "var(--color-label-mute)", overflow: "hidden",
+    textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2, fontWeight: 600,
   },
   tagCurrent: {
-    fontSize: 10, background: "var(--color-primary-soft)", color: "var(--color-primary-deep)",
-    borderRadius: 999, padding: "3px 9px", flexShrink: 0, fontWeight: 700,
+    fontSize: 13, background: "var(--color-primary-soft)", color: "var(--color-primary-deep)",
+    borderRadius: 999, padding: "5px 12px", flexShrink: 0, fontWeight: 800,
   },
   tagNext: {
-    fontSize: 10, background: "var(--color-atomic-orange-90)", color: "#B95300",
-    borderRadius: 999, padding: "3px 9px", flexShrink: 0, fontWeight: 700,
+    fontSize: 13, background: "var(--color-atomic-orange-90)", color: "#B95300",
+    borderRadius: 999, padding: "5px 12px", flexShrink: 0, fontWeight: 800,
   },
 
   qrNotice: {
