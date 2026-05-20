@@ -2,9 +2,9 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
-## 현재 상태 (2026-05-20 세션 종료)
+## 현재 상태 (2026-05-21 세션 종료)
 > 이 저장소가 작업 정본. **어느 PC든** `git pull` + `.env.local`(↓부트스트랩)이면 빌드·배포 가능.
-> prod 라이브 = `main.d1013e16.js` (기사앱 현재 정류장 자동 스크롤(중앙) + 글로우/펄스 강조).
+> prod 라이브 = `main.dbeedce7.js` (승객앱 ETA 안정화 — EMA + 버킷 + plan+delay 70:gps 30 + 신뢰도 소스).
 
 ### git 원격
 - `origin/master` = 작업 정본(2026-05-20 main→master 머지 완료). 3월 폐갈래는 `origin/archive/remote-march-2026`(`f63321c`) 영구 백업.
@@ -38,6 +38,7 @@
 - [ ] (보류·SaaS) #17 슈퍼관리자·빌링 / #16 멀티테넌트(dy001 하드코딩) / #15 SMS. (폐기) #10 예약관리
 
 ## 완료 (최근·시간역순. 옛 누적은 @.claude/tasks-log.md)
+- [x] **2026-05-21** **승객앱 ETA 안정화 + 정밀 표현 강화 prod 배포** (`main.dbeedce7.js`, 프론트 단독·functions/rules 무관). "도착 예정 시간이 갑자기 늘어났다 줄어드는" 사용자 보고 → 4계층 완충. ① `src/lib/stopSchedule.js` GPS 가중치 50:50 → **plan+delay 70 : gps 30**(GPS 노이즈 30~70km/h 흔들림 표면 축소). ② **신규 `src/lib/useSmoothedEta.js`** React 훅(EMA α=0.25 + rate-limit maxIncrease 0.5s/s·maxDecrease 1.5s/s + jumpThreshold 5분 통과 즉시 raw — 누적지연 갱신 보존). ③ **신규 `formatPassengerEta(etaSec)`**(stopSchedule.js): 버킷 라벨(<60s='곧 도착'·<5분='N분 후'·<60분='약 N분' 5분 단위 round·≥60분='HH:MM 예상') + tone. ④ **신규 `describeEtaSource(source)`**: 11px 보조('실측'/'계획+지연'/'GPS 추정'/'대략'). EmployeeApp `/p` myStop 큰 카운트다운 + PassengerApp `/bus` 큰 ETA 카드에 ②③④ 적용. 정류장 카드(많음)는 ③만(버킷 자체로 안정). 색상 임계(≤3분 destructive·≤10분 cautionary)도 smoothed 기반. **회귀-0**: `etaStatus.eta` 분 단위 유지(기존 텍스트/색 분기 호환), `passed`/`arriving`/`waiting` 분기 그대로, `myStopEst.estimatedAt`(HH:MM) 정본 우선·없으면 routePath/직선 폴백. 변경 파일 4개(stopSchedule.js·useSmoothedEta.js[신규]·EmployeeApp.js·PassengerApp.js). 카카오 SDK 컴포넌트(`<Map>/<MapMarker>/<Polyline>/<CustomOverlayMap>`) HEAD=NOW 호출 개수 동일, `onSnapshot/updateDoc/stopArrivals/sendGPS` 무변, `calcETA` +1(EmployeeApp 폴백 etaSec). 신규 ESLint 경고 0(rules-of-hooks 1회 잡음 — useSmoothedEta를 early return 위로 이동). curl: `appkey=58bf34`+`main.dbeedce7.js`. **사용자 검증 잔여**: AdminApp 시뮬레이터 차량 1대 + 속도 5/30/60km/h 토글 → `/p` myStop ETA 부드럽게 변하는지 + 정류장 통과 시 누적지연(≥5분 차이) 즉시 반영 + "곧 도착"/"5분 후"/"약 10분"/"07:35 예상" 버킷 전환.
 - [x] **2026-05-21** 기사앱 현재 정류장 자동 스크롤 + 강조 (`main.d1013e16.js`). `currentStopRowRef` + `useEffect([currentStopIdx])` → `scrollIntoView({behavior:'smooth', block:'center'})` 80ms 지연(카드 전환 후). 현재 정류장 강조: 글로우(`box-shadow 0 0 0 4px rgba(0,102,255,0.18)+0 4px 14px`), padding 18px(다른 row 14px), dot 14→18px + buspulse 펄스 ring(`absolute inset:-3`). 운행 시작 전(currentStopIdx<0)은 스크롤 skip. DriverApp.js 단독.
 - [x] **2026-05-21** 기사앱 어르신 가독성 강화 (`main.ec085ae6.js`). 정류장 이름 14→18px·weight 800, 주소 11→13px, dot 10→14px(border 2→3), row padding 8→14px(터치영역). 시각·지연 줄 12→16px·시각 18px·weight 800. 지연 라벨이 텍스트 컬러→**칩 형태**(배경+border+padding). 현재/다음 태그 10→13px. 히어로 다음정류장 17→24px·시각 17→20px·지연 칩 12→15px. **도착 정류장 강조**: positive 톤 배경 카드(#F0FAF4+#B6E6C6 border) + 정류장 dot positive 색. opacity 분리(통과한 정류장은 이름만 0.55 흐림, 시각·지연은 항상 또렷 — 기사 본인 운행 평가에 중요). DriverApp.js 단독 변경, 로직 0 변경.
 - [x] **2026-05-20** 기사앱 설치 카드/팝업 미표시 결함 수정 + 운행 시작 전 지연 라벨 게이팅 (`cac9f4b`→`eb1c2e7`/`main.ff93d91f.js`). ① **BIP 글로벌 stash 이중 소비자 결함**: `usePermissions`(PermissionGate "📲 홈 화면에 앱 추가" 카드)는 stash 회수 안 함 + `InstallPrompt`는 회수 후 null로 비움 → PermissionGate 카드 영구 미표시 + InstallPrompt 3일 스누즈 시 양쪽 다 비표시(과천라인 기사 보고). 수정: usePermissions에 stash 회수 + InstallPrompt가 비우지 않음(공유). PermissionGate 카드는 스누즈와 무관하게 살아있음 → 사용자 강제 진입 통로. ② **운행 시작 전 무의미 지연 라벨**: `!driving` 정류장 리스트에 "지연 866분" 등 — `(arrived || driving) && lab.label` 게이팅. 운행 전엔 "계획 HH:MM"만. ③ DIAG-INSTALL2 진단 박스 1회 사용 후 제거(STDLN:n BIP:y SW:ctrl iOS:n LS:dismissedAt 캡처로 결함 1 확정).

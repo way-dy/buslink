@@ -5,7 +5,11 @@
 //     → 정류장 계획 진입시각("HH:MM" 또는 null).
 //   - computeStopEstimates: 정류장별 status·계획시각·예상시각·지연(초) 산출.
 //     실 도착(actualArrivals) 누적지연을 미통과 정류장에 적용 + 다음 1개는
-//     GPS 잔여거리/속도와 50:50 가중평균. offsetMin 미설정 정류장은 calcETA 폴백.
+//     GPS 잔여거리/속도와 30:70 가중평균(2026-05-21 ETA 안정화: GPS 비중 축소,
+//     plan+delay 안정성 우세 — GPS 노이즈 30~70km/h 흔들림 vs plan+delay는
+//     정류장 통과 후 1회만 갱신). offsetMin 미설정 정류장은 calcETA 폴백.
+//   - formatPassengerEta: 부드러워진 ETA(초)를 버킷 라벨(곧 도착/N분 후/약 N분/
+//     HH:MM 예상)로 변환 + 신뢰도 톤(primary/warn/mute).
 // react-kakao-maps-sdk · Firebase import 없음(순수 계산).
 // ---------------------------------------------------------------------------
 
@@ -186,11 +190,15 @@ export function computeStopEstimates({
       gpsMs = T_NOW + Math.max(0, etaMinFloat) * 60 * 1000;
     }
 
-    // (e) 가중 평균 — 둘 다 있을 때 50:50.
+    // (e) 가중 평균 — 둘 다 있을 때 plan+delay 70 : gps 30 (2026-05-21).
+    // GPS 잔여거리/속도 추정은 노이즈가 크므로(같은 50km/h라도 30~70 흔들림)
+    // 계획+누적지연(정류장 통과 후 1회만 갱신) 쪽에 더 비중. 누적지연이 미반영된
+    // 노선 첫 정류장도 plan 자체로 안정 — 5km/h 임계점프(`(speed>5?speed:30)`)에
+    // 직접 노출되는 표면을 줄임. UI(`useSmoothedEta`)와 함께 이중 완충.
     let estMs = null;
     let source = "plan+delay";
     if (planDelayMs != null && gpsMs != null) {
-      estMs = (planDelayMs + gpsMs) / 2;
+      estMs = 0.7 * planDelayMs + 0.3 * gpsMs;
       source = "gps";
     } else if (planDelayMs != null) {
       estMs = planDelayMs;
@@ -220,6 +228,71 @@ export function computeStopEstimates({
       source,
     };
   });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// formatPassengerEta(etaSec, now?) — 부드러워진 ETA(초) → 승객용 라벨·신뢰도 톤.
+//   입력: etaSec (number|null) — useSmoothedEta 통과한 값 또는 null.
+//        now (millis, optional) — 테스트성. 기본 Date.now().
+//   출력: {
+//     primary: 큰 글씨 라벨 ("곧 도착" | "5분 후" | "약 10분" | "07:35 예상" | "지나감" | "대기 중"),
+//     tone: 'primary' | 'warn' | 'mute' (강조 색),
+//     precise: "HH:MM" — 보조 작은 글씨용 도착 예상 시각 (null 가능),
+//     bucket: 디버그/테스트용 라벨 ('soon'/'min'/'about5'/'time'/'wait'/'passed')
+//   }
+// 버킷:
+//   null/NaN          → "대기 중", mute, precise=null
+//   < 0 초            → "지나감", warn, precise=null (음수 = 이미 지난 시각)
+//   < 60s             → "곧 도착", primary
+//   < 5분(300s)       → "{n}분 후", primary (n=Math.max(1, round(sec/60)))
+//   < 60분(3600s)     → "약 {round5}분", primary (5분 단위 반올림)
+//   ≥ 60분            → "{HH:MM} 예상", mute
+// ────────────────────────────────────────────────────────────────────────────
+export function formatPassengerEta(etaSec, now) {
+  if (etaSec == null || !isFinite(etaSec)) {
+    return { primary: "대기 중", tone: "mute", precise: null, bucket: "wait" };
+  }
+  const T_NOW = now || Date.now();
+  if (etaSec < 0) {
+    return { primary: "지나감", tone: "warn", precise: null, bucket: "passed" };
+  }
+  // 보조 precise 시각(HH:MM) — 모든 정상 케이스에서 제공.
+  const arriveMs = T_NOW + etaSec * 1000;
+  const d = new Date(arriveMs);
+  const precise = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+
+  if (etaSec < 60) {
+    return { primary: "곧 도착", tone: "primary", precise, bucket: "soon" };
+  }
+  if (etaSec < 300) {
+    const n = Math.max(1, Math.round(etaSec / 60));
+    return { primary: `${n}분 후`, tone: "primary", precise, bucket: "min" };
+  }
+  if (etaSec < 3600) {
+    // 5분 단위 반올림 — 분 단위 깜빡임 흡수(예: 12·13·14분 → "약 15분"·"약 10분")
+    const minutes = etaSec / 60;
+    const rounded = Math.max(5, Math.round(minutes / 5) * 5);
+    return { primary: `약 ${rounded}분`, tone: "primary", precise, bucket: "about5" };
+  }
+  // 60분 이상은 분이 무의미 → 도착 예상 시각만.
+  return { primary: `${precise} 예상`, tone: "mute", precise, bucket: "time" };
+}
+
+// estimate.source(=computeStopEstimates의 source) → 짧은 한국어 라벨.
+// 메인 카운트다운 밑 11px 보조 표시 — 사용자가 "어떤 데이터인지" 알아 신뢰.
+//   'actual'      → '실측'
+//   'plan+delay'  → '계획+지연'
+//   'gps'         → 'GPS 추정'
+//   'fallback'    → '대략'
+//   그 외/null    → null
+export function describeEtaSource(source) {
+  switch (source) {
+    case "actual":     return "실측";
+    case "plan+delay": return "계획+지연";
+    case "gps":        return "GPS 추정";
+    case "fallback":   return "대략";
+    default: return null;
+  }
 }
 
 // 지연(초) → 한국어 짧은 라벨. 정시 임계 ±2분, 지연 ≥3분, 조기 ≤-3분.

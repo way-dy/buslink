@@ -6,7 +6,8 @@ import { collection, onSnapshot, query, where, doc, getDoc, getDocs, orderBy } f
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { calcETA } from "../lib/gps";
 import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom } from "../lib/routeProgress";
-import { computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
+import { computeStopEstimates, formatDelayLabel, formatPassengerEta, describeEtaSource } from "../lib/stopSchedule";
+import { useSmoothedEta } from "../lib/useSmoothedEta";
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 
 // ── 경로 진행 판정 임계값 (작업2, 2026-05-18 — EmployeeApp과 동일 정책) ──
@@ -233,6 +234,39 @@ export default function PassengerApp() {
     );
   };
 
+  // 내 정류장까지 ETA(초 단위 raw) — useSmoothedEta 입력용. 2026-05-21 도착 안정화.
+  // myStopEst의 estimatedAt(plan+delay+GPS 30:70)이 정본 우선 — 분 단위 ceil 점프
+  // 회피·myStopEst 미존재(offsetMin 미설정) 시 routePath 또는 직선 폴백.
+  const getMyETASec = () => {
+    if (!mainBus || myStopIdx === null || !stops[myStopIdx]) return null;
+    const myStopId = stops[myStopIdx].id;
+    const e = estByStopId[myStopId];
+    if (e && e.estimatedAt && e.status !== 'unplanned' && e.status !== 'arrived') {
+      const base = new Date(); base.setHours(0, 0, 0, 0);
+      const m = e.estimatedAt.match(/^(\d{2}):(\d{2})$/);
+      if (m) {
+        const arriveMs = base.getTime() + (+m[1] * 60 + +m[2]) * 60 * 1000;
+        const diff = Math.round((arriveMs - Date.now()) / 1000);
+        if (diff > -60 && diff < 6 * 3600) return Math.max(0, diff);
+      }
+    }
+    if (usePathProgress && busProgress !== null && myStopProgress !== null) {
+      const remain = myStopProgress - busProgress;
+      if (busProgress > myStopProgress + PASSED_MARGIN_M) return null;
+      const speed = (mainBus.speed > 5 ? mainBus.speed : 30);
+      return Math.max(0, (remain / 1000) / speed * 3600);
+    }
+    // 폴백: 직선거리
+    const stop = stops[myStopIdx];
+    const R = 6371000;
+    const dLat = (stop.lat - mainBus.lat) * Math.PI / 180;
+    const dLng = (stop.lng - mainBus.lng) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(mainBus.lat * Math.PI / 180) * Math.cos(stop.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const speed = (mainBus.speed > 5 ? mainBus.speed : 30);
+    return Math.max(0, (dist / 1000) / speed * 3600);
+  };
+
   // 노선 검색 필터 (노선명·거래처명·구분)
   const filteredRoutes = routeList.filter(r => {
     const q = routeQuery.trim().toLowerCase();
@@ -292,6 +326,12 @@ export default function PassengerApp() {
     </>
   );
 
+  // ── 훅 호출 순서 고정(early return 전): useSmoothedEta 위치 ──
+  // raw 초 산출은 myStopIdx/stops 의존 — 조건 미충족이면 null 반환되어 훅이 reset.
+  // React rules-of-hooks: 조건부 호출 금지(early return 뒤에 두면 hook 순서 위반).
+  const myStopRawSec = getMyETASec();
+  const smoothedMyEtaSec = useSmoothedEta(myStopRawSec);
+
   if (!ready) return (
     <div style={S.fullCenter}>
       <div style={{ color: "var(--color-primary)", fontSize: 16, fontWeight: 600 }}>로딩 중...</div>
@@ -314,6 +354,10 @@ export default function PassengerApp() {
 
   const eta = getMyETA();
   const myStop = myStopIdx !== null ? stops[myStopIdx] : null;
+  const myPassengerLabel = (eta !== null && smoothedMyEtaSec != null)
+    ? formatPassengerEta(smoothedMyEtaSec)
+    : null;
+  const myStopEst = myStop ? estByStopId[myStop.id] : null;
   // 마지막 정류장 = 도착지(=회사, 탑승자 없음). 이 정류장 선택 시에만
   // ETA 카드 문구를 "목적지 도착" 류로 대체(표시 문자열만 분기, eta 로직 불변).
   const isDestStop = stops.length >= 2 && myStopIdx === stops.length - 1;
@@ -480,21 +524,33 @@ export default function PassengerApp() {
             </span>
           </div>
 
-          {eta !== null ? (
+          {eta !== null && myPassengerLabel ? (
             isDestStop ? (
               <div style={{ ...S.etaBig, alignItems: "center", flexDirection: "column", gap: 4 }}>
-                <span style={{ fontSize: 22, fontWeight: 800, color: eta <= 5 ? "var(--color-destructive)" : "var(--color-primary)" }}>
-                  {eta > 1 ? `목적지까지 약 ${eta}분` : "🏁 목적지 도착"}
+                <span style={{ fontSize: 22, fontWeight: 800, color: myPassengerLabel.bucket === 'soon' || (smoothedMyEtaSec != null && smoothedMyEtaSec <= 300) ? "var(--color-destructive)" : "var(--color-primary)" }}>
+                  {myPassengerLabel.bucket === 'soon' ? '🏁 목적지 도착' : `목적지까지 ${myPassengerLabel.primary}`}
                 </span>
                 <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-label-mute)" }}>
-                  {eta > 1 ? "목적지로 이동 중" : "하차해 주세요"}
+                  {myPassengerLabel.bucket === 'soon' ? "하차해 주세요" : "목적지로 이동 중"}
+                  {myPassengerLabel.precise && myPassengerLabel.bucket !== 'time' && myPassengerLabel.bucket !== 'soon' && (
+                    <> · {myPassengerLabel.precise} 예상</>
+                  )}
                 </span>
               </div>
             ) : (
-            <div style={S.etaBig}>
-              <span style={{ ...S.etaNum, color: eta <= 5 ? "var(--color-destructive)" : "var(--color-primary)" }}>{eta}</span>
-              <span style={S.etaUnit}>분</span>
-              <span style={S.etaSub}>후 도착 예정</span>
+            <div style={{ ...S.etaBig, flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+              <span style={{ fontSize: 38, fontWeight: 900, color: smoothedMyEtaSec != null && smoothedMyEtaSec <= 300 ? "var(--color-destructive)" : "var(--color-primary)", lineHeight: 1.05 }}>
+                {myPassengerLabel.primary}
+              </span>
+              {myPassengerLabel.precise && myPassengerLabel.bucket !== 'time' && (
+                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-label-mute)" }}>
+                  {myPassengerLabel.precise} 예상
+                  {myStopEst && (() => {
+                    const src = describeEtaSource(myStopEst.source);
+                    return src ? <> · <span style={{ color: "var(--color-label-alt)" }}>{src}</span></> : null;
+                  })()}
+                </span>
+              )}
             </div>
             )
           ) : (
@@ -593,12 +649,17 @@ export default function PassengerApp() {
                   {mainBus && myStopIdx === null && (
                     <span style={S.stopEta}>
                       {(() => {
-                        // offsetMin 설정 + plan+delay 산출 가능하면 그것 우선, 아니면 calcETA 폴백.
+                        // offsetMin 설정 + plan+delay 산출 가능 → estimatedAt(HH:MM) 우선 표시.
+                        // 아니면 calcETA 폴백을 formatPassengerEta 버킷화 — 분 단위 깜빡임 흡수.
+                        // 정류장이 많아 EMA 훅은 사용 안 함(버킷화로 자연 안정).
                         const e = estByStopId[s.id];
                         if (e && e.estimatedAt && e.status !== 'unplanned' && e.status !== 'arrived') {
                           return e.estimatedAt;
                         }
-                        return `${calcETA({ lat: mainBus.lat, lng: mainBus.lng }, s, mainBus.speed)}분`;
+                        const m = calcETA({ lat: mainBus.lat, lng: mainBus.lng }, s, mainBus.speed);
+                        if (m == null) return "–";
+                        const lab = formatPassengerEta(m * 60);
+                        return lab.primary;
                       })()}
                     </span>
                   )}

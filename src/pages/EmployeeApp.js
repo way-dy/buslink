@@ -11,7 +11,8 @@ import {
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { calcETA } from "../lib/gps";
 import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom } from "../lib/routeProgress";
-import { computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
+import { computeStopEstimates, formatDelayLabel, formatPassengerEta, describeEtaSource } from "../lib/stopSchedule";
+import { useSmoothedEta } from "../lib/useSmoothedEta";
 
 import { validateAndBoard } from "../lib/boarding";
 import { hashPin } from "../lib/partner";
@@ -435,35 +436,71 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
   const myStopEst = myStop ? estByStopId[myStop.id] : null;
 
   // ★ 핵심 — routePath 있으면 경로 진행거리 기반, 없으면 노선 순서(기존) 폴백
+  // 2026-05-21: 큰 카운트다운 안정화를 위해 분(`eta`)과 초(`etaSec`)를 함께 산출.
+  //   - `eta`(분): 기존 색상 분기·텍스트 분기 호환(0~10분 임계 등 회귀-0).
+  //   - `etaSec`(초): useSmoothedEta + formatPassengerEta 입력. 부드러운 카운트다운.
+  // myStopEst(stopSchedule plan+delay GPS 30:70 가중)가 있으면 그것을 정본으로 우선 —
+  // 한 화면에서 카드/리스트가 다른 시각을 가리키는 불일치 제거(승객 신뢰도).
   const etaStatus = (() => {
     if (!mainBus || myStopIdx === null) return { type: 'waiting' };        // 버스 없음
+    // myStopEst의 estimatedAt → etaSec 보조 우선(plan+delay+GPS 30:70 안정).
+    let estSec = null;
+    if (myStopEst && myStopEst.estimatedAt && myStopEst.status !== 'unplanned' && myStopEst.status !== 'arrived') {
+      const base = new Date();
+      base.setHours(0, 0, 0, 0);
+      const m = myStopEst.estimatedAt.match(/^(\d{2}):(\d{2})$/);
+      if (m) {
+        const arriveMs = base.getTime() + (+m[1] * 60 + +m[2]) * 60 * 1000;
+        const diff = Math.round((arriveMs - Date.now()) / 1000);
+        if (diff > -60 && diff < 6 * 3600) estSec = Math.max(0, diff); // 합리 범위만
+      }
+    }
+
     if (usePathProgress && busProgress !== null && myStopProgress !== null) {
       const remain = myStopProgress - busProgress;          // 내 정류장까지 남은 경로거리(m)
-      if (busProgress > myStopProgress + PASSED_MARGIN_M) return { type: 'passed' };
-      if (remain < ARRIVING_M) return { type: 'arriving' };
+      if (busProgress > myStopProgress + PASSED_MARGIN_M) return { type: 'passed', etaSec: null };
+      if (remain < ARRIVING_M) return { type: 'arriving', etaSec: 0 };
       // ETA = 남은 경로거리/속도 (calcETA 시그니처 재사용 — 거리 입력만 경로거리로)
       const speed = (mainBus.speed > 5 ? mainBus.speed : 30);
-      const eta = Math.ceil((Math.max(remain, 0) / 1000) / speed * 60);
-      return { type: 'approaching', eta };
+      const etaSecRaw = Math.max(0, (remain / 1000) / speed * 3600);
+      const eta = Math.ceil(etaSecRaw / 60);
+      return { type: 'approaching', eta, etaSec: estSec != null ? estSec : etaSecRaw };
     }
     // ── 폴백(routePath 없음): 기존 노선 순서 로직 그대로 ──
-    if (_distToMyStop !== null && _distToMyStop < 150) return { type: 'arriving' }; // 150m 이내 = 곧 도착
-    if (_busStopIdx > myStopIdx) return { type: 'passed' };               // 버스가 내 정류장 지남
+    if (_distToMyStop !== null && _distToMyStop < 150) return { type: 'arriving', etaSec: 0 }; // 150m 이내 = 곧 도착
+    if (_busStopIdx > myStopIdx) return { type: 'passed', etaSec: null };               // 버스가 내 정류장 지남
     if (_busStopIdx < myStopIdx) {
       const eta = calcETA({ lat: mainBus.lat, lng: mainBus.lng }, myStop, mainBus.speed);
-      return { type: 'approaching', eta };                                  // 접근 중
+      // 폴백 etaSec — calcETA는 분 단위라 초로 환산하면 ceil 점프 일부 잔존,
+      // useSmoothedEta가 흡수. 직선거리(_distToMyStop) 재사용해 비용 0.
+      const speed = (mainBus.speed > 5 ? mainBus.speed : 30);
+      const fallbackSec = _distToMyStop != null
+        ? Math.max(0, (_distToMyStop / 1000) / speed * 3600) : null;
+      return { type: 'approaching', eta, etaSec: estSec != null ? estSec : fallbackSec };  // 접근 중
     }
-    return { type: 'arriving' };                                           // 동일 정류장
+    return { type: 'arriving', etaSec: 0 };                                           // 동일 정류장
   })();
 
-  // 표시용 색상
+  // 부드러운 카운트다운(EMA + rate-limit) — 'approaching'만 적용.
+  // 'arriving'/'passed'/'waiting'은 텍스트 분기이므로 EMA 무관.
+  // 분 단위 점프·5km/h 임계점프·GPS 노이즈를 흡수해 "갑자기 늘어났다 줄어드는" 현상 완화.
+  const smoothedEtaSec = useSmoothedEta(
+    etaStatus.type === 'approaching' ? etaStatus.etaSec : null
+  );
+  const passengerLabel = (etaStatus.type === 'approaching')
+    ? formatPassengerEta(smoothedEtaSec)
+    : null;
+
+  // 표시용 색상 — 2026-05-21: smoothedEtaSec 기반(분 단위)으로 깜빡임 흡수.
+  // 임계값은 동일(≤3분=destructive·≤10분=cautionary). smoothed 없으면 etaStatus.eta 폴백.
+  const colorMin = smoothedEtaSec != null ? smoothedEtaSec / 60 : etaStatus.eta;
   const etaColor = etaStatus.type === 'passed'
     ? 'var(--color-cautionary)'
     : etaStatus.type === 'arriving'
       ? 'var(--color-destructive)'
-      : etaStatus.eta !== undefined && etaStatus.eta <= 3
+      : colorMin !== undefined && colorMin !== null && colorMin <= 3
         ? 'var(--color-destructive)'
-        : etaStatus.eta !== undefined && etaStatus.eta <= 10
+        : colorMin !== undefined && colorMin !== null && colorMin <= 10
           ? 'var(--color-cautionary)'
           : 'var(--color-primary)';
 
@@ -778,10 +815,22 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
                   ? (isDestStop ? '목적지 도착 완료' : '이미 지나침')
                   : etaStatus.type === 'arriving'
                     ? (isDestStop ? '🏁 목적지 도착' : '🚌 곧 도착!')
-                    : etaStatus.type === 'approaching' && etaStatus.eta !== undefined
-                      ? (isDestStop ? `목적지까지 약 ${etaStatus.eta}분` : `약 ${etaStatus.eta}분 후 도착`)
+                    : etaStatus.type === 'approaching' && passengerLabel
+                      ? (isDestStop
+                          ? (passengerLabel.bucket === 'soon' ? '🏁 목적지 도착' : `목적지까지 ${passengerLabel.primary}`)
+                          : passengerLabel.primary)
                       : '버스 대기 중'}
               </div>
+              {/* 보조 작은 글씨 — 도착 예상 시각(HH:MM) + 데이터 소스 */}
+              {etaStatus.type === 'approaching' && passengerLabel && passengerLabel.precise && passengerLabel.bucket !== 'time' && (
+                <div style={{ fontSize: 11, color: 'var(--color-label-mute)', marginTop: 2, fontWeight: 600 }}>
+                  {passengerLabel.precise} 예상
+                  {myStopEst && (() => {
+                    const src = describeEtaSource(myStopEst.source);
+                    return src ? <> · <span style={{ color: 'var(--color-label-alt)' }}>{src}</span></> : null;
+                  })()}
+                </div>
+              )}
               {/* 부가 정보 */}
               {etaStatus.type === 'passed' && !isDestStop && (
                 <div style={{ fontSize: 11, color: 'var(--color-cautionary)', marginTop: 3, fontWeight: 600 }}>
