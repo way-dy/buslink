@@ -9,6 +9,18 @@ import './styles/tokens.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
 
+// PWA 설치 가이드 — beforeinstallprompt는 페이지 로드 직후 한 번 발생.
+// 리스너가 늦게 붙는 라우트(기사앱 등 Firebase Auth+driver/dispatch 로드 대기)에서도
+// 놓치지 않도록 글로벌 stash. InstallPrompt 마운트 시 이 값을 회수해 사용.
+if (typeof window !== "undefined") {
+  window.__buslinkDeferredBIP = null;
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    window.__buslinkDeferredBIP = e;
+  });
+  window.addEventListener("appinstalled", () => { window.__buslinkDeferredBIP = null; });
+}
+
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>

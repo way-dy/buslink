@@ -25,7 +25,11 @@ import PermissionGate from "../components/PermissionGate";
 //    실제 dispatch/stops/currentStopIdx 데이터만 리스킨.
 export default function DriverApp({ companyId: propCompanyId }) {
   const [driver, setDriver] = useState(null);
-  const [dispatch, setDispatch] = useState(null);
+  // 다중 배차 지원: 같은 기사·날짜에 dispatch 여러 건 가능 → 칩으로 선택.
+  // 기존 `dispatch` 단일 참조는 derived 값으로 호환(아래 derived dispatch).
+  const [dispatches, setDispatches] = useState([]);
+  const [activeDispatchId, setActiveDispatchId] = useState(null);
+  const dispatch = dispatches.find(d => d.id === activeDispatchId) || null;
   const [stops, setStops] = useState([]);
   const [currentStopIdx, setCurrentStopIdx] = useState(-1);
   const [boardingToken, setBoardingToken] = useState(null);   // 현재 탑승 토큰
@@ -111,12 +115,20 @@ export default function DriverApp({ companyId: propCompanyId }) {
       collection(db, "companies", cid, "dispatches", today, "list"),
       where("driverId", "==", driverId)
     ));
-    if (!snap.empty) {
-      const d = { id: snap.docs[0].id, ...snap.docs[0].data() };
-      setDispatch(d);
-      // 정류장 로드
-      if (d.routeId) await loadStops(d.routeId, cid);
-    }
+    if (snap.empty) { setDispatches([]); setActiveDispatchId(null); return; }
+    const list = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (a.departTime || "").localeCompare(b.departTime || ""));  // 출발시간 오름차순
+    setDispatches(list);
+    // 활성 선택: localStorage 우선(같은 날 재진입 시 복원) > 첫 항목
+    let pick = null;
+    try {
+      const saved = localStorage.getItem(`buslink_driver_active_dispatch_${today}`);
+      if (saved && list.some(d => d.id === saved)) pick = saved;
+    } catch {}
+    pick = pick || list[0].id;
+    setActiveDispatchId(pick);
+    // 정류장 로드는 activeDispatchId 변경 useEffect 가 책임(중복 호출 회피)
   };
 
   const loadStops = async (routeId, cid) => {
@@ -143,6 +155,17 @@ export default function DriverApp({ companyId: propCompanyId }) {
     );
     return () => { cancelled = true; navigator.geolocation.clearWatch(w); };
   }, [driving, gpsStatus]);
+
+  // 활성 배차 변경 시 stops 재로드 + 선택 영속화
+  useEffect(() => {
+    if (!dispatch?.routeId || !companyId) { setStops([]); return; }
+    loadStops(dispatch.routeId, companyId);
+    try {
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+      localStorage.setItem(`buslink_driver_active_dispatch_${today}`, dispatch.id);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDispatchId, dispatch?.routeId, companyId]);
 
   // Wake Lock 재획득
   useEffect(() => {
@@ -261,12 +284,14 @@ export default function DriverApp({ companyId: propCompanyId }) {
 
   if (loading) return (
     <div style={S.fullCenter}>
+      <InstallPrompt />
       <div style={{ color: "var(--color-primary)", fontSize: 16, fontWeight: 600 }}>로딩 중...</div>
     </div>
   );
 
   if (error) return (
     <div style={{ ...S.fullCenter, flexDirection: "column", gap: 16 }}>
+      <InstallPrompt />
       <div style={{ color: "var(--color-destructive)", fontSize: 15, textAlign: "center", whiteSpace: "pre-line", fontWeight: 600 }}>{error}</div>
       <button style={S.outlineBtn} onClick={() => signOut(auth)}>로그아웃</button>
     </div>
@@ -307,6 +332,26 @@ export default function DriverApp({ companyId: propCompanyId }) {
             {driver?.name ? `${driver.name} 기사님, 안녕하세요` : "안녕하세요"}
           </div>
         </div>
+
+        {/* 다중 배차 선택 칩 — 2건 이상일 때만 노출(1건 이하 회귀 없음) */}
+        {dispatches.length > 1 && (
+          <div style={S.dispatchPicker}>
+            <div style={S.dispatchPickerLabel}>오늘 배차 {dispatches.length}건 — 선택</div>
+            <div style={S.dispatchChips}>
+              {dispatches.map(d => {
+                const active = d.id === activeDispatchId;
+                return (
+                  <button key={d.id} onClick={() => setActiveDispatchId(d.id)}
+                    style={{ ...S.dispatchChip, ...(active ? S.dispatchChipActive : {}) }}>
+                    <span style={S.dispatchChipTime}>{d.departTime || "--:--"}</span>
+                    <span style={S.dispatchChipRoute}>{d.routeName || "노선?"}</span>
+                    {d.vehicleNo && <span style={S.dispatchChipVeh}>· {d.vehicleNo}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* 배차 정보 — 그라데이션 히어로 카드 */}
         {dispatch ? (
@@ -501,6 +546,32 @@ const S = {
     borderRadius: "var(--radius-8)", padding: "8px 20px", color: "var(--color-label)",
     cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: 14,
   },
+
+  // 다중 배차 선택 칩 (오늘 배차 2건 이상일 때)
+  dispatchPicker: {
+    background: "var(--color-bg)", borderRadius: "var(--radius-12)", padding: "10px 12px",
+    border: "1px solid var(--color-line)", marginBottom: 8,
+  },
+  dispatchPickerLabel: {
+    fontSize: 11, fontWeight: 700, color: "var(--color-label-mute)", marginBottom: 6,
+  },
+  dispatchChips: { display: "flex", gap: 6, overflowX: "auto", paddingBottom: 2 },
+  dispatchChip: {
+    flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 5,
+    padding: "6px 12px", borderRadius: "var(--radius-pill)",
+    border: "1px solid var(--color-line)", background: "var(--color-bg-soft)",
+    color: "var(--color-label-mute)", fontSize: 12, fontWeight: 600,
+    cursor: "pointer", fontFamily: "inherit",
+  },
+  dispatchChipActive: {
+    background: "var(--color-primary)", color: "#fff",
+    border: "1px solid var(--color-primary)", boxShadow: "var(--shadow-emphasize)",
+  },
+  dispatchChipTime: { fontWeight: 800 },
+  dispatchChipRoute: {
+    maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+  },
+  dispatchChipVeh: { fontSize: 11, opacity: 0.85 },
 
   container: {
     minHeight: "100vh", background: "var(--color-bg-alt)", display: "flex",
