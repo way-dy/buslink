@@ -21,7 +21,7 @@
 - ※ Firebase Auth 승인 도메인은 기본 자동등록 — 조치 불필요(지난 "문제 A" 오진, issues.md).
 
 ## 다음 할 일
-- [ ] **DIAG-INSTALL 진단 결과 확인 후 제거** — 사용자 기기에서 설치팝업 미표시 원인 5후보(snoozed/standalone/engagement/in-app browser/SW idle) 확정 후 `grep "DIAG-INSTALL"` 로 InstallPrompt.js 통째 제거+재배포.
+- [x] **DIAG-INSTALL 진단 결과 확인 후 제거** (2026-05-20 완료) — 사용자 기기에서 설치팝업 미표시 원인 5후보(snoozed/standalone/engagement/in-app browser/SW idle) 확정 후 `grep "DIAG-INSTALL"` 로 InstallPrompt.js 통째 제거+재배포.
 - [x] **노선 그리기 편집 UX 개선·배포** (2026-05-20, `1849cce`/`main.7d89705e.js`) — 중간 삽입(⊕)·앞에 추가 모드·선택 기반 삭제·출발/도착 색·번호 라벨.
 - [x] **본 머지 prod 재배포** — 노선 그리기·routeProgress·PermissionGate·gps 콜드스타트 복구(2026-05-20 회귀 보고 → 머지로 복원). 이어그리기는 `openPathDraw`가 이미 `route.routePath`를 초기 로드해 자동 지원.
 - [ ] (선택) 운영 노선에 `routePath` 실제 그리기 — 안 그린 노선은 stops 직선 폴백(정상).

@@ -7,14 +7,14 @@
 //  - 이미 설치(standalone)면 렌더 안 함.
 //  - Android/Chrome: beforeinstallprompt 가로채 stash → 하단 배너 → [설치] 시 네이티브 프롬프트.
 //  - iOS Safari: beforeinstallprompt 미지원이므로 "공유 → 홈 화면에 추가" 안내 팝업.
-//  - 닫기/나중에: localStorage buslink_pwa_prompt 에 기록 → 14일 후 재노출.
+//  - 닫기/나중에: localStorage buslink_pwa_prompt 에 기록 → 3일 후 재노출.
 //  - appinstalled 또는 standalone 이면 영구 비표시.
 // ---------------------------------------------------------------------------
 import React, { useEffect, useState } from "react";
 import { Btn } from "./ui";
 
 const LS_KEY = "buslink_pwa_prompt";
-const SNOOZE_DAYS = 14;
+const SNOOZE_DAYS = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // 이미 설치된(홈 화면 실행) 상태인가
@@ -41,7 +41,7 @@ function isIosSafari() {
   return isSafari;
 }
 
-// 최근에 닫았으면(14일 이내) true
+// 최근에 닫았으면(3일 이내) true
 function isSnoozed() {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -157,7 +157,7 @@ export default function InstallPrompt() {
         setMode(null);
         setDeferred(null);
       } else {
-        // 거절 → 14일 스누즈
+        // 거절 → 3일 스누즈
         close();
       }
     } catch {
@@ -165,26 +165,9 @@ export default function InstallPrompt() {
     }
   };
 
-  // [DIAG-INSTALL 제거예정] 설치팝업 미표시 원인 5후보 가시화용(스누즈/standalone/engagement/인앱브라우저/SW미등록).
-  // 다음 커밋에서 grep "DIAG-INSTALL" 로 통째 제거. pointerEvents:none 라 UI 무방해.
-  const diagBox = (
-    <div style={{
-      position: "fixed", top: 60, right: 8, zIndex: 9999,
-      background: "rgba(0,0,0,.78)", color: "#0f0",
-      font: "10px/1.4 monospace", padding: "6px 9px",
-      borderRadius: 6, maxWidth: 240, pointerEvents: "none",
-      whiteSpace: "pre-wrap", wordBreak: "break-all",
-    }}>
-      {`DIAG-INSTALL\nmode=${mode || "null"}\nBIP=${typeof window !== "undefined" && window.__buslinkDeferredBIP ? "deferred" : "null"}\nstandalone=${isStandalone()}\nsnoozed=${isSnoozed()}\nLS=${(() => { try { return localStorage.getItem(LS_KEY) || "empty"; } catch { return "denied"; } })()}\nSW=${typeof navigator !== "undefined" && "serviceWorker" in navigator ? (navigator.serviceWorker.controller ? "active" : "idle") : "none"}\nUA=${(typeof navigator !== "undefined" ? navigator.userAgent : "").slice(0, 40)}`}
-    </div>
-  );
-  // [/DIAG-INSTALL]
-
-  if (!mode) return diagBox;
+  if (!mode) return null;
 
   return (
-    <>
-    {diagBox}
     <div
       role="dialog"
       aria-label="앱 설치 안내"
@@ -297,6 +280,5 @@ export default function InstallPrompt() {
         </div>
       </div>
     </div>
-    </>
   );
 }
