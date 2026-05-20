@@ -37,6 +37,7 @@
 - [ ] (보류·SaaS) #17 슈퍼관리자·빌링 / #16 멀티테넌트(dy001 하드코딩) / #15 SMS. (폐기) #10 예약관리
 
 ## 완료 (최근·시간역순. 옛 누적은 @.claude/tasks-log.md)
+- [x] **2026-05-20** 정류장 계획·예상시각 시스템 — stops `offsetMin`(분) + `dispatches.stopArrivals` + `lib/stopSchedule.js`(공용 헬퍼). AdminApp 정류장 폼/카드에 오프셋 입력·계획시각 표시, EmployeeApp(/p) 홈 myStop 패널 + 노선 모달 정류장 목록 시간 표시, PassengerApp(/bus) 정류장 리스트 계획·예상·지연, DriverApp 히어로 다음정류장 배너 + 정류장 리스트 계획·도착·지연 라벨. 도착감지 시 dispatch `stopArrivals.{stopId}` 멱등 기록(기사). Firestore 규칙: dispatches update를 driver 본인+stopArrivals 필드 한정 update 허용으로 좁힘. 기존 데이터(offsetMin 미설정) 무파괴(calcETA/노선순서 폴백). 빌드·배포 사용자 진행.
 - [x] **2026-05-20** 설치팝업 스누즈 14→3일 단축 + DIAG-INSTALL 제거 (`da24224`/`main.f0dd8be3.js`) — 사용자 LS `dismissedAt` 14일 차단 확정·종결.
 - [x] **2026-05-20** 기사앱 배차 선택 칩→모달(EmployeeApp 패턴) + DIAG-INSTALL 임시진단 (`e690b41`/`main.cb747e1c.js`).
 - [x] **2026-05-20** 기사앱 설치 BIP 글로벌 stash + 다중 배차(`dispatches[]`·`activeDispatchId`·LS 영속) (`ac6fbf3`/`main.6c626f25.js`).

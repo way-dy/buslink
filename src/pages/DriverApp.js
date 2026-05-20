@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { auth, db } from "../firebase";
 import { signOut } from "firebase/auth";
-import { collection, query, where, getDocs, doc, updateDoc, orderBy } from "firebase/firestore";
+import { collection, query, where, getDocs, doc, updateDoc, getDoc, onSnapshot, orderBy, serverTimestamp } from "firebase/firestore";
 import { startGPS, stopGPS, clearGPS } from "../lib/gps";
+import { planTimeForStop, computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
 import { ensureGeolocationPermission } from "../lib/usePermissions";
 import { createBoardingToken, getBoardingUrl } from "../lib/boarding";
 import QRCode from "qrcode";
@@ -178,6 +179,26 @@ export default function DriverApp({ companyId: propCompanyId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDispatchId, dispatch?.routeId, companyId]);
 
+  // ── 활성 dispatch 문서 실시간 구독 — stopArrivals 표시·멱등 가드용 ──
+  // 운행중일 때만 구독(미운행 시엔 정류장 표시 자체가 없으므로 비용 절감).
+  // dispatch.stopArrivals = { [stopId]: { actualAt: serverTimestamp, plannedAt, delaySec } }
+  const [stopArrivals, setStopArrivals] = useState({});
+  useEffect(() => {
+    if (!companyId || !dispatch?.id) { setStopArrivals({}); return; }
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+    const ref = doc(db, "companies", companyId, "dispatches", today, "list", dispatch.id);
+    return onSnapshot(ref, snap => {
+      if (!snap.exists()) { setStopArrivals({}); return; }
+      const sa = snap.data().stopArrivals || {};
+      const out = {};
+      Object.entries(sa).forEach(([sid, v]) => {
+        const at = v?.actualAt?.toMillis ? v.actualAt.toMillis() : (typeof v?.actualAt === 'number' ? v.actualAt : null);
+        if (at != null) out[sid] = at;
+      });
+      setStopArrivals(out);
+    }, () => setStopArrivals({}));
+  }, [companyId, dispatch?.id]);
+
   // Wake Lock 재획득
   useEffect(() => {
     const fn = async () => {
@@ -188,6 +209,19 @@ export default function DriverApp({ companyId: propCompanyId }) {
     document.addEventListener("visibilitychange", fn);
     return () => document.removeEventListener("visibilitychange", fn);
   }, [driving]);
+
+  // ── 정류장 estimates(계획·예상시각·지연) ──
+  // 기사 화면엔 GPS 가중 무의미(차량 자기 좌표) → vehiclePos 미주입, plan+delay 모드.
+  // todayDispatch.stopArrivals 갱신 → 누적지연 자동 반영. offsetMin 미설정 = unplanned.
+  const stopEstimates = computeStopEstimates({
+    stops,
+    departTime: dispatch?.departTime,
+    actualArrivals: stopArrivals,
+    vehiclePos: null,
+    speed: null,
+    routePath: null,
+  });
+  const estByStopId = Object.fromEntries(stopEstimates.map(e => [e.stopId, e]));
 
   const sendNotification = (stop, dist) => {
     if ("Notification" in window && Notification.permission === "granted") {
@@ -218,14 +252,50 @@ export default function DriverApp({ companyId: propCompanyId }) {
     await updateDoc(doc(db, "companies", companyId, "drivers", driver.id), {
       status: "운행중", startedAt: new Date().toISOString(),
     });
+    // 운행 시작 시점의 활성 dispatch·노선 정보를 캡쳐(중간에 dispatch picker 전환되어도
+    // 콜백 클로저는 시작 dispatch에 stopArrivals 기록 — 단일 운행 단위 일관성).
+    const activeDispId = dispatch?.id || null;
+    const activeRouteDepart = dispatch?.departTime || null;
+    const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
     const id = startGPS({
       companyId, vehicleId: driver.vehicleId, vehicleNo: driver.vehicleNo || "",
       driverId: driver.id, driverName: driver.name || "",
       routeId: dispatch?.routeId || "", routeName: dispatch?.routeName || "",
       stops,
-      onStopReached: (stop, dist) => {
+      onStopReached: async (stop, dist) => {
         setCurrentStopIdx(stops.findIndex(s => s.id === stop.id));
         sendNotification(stop, dist);
+        // ── stopArrivals 기록(멱등) ─────────────────────────────
+        // 활성 dispatch 있을 때만, 같은 stopId가 이미 있으면 덮어쓰지 않음(서버측 가드).
+        // 권한: 운행 중 기사(driver) 본인은 자신 dispatch 의 stopArrivals 필드만 update 가능
+        // (firestore.rules 신규 화이트리스트). 실패는 무해 처리(로컬 진행 UI는 불변).
+        if (!activeDispId) return;
+        try {
+          const ref = doc(db, "companies", companyId, "dispatches", todayStr, "list", activeDispId);
+          const snap = await getDoc(ref);
+          if (!snap.exists()) return;
+          const sa = snap.data().stopArrivals || {};
+          if (sa[stop.id]) return; // 멱등 — 첫 도착만 기록
+          const plannedAt = planTimeForStop(activeRouteDepart, stop.offsetMin);
+          // delaySec 추정: plannedAt(오늘 ms) - now. 클라 추정값(서버는 actualAt에 serverTimestamp).
+          let delaySec = null;
+          if (plannedAt && typeof stop.offsetMin === "number") {
+            const m = plannedAt.match(/^(\d{2}):(\d{2})$/);
+            if (m) {
+              const planDate = new Date(); planDate.setHours(+m[1], +m[2], 0, 0);
+              delaySec = Math.round((Date.now() - planDate.getTime()) / 1000);
+            }
+          }
+          await updateDoc(ref, {
+            [`stopArrivals.${stop.id}`]: {
+              actualAt: serverTimestamp(),
+              plannedAt: plannedAt || null,
+              delaySec,
+            },
+          });
+        } catch (e) {
+          console.warn("[BusLink] stopArrivals 기록 실패:", e.message);
+        }
       },
       onGpsError: (err) => {
         // err.code 1=PERMISSION_DENIED, 3=TIMEOUT — 화면 안내(작업4 권한 UI와 연동)
@@ -387,6 +457,11 @@ export default function DriverApp({ companyId: propCompanyId }) {
                 const done = currentStopIdx < 0 ? 0 : Math.min(currentStopIdx + 1, total);
                 const next = stops[currentStopIdx + 1] || stops[currentStopIdx] || null;
                 const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+                const nextEst = next ? estByStopId[next.id] : null;
+                const lab = nextEst ? formatDelayLabel(nextEst.delaySec) : { tone: "mute", label: "" };
+                const labColor = lab.tone === 'danger' ? '#FFD8D8'
+                  : lab.tone === 'warn' ? '#FFE7BF'
+                  : '#CFEFE0';
                 return (
                   <div style={S.heroProgress}>
                     <div style={S.heroProgressTop}>
@@ -394,6 +469,19 @@ export default function DriverApp({ companyId: propCompanyId }) {
                       <span style={S.heroProgressCount}>{done}/{total} 정류장</span>
                     </div>
                     <div style={S.heroNextStop}>{next ? next.name : "운행 시작"}</div>
+                    {nextEst && nextEst.plannedAt && (
+                      <div style={{ fontSize: 13, color: "#fff", opacity: 0.92, marginTop: 4, fontWeight: 700, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        <span>계획 {nextEst.plannedAt}</span>
+                        {nextEst.estimatedAt && nextEst.estimatedAt !== nextEst.plannedAt && (
+                          <span>· 예상 {nextEst.estimatedAt}</span>
+                        )}
+                        {lab.label && lab.tone !== 'mute' && (
+                          <span style={{ background: "rgba(255,255,255,0.18)", border: `1px solid ${labColor}`, color: labColor, borderRadius: 999, padding: "2px 9px", fontSize: 12 }}>
+                            {lab.label}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     <div style={S.heroBar}>
                       <div style={{ ...S.heroBarFill, width: `${pct}%` }} />
                     </div>
@@ -460,6 +548,12 @@ export default function DriverApp({ companyId: propCompanyId }) {
                 const isDone = i < currentStopIdx;
                 const isCurrent = i === currentStopIdx;
                 const isNext = i === currentStopIdx + 1;
+                const est = estByStopId[stop.id];
+                const lab = est ? formatDelayLabel(est.delaySec) : { tone: "mute", label: "" };
+                const labColor = lab.tone === 'danger' ? 'var(--color-destructive)'
+                  : lab.tone === 'warn' ? 'var(--color-cautionary)'
+                  : 'var(--color-positive)';
+                const arrived = est && est.status === 'arrived';
                 return (
                   <div key={stop.id} style={{ ...S.stopRow, opacity: isDone ? 0.5 : 1 }}>
                     <div style={{
@@ -475,6 +569,19 @@ export default function DriverApp({ companyId: propCompanyId }) {
                       }}>
                         {stop.name}
                       </div>
+                      {/* 계획·실제 시각 — offsetMin 설정된 정류장만(폴백은 정류장명만) */}
+                      {est && est.plannedAt && (
+                        <div style={{ fontSize: 12, marginTop: 2, fontWeight: 600, color: "var(--color-label-mute)" }}>
+                          {arrived ? "도착 " : "계획 "}
+                          <span style={{ color: arrived ? 'var(--color-positive)' : 'var(--color-primary-deep)', fontWeight: 800 }}>{arrived ? est.estimatedAt : est.plannedAt}</span>
+                          {!arrived && est.estimatedAt && est.estimatedAt !== est.plannedAt && (
+                            <> · 예상 <span style={{ color: 'var(--color-primary-deep)', fontWeight: 800 }}>{est.estimatedAt}</span></>
+                          )}
+                          {lab.label && lab.tone !== 'mute' && (
+                            <> · <span style={{ color: labColor, fontWeight: 800 }}>{lab.label}</span></>
+                          )}
+                        </div>
+                      )}
                       {stop.address && <div style={S.stopAddr}>{stop.address}</div>}
                     </div>
                     {isCurrent && <span style={S.tagCurrent}>현재</span>}

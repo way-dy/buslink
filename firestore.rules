@@ -50,7 +50,16 @@ service cloud.firestore {
 
       match /dispatches/{date}/list/{dispatchId} {
         allow read: if isAuth() && (isAdmin(companyId) || isDriverOf(companyId));
-        allow write: if isAdmin(companyId);
+        // 관리자: 전체 write 가능(기존 동작 유지)
+        allow create, delete: if isAdmin(companyId);
+        // update: 관리자 전체 OR 기사 본인 dispatch 의 stopArrivals 필드 한정.
+        // 기사 본인 확인: drivers/{dispatch.driverId}.uid == request.auth.uid
+        // (운행 시작 시 DriverApp 이 drivers.uid 를 자기 auth uid 로 update — 기존 흐름)
+        allow update: if isAdmin(companyId)
+          || (isDriverOf(companyId)
+              && get(/databases/$(database)/documents/companies/$(companyId)/drivers/$(resource.data.driverId)).data.uid
+                 == request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["stopArrivals"]));
       }
 
       match /drivers/{driverId} {

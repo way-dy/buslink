@@ -11,6 +11,7 @@ import {
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { calcETA } from "../lib/gps";
 import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom } from "../lib/routeProgress";
+import { computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
 
 import { validateAndBoard } from "../lib/boarding";
 import { hashPin } from "../lib/partner";
@@ -338,6 +339,34 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
     });
   }, [companyId, activeRouteId]);
 
+  // ── 오늘 노선 dispatch 구독(stopArrivals 실 도착시각 수신) ────────
+  // 활성 노선의 오늘 dispatch 1건(여러개면 첫 건) — driver 측이 도착 감지 시
+  // stopArrivals.{stopId} = { actualAt, plannedAt, delaySec } 업데이트.
+  // 미설정 노선/dispatch 없음=빈객체→ 폴백 동작(stopSchedule.js 가 처리).
+  const [todayDispatch, setTodayDispatch] = useState(null);
+  useEffect(() => {
+    if (!companyId || !activeRouteId) { setTodayDispatch(null); return; }
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+    const q = query(
+      collection(db, 'companies', companyId, 'dispatches', today, 'list'),
+      where('routeId', '==', activeRouteId)
+    );
+    return onSnapshot(q, snap => {
+      if (snap.empty) { setTodayDispatch(null); return; }
+      // 같은 노선 dispatch 여러건이어도 stopArrivals 병합 — '먼저 도착한' 차량 우선.
+      const merged = {};
+      snap.docs.forEach(d => {
+        const sa = d.data().stopArrivals || {};
+        Object.entries(sa).forEach(([sid, v]) => {
+          const at = v?.actualAt?.toMillis ? v.actualAt.toMillis() : (typeof v?.actualAt === 'number' ? v.actualAt : null);
+          if (at == null) return;
+          if (merged[sid] == null || at < merged[sid]) merged[sid] = at;
+        });
+      });
+      setTodayDispatch({ stopArrivals: merged });
+    }, () => setTodayDispatch(null));
+  }, [companyId, activeRouteId]);
+
   const mainBus   = buses[0] || null;
   const myStop    = myStopIdx !== null ? stops[myStopIdx] : null;
   const activeRoute = routes.find(r => r.id === activeRouteId) || allRoutes.find(r => r.id === activeRouteId);
@@ -390,6 +419,20 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
     const a = Math.sin(dLat/2)**2 + Math.cos(mainBus.lat*Math.PI/180)*Math.cos(myStop.lat*Math.PI/180)*Math.sin(dLng/2)**2;
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
   })() : null;
+
+  // ── 정류장 estimates(계획 + 누적지연 + GPS 가중) ───────────────
+  // todayDispatch.stopArrivals = { stopId: actualMs } (서버측 도착 기록).
+  // departTime/offsetMin 미설정이면 status='unplanned'로 폴백 분기.
+  const stopEstimates = computeStopEstimates({
+    stops,
+    departTime: activeRoute?.departTime,
+    actualArrivals: todayDispatch?.stopArrivals || {},
+    vehiclePos: mainBus ? { lat: mainBus.lat, lng: mainBus.lng } : null,
+    speed: mainBus?.speed,
+    routePath: usePathProgress ? routePath : null,
+  });
+  const estByStopId = Object.fromEntries(stopEstimates.map(e => [e.stopId, e]));
+  const myStopEst = myStop ? estByStopId[myStop.id] : null;
 
   // ★ 핵심 — routePath 있으면 경로 진행거리 기반, 없으면 노선 순서(기존) 폴백
   const etaStatus = (() => {
@@ -720,6 +763,23 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
                   {mainBus.vehicleNo} · {mainBus.speed ?? 0} km/h
                 </div>
               )}
+              {/* 계획 진입시각 · 예상 · 지연(있을 때만, 폴백/미설정이면 미노출) */}
+              {myStopEst && myStopEst.plannedAt && (
+                <div style={{ fontSize: 10, color: 'var(--color-label-mute)', marginTop: 3, fontWeight: 600 }}>
+                  계획 {myStopEst.plannedAt}
+                  {myStopEst.estimatedAt && myStopEst.estimatedAt !== myStopEst.plannedAt && (
+                    <> · 예상 <span style={{ color: 'var(--color-primary-deep)', fontWeight: 700 }}>{myStopEst.estimatedAt}</span></>
+                  )}
+                  {(() => {
+                    const lab = formatDelayLabel(myStopEst.delaySec);
+                    if (!lab.label || lab.tone === 'mute') return null;
+                    const color = lab.tone === 'danger' ? 'var(--color-destructive)'
+                      : lab.tone === 'warn' ? 'var(--color-cautionary)'
+                      : 'var(--color-positive)';
+                    return <> · <span style={{ color, fontWeight: 700 }}>{lab.label}</span></>;
+                  })()}
+                </div>
+              )}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flexShrink: 0 }}>
               <button onClick={onScanTab}
@@ -909,6 +969,41 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
     });
   }, [stopModal, companyId]);
 
+  // 선택 노선 오늘 dispatch stopArrivals 구독 — 모달 정류장 목록 계획·예상 시간 표시용.
+  const [modalDispatch, setModalDispatch] = useState(null);
+  useEffect(() => {
+    if (!stopModal || !companyId) { setModalDispatch(null); return; }
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+    const q = query(
+      collection(db, "companies", companyId, "dispatches", today, "list"),
+      where("routeId", "==", stopModal.id)
+    );
+    return onSnapshot(q, snap => {
+      if (snap.empty) { setModalDispatch(null); return; }
+      const merged = {};
+      snap.docs.forEach(d => {
+        const sa = d.data().stopArrivals || {};
+        Object.entries(sa).forEach(([sid, v]) => {
+          const at = v?.actualAt?.toMillis ? v.actualAt.toMillis() : (typeof v?.actualAt === 'number' ? v.actualAt : null);
+          if (at == null) return;
+          if (merged[sid] == null || at < merged[sid]) merged[sid] = at;
+        });
+      });
+      setModalDispatch({ stopArrivals: merged });
+    }, () => setModalDispatch(null));
+  }, [stopModal, companyId]);
+
+  // 모달 정류장 estimates(계획 + 누적지연). 모달엔 routePath/속도 모르므로 GPS 가중은 생략.
+  const modalEstimates = (stopModal && modalStops.length > 0)
+    ? computeStopEstimates({
+        stops: modalStops,
+        departTime: stopModal.departTime,
+        actualArrivals: modalDispatch?.stopArrivals || {},
+        vehiclePos: null, speed: null, routePath: null,
+      })
+    : [];
+  const modalEstByStopId = Object.fromEntries(modalEstimates.map(e => [e.stopId, e]));
+
   const toggleFavorite = async (routeId) => {
     const newFavs = favorites.includes(routeId)
       ? favorites.filter(id => id !== routeId)
@@ -1073,6 +1168,28 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
                             color: i===0?"#007A29":i===modalStops.length-1?"var(--color-destructive)":"var(--color-label)" }}>
                             {s.name}
                           </div>
+                          {/* 계획·예상시각 표시 — offsetMin 설정된 정류장만(미설정은 폴백, 본 모달엔 GPS 가중 없음) */}
+                          {(() => {
+                            const e = modalEstByStopId[s.id];
+                            if (!e || !e.plannedAt) return null;
+                            const lab = formatDelayLabel(e.delaySec);
+                            const labColor = lab.tone === 'danger' ? 'var(--color-destructive)'
+                              : lab.tone === 'warn' ? 'var(--color-cautionary)'
+                              : 'var(--color-positive)';
+                            const arrived = e.status === 'arrived';
+                            return (
+                              <div style={{ fontSize:11, marginTop:2, fontWeight:600, color:"var(--color-label-mute)" }}>
+                                {arrived ? "도착 " : "계획 "}
+                                <span style={{ color: arrived ? 'var(--color-positive)' : 'var(--color-primary-deep)', fontWeight:700 }}>{arrived ? e.estimatedAt : e.plannedAt}</span>
+                                {!arrived && e.estimatedAt && e.estimatedAt !== e.plannedAt && (
+                                  <> · 예상 <span style={{ color: 'var(--color-primary-deep)', fontWeight:700 }}>{e.estimatedAt}</span></>
+                                )}
+                                {lab.label && lab.tone !== 'mute' && (
+                                  <> · <span style={{ color: labColor, fontWeight:700 }}>{lab.label}</span></>
+                                )}
+                              </div>
+                            );
+                          })()}
                           {s.address && <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:1 }}>{s.address}</div>}
                           {s.description && <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:2, lineHeight:1.45, wordBreak:"keep-all" }}>{s.description}</div>}
                           {s.photo && (

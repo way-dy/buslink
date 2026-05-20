@@ -12,6 +12,7 @@ import { sendGPS } from "../lib/gps";
 import { createPartnerCode, getBoardingUrl } from "../lib/partner";
 import { sendNotice } from "../lib/notifications";
 import { compressImageFile } from "../lib/image";
+import { planTimeForStop } from "../lib/stopSchedule";
 // 리디자인 3단계 — 실시간 관제(MapTab) 라이트 리스킨 전용. 타 탭 미사용.
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 
@@ -650,7 +651,7 @@ function RoutesTab({ companyId }) {
   const [stops, setStops] = useState([]);
   const [showStopForm, setShowStopForm] = useState(false);
   const [editStop, setEditStop] = useState(null);
-  const [stopForm, setStopForm] = useState({ name:"", address:"", lat:"", lng:"", photo:"", description:"" });
+  const [stopForm, setStopForm] = useState({ name:"", address:"", lat:"", lng:"", photo:"", description:"", offsetMin:"" });
   const [stopLoading, setStopLoading] = useState(false);
   const [photoProcessing, setPhotoProcessing] = useState(false); // 사진 압축 중
   const [showMapPicker, setShowMapPicker] = useState(false);   // 지도 좌표 선택 모달
@@ -727,7 +728,7 @@ function RoutesTab({ companyId }) {
   const resetAddrSearch = () => { setAddrQuery(""); setAddrResults([]); setAddrSearching(false); setAddrMsg(""); };
   const openStopAdd = () => {
     setEditStop(null);
-    setStopForm({ name:"", address:"", lat:"", lng:"", photo:"", description:"" });
+    setStopForm({ name:"", address:"", lat:"", lng:"", photo:"", description:"", offsetMin:"" });
     setPickerPin(null);
     resetAddrSearch();
     // 기존 정류장이 있으면 첫 번째 정류장 위치로 중심 설정
@@ -736,7 +737,7 @@ function RoutesTab({ companyId }) {
   };
   const openStopEdit = (s) => {
     setEditStop(s);
-    setStopForm({ name:s.name||"", address:s.address||"", lat:s.lat?.toString()||"", lng:s.lng?.toString()||"", photo:s.photo||"", description:s.description||"" });
+    setStopForm({ name:s.name||"", address:s.address||"", lat:s.lat?.toString()||"", lng:s.lng?.toString()||"", photo:s.photo||"", description:s.description||"", offsetMin: (typeof s.offsetMin === "number") ? String(s.offsetMin) : "" });
     resetAddrSearch();
     if (s.lat && s.lng) {
       setPickerCenter({ lat: s.lat, lng: s.lng });
@@ -860,7 +861,15 @@ function RoutesTab({ companyId }) {
     const lat = parseFloat(stopForm.lat), lng = parseFloat(stopForm.lng);
     if (isNaN(lat) || isNaN(lng)) return alert("위도/경도는 숫자로 입력해주세요");
     setStopLoading(true);
-    const data = { name:stopForm.name.trim(), address:stopForm.address.trim(), lat, lng, photo:stopForm.photo||"", description:(stopForm.description||"").trim(), updatedAt:new Date().toISOString() };
+    // offsetMin: 빈값/공백 → null(미설정, 폴백 동작). 숫자면 정수로 저장(분).
+    const rawOff = (stopForm.offsetMin ?? "").toString().trim();
+    let offsetMin = null;
+    if (rawOff !== "") {
+      const n = parseInt(rawOff, 10);
+      if (isNaN(n)) { setStopLoading(false); return alert("진입 오프셋(분)은 정수로 입력하세요"); }
+      offsetMin = n;
+    }
+    const data = { name:stopForm.name.trim(), address:stopForm.address.trim(), lat, lng, photo:stopForm.photo||"", description:(stopForm.description||"").trim(), offsetMin, updatedAt:new Date().toISOString() };
     const col = collection(db, "companies", companyId, "routes", stopsRoute.id, "stops");
     try {
       if (editStop) {
@@ -1073,6 +1082,16 @@ function RoutesTab({ companyId }) {
                     <div style={{ fontSize:13, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.name}</div>
                     {s.address && <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.address}</div>}
                     {s.description && <div style={{ fontSize:10, color:"var(--color-label-mute)", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>📝 {s.description}</div>}
+                    {/* 계획 진입시각 — 노선 출발 + 정류장 offsetMin. 미설정은 '—' */}
+                    {(() => {
+                      const plan = planTimeForStop(stopsRoute?.departTime, s.offsetMin);
+                      return (
+                        <div style={{ fontSize:10, color: plan ? "var(--color-primary-deep)" : "var(--color-label-assistive)", marginTop:1, fontWeight: plan ? 600 : 500 }}>
+                          🕒 계획 진입 {plan || "—"}
+                          {typeof s.offsetMin === "number" ? ` (+${s.offsetMin}분)` : ""}
+                        </div>
+                      );
+                    })()}
                     <div style={{ fontSize:10, color:"var(--color-label-alt)", marginTop:1 }}>{s.lat?.toFixed(5)}, {s.lng?.toFixed(5)}</div>
                   </div>
                   <div style={{ display:"flex", flexDirection:"column", gap:4, flexShrink:0 }}>
@@ -1151,6 +1170,26 @@ function RoutesTab({ companyId }) {
                 placeholder="예) 정문 앞 버스 표지판 옆, 횡단보도 건너편"
                 value={stopForm.description}
                 onChange={e=>setStopForm({...stopForm,description:e.target.value})}/>
+
+              {/* 진입 오프셋(분) (선택) — 노선 출발시각 기준 이 정류장까지 도달 분 수.
+                  예: 출발 07:00·오프셋 25 → 계획 진입 07:25. 미설정 시 폴백(직선거리 ETA). */}
+              <label style={S.label}>진입 오프셋(분) (선택)</label>
+              <input
+                style={{...S.input, marginBottom:4}}
+                type="number"
+                inputMode="numeric"
+                placeholder="예) 25 (출발시각 기준 25분 후 진입)"
+                value={stopForm.offsetMin}
+                onChange={e=>setStopForm({...stopForm, offsetMin: e.target.value.replace(/[^\d-]/g, "")})}
+              />
+              <div style={{ fontSize:11, color:"var(--color-label-alt)", marginBottom:8, lineHeight:1.45 }}>
+                {(() => {
+                  const plan = planTimeForStop(stopsRoute?.departTime, parseInt(stopForm.offsetMin, 10));
+                  return plan
+                    ? `→ 계획 진입시각 ${plan} (노선 출발 ${stopsRoute?.departTime || "-"})`
+                    : "미설정 시 직선거리 기반 ETA로 폴백";
+                })()}
+              </div>
 
               {/* 지도 클릭 좌표 선택 버튼 */}
               <button onClick={() => setShowMapPicker(true)}

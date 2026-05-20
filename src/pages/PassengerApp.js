@@ -6,6 +6,7 @@ import { collection, onSnapshot, query, where, doc, getDoc, getDocs, orderBy } f
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { calcETA } from "../lib/gps";
 import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom } from "../lib/routeProgress";
+import { computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 
 // ── 경로 진행 판정 임계값 (작업2, 2026-05-18 — EmployeeApp과 동일 정책) ──
@@ -136,6 +137,30 @@ export default function PassengerApp() {
     });
   }, [companyId, routeId, ready]);
 
+  // 오늘 dispatch stopArrivals 구독(routeId 한정) — 정류장 리스트 계획·예상 시간 표시용.
+  const [todayDispatch, setTodayDispatch] = useState(null);
+  useEffect(() => {
+    if (!ready || !routeId) { setTodayDispatch(null); return; }
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+    const q = query(
+      collection(db, "companies", companyId, "dispatches", today, "list"),
+      where("routeId", "==", routeId)
+    );
+    return onSnapshot(q, snap => {
+      if (snap.empty) { setTodayDispatch(null); return; }
+      const merged = {};
+      snap.docs.forEach(d => {
+        const sa = d.data().stopArrivals || {};
+        Object.entries(sa).forEach(([sid, v]) => {
+          const at = v?.actualAt?.toMillis ? v.actualAt.toMillis() : (typeof v?.actualAt === 'number' ? v.actualAt : null);
+          if (at == null) return;
+          if (merged[sid] == null || at < merged[sid]) merged[sid] = at;
+        });
+      });
+      setTodayDispatch({ stopArrivals: merged });
+    }, () => setTodayDispatch(null));
+  }, [companyId, routeId, ready]);
+
   const timeSince = (date) => {
     if (!date) return "";
     const sec = Math.floor((new Date() - date) / 1000);
@@ -179,6 +204,18 @@ export default function PassengerApp() {
   const myStopProgress = (usePathProgress && myStopIdx !== null && stops[myStopIdx])
     ? projectToPolyline({ lat: stops[myStopIdx].lat, lng: stops[myStopIdx].lng }, routePath, routeCum)?.progress
     : null;
+
+  // ── 정류장 estimates(계획 + 누적지연 + GPS 가중, 다음 1개) ──
+  // routePath 없으면 GPS 가중도 직선거리 폴백. offsetMin 미설정 정류장은 unplanned 처리.
+  const stopEstimates = computeStopEstimates({
+    stops,
+    departTime: route?.departTime,
+    actualArrivals: todayDispatch?.stopArrivals || {},
+    vehiclePos: mainBus ? { lat: mainBus.lat, lng: mainBus.lng } : null,
+    speed: mainBus?.speed,
+    routePath: usePathProgress ? routePath : null,
+  });
+  const estByStopId = Object.fromEntries(stopEstimates.map(e => [e.stopId, e]));
 
   // 내 정류장까지 ETA — routePath 있으면 경로거리 기반, 없으면 기존 직선 calcETA(폴백)
   const getMyETA = () => {
@@ -498,13 +535,42 @@ export default function PassengerApp() {
                     </div>
                     {s.address && <div style={S.stopItemAddr}>{s.address}</div>}
                     {s.description && <div style={S.stopItemDesc}>{s.description}</div>}
+                    {/* 계획·예상시각 (offsetMin 설정 시) */}
+                    {(() => {
+                      const e = estByStopId[s.id];
+                      if (!e || !e.plannedAt) return null;
+                      const lab = formatDelayLabel(e.delaySec);
+                      const labColor = lab.tone === 'danger' ? 'var(--color-destructive)'
+                        : lab.tone === 'warn' ? 'var(--color-cautionary)'
+                        : 'var(--color-positive)';
+                      const arrived = e.status === 'arrived';
+                      return (
+                        <div style={{ fontSize:11, marginTop:2, fontWeight:600, color:"var(--color-label-mute)" }}>
+                          {arrived ? "도착 " : "계획 "}
+                          <span style={{ color: arrived ? 'var(--color-positive)' : 'var(--color-primary-deep)', fontWeight:700 }}>{arrived ? e.estimatedAt : e.plannedAt}</span>
+                          {!arrived && e.estimatedAt && e.estimatedAt !== e.plannedAt && (
+                            <> · 예상 <span style={{ color: 'var(--color-primary-deep)', fontWeight:700 }}>{e.estimatedAt}</span></>
+                          )}
+                          {lab.label && lab.tone !== 'mute' && (
+                            <> · <span style={{ color: labColor, fontWeight:700 }}>{lab.label}</span></>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                   {myStopIdx === i && (
                     <span style={S.tagMyStop}>내 정류장</span>
                   )}
                   {mainBus && myStopIdx === null && (
                     <span style={S.stopEta}>
-                      {calcETA({ lat: mainBus.lat, lng: mainBus.lng }, s, mainBus.speed)}분
+                      {(() => {
+                        // offsetMin 설정 + plan+delay 산출 가능하면 그것 우선, 아니면 calcETA 폴백.
+                        const e = estByStopId[s.id];
+                        if (e && e.estimatedAt && e.status !== 'unplanned' && e.status !== 'arrived') {
+                          return e.estimatedAt;
+                        }
+                        return `${calcETA({ lat: mainBus.lat, lng: mainBus.lng }, s, mainBus.speed)}분`;
+                      })()}
                     </span>
                   )}
                 </div>
