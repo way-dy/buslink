@@ -36,6 +36,8 @@
 - `[패턴]` 루트 `CLOUD_FUNCTION_FCM.js`는 v1 옛 참고 스니펫 — 실배포는 `functions/index.js`(v2).
 - `[패턴]` `boardingTokens`/`partnerCodes`는 규칙상 read 공개(`true`) — 토큰 추측·코드 유출 주의.
 - `[패턴]` 카카오 `services`(Geocoder/Places) 사용 시 `window.kakao?.maps?.services` + 콜백 `status` 가드 필수 — SDK 미로드/한도초과 시 우아 실패+수동 경로(지도선택/좌표직접/자유텍스트) 보존. RoutesTab 정류장 검색이 이 패턴(`handleAddrSearch`).
+- `[패턴]` **임시 진단 박스 = `[DIAG-X 제거예정]`/`[/DIAG-X]` 경계 + 모든 return 분기 결합**: `return null` 자리도 `return diagBox`로 바꿔야 standalone/snoozed/null-mode 어떤 분기든 가시화 가능. 다음 커밋에 `grep DIAG-X` 1줄로 통째 제거. DIAG-B(`/p` 흰화면, 2026-05-19) · DIAG-INSTALL(설치팝업, 2026-05-20) 둘 다 이 패턴으로 1회 사용자 확인 후 종결.
+- `[패턴]` **minified 번들 검증은 `grep -o TOKEN file \| wc -l`** (매칭 횟수). `grep -c`는 단일행 prod 번들에 늘 1 — 오탐. 한국어 라벨은 terser가 ASCII `\uXXXX`로 escape하므로 fixed-string grep 0건이 정상 — **ASCII 식별자**(window 속성 `__buslinkDeferredBIP`·LS 키 `buslink_*`·Firestore 필드 `routePath`·CSS 클래스 `pickerModal`·SVG 색 코드 `00BF40`) 또는 Node로 escape needle 생성해 검증.
 - `[패턴]` 실 테스트/별도 lint 없음 — 수동 검증. 배포는 사용자 명시 요청 시에만.
 
 ## 저장소 메모

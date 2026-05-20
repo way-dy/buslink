@@ -25,7 +25,8 @@
 
 ## 경로 / 권한·설치 (2026-05-18)
 - `lib/routeProgress.js` — 폴리라인 누적거리·점 투영. `routes/{id}.routePath`(수동 그린 경로) 기반 승객앱(`/p`·`/bus`) 진행 시각화·정밀 도착판정. **미설정 시 stops 직선 폴백**(하위호환). 상세 @.claude/issues.md.
-- 권한·PWA설치: `lib/usePermissions.js` + `components/PermissionGate.js`(순수 브라우저 API, Firebase import 금지 — `components/ui` 관례 일관). `index.js`가 `firebase-messaging-sw.js` 1회 선등록(`beforeinstallprompt` 활성화, idempotent).
+- 권한·PWA설치: `lib/usePermissions.js` + `components/PermissionGate.js` + `components/InstallPrompt.js`(순수 브라우저 API, Firebase import 금지). `src/index.js`가 ①`firebase-messaging-sw.js` 1회 선등록(idempotent) ②`beforeinstallprompt` 글로벌 stash(`window.__buslinkDeferredBIP`, render 전 — 늦게 마운트되는 라우트에서도 이벤트 보존).
+- 앱별 PWA 아이콘: `manifest.json`(관제·기본) + `manifest-employee.json`(scope `/p`) + `manifest-driver.json` 3종 + `public/icons/`(승객/기사/관제 svg+1024png). `lib/pwaManifest.js applyAppManifest`를 EmployeeApp/DriverApp 마운트 시 1회 호출해 `<link rel=manifest>`/`apple-touch-icon`/`apple-mobile-web-app-title` 동적 교체. 상세 @.claude/issues.md.
 
 ## 데이터 흐름 — 공지/FCM
 AdminApp → `lib/notifications.js sendNotice` → `notices` + `fcmQueue` 문서 생성 → CF `sendNoticeToCompany`가 멀티캐스트 발송. 상세 @.claude/functions.md.
