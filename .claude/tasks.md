@@ -2,9 +2,9 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
-## 현재 상태 (2026-05-20 노선 그리기 편집 UX 개선·배포 완료)
+## 현재 상태 (2026-05-20 기사앱 설치팝업 BIP stash + 다중배차 선택 칩 배포 완료)
 > 이 저장소가 작업 정본. **어느 PC든** `git pull` + `.env.local`(↓부트스트랩)이면 빌드·배포 가능.
-> prod 라이브 = `main.7d89705e.js`(master HEAD `1849cce`, 노선 그리기 편집 UX 개선).
+> prod 라이브 = `main.6c626f25.js`(master HEAD `ac6fbf3`, 기사앱 BIP 글로벌 stash·다중배차 칩).
 
 ### git 원격
 - `origin/master` = 작업 정본(2026-05-20 main 4커밋 머지). 3월 폐갈래는 `origin/archive/remote-march-2026`(`f63321c`)에 영구 백업.
@@ -40,6 +40,7 @@
 - [ ] (보류·SaaS) #17 슈퍼관리자·빌링 / #16 멀티테넌트(dy001 하드코딩) / #15 SMS인증 — PLANNING §7·§8. (폐기) #10 예약관리(통근 확정)
 
 ## 완료 (요약·시간역순, 상세는 issues.md 패턴·redesign-log.md)
+- [x] **2026-05-20 기사앱 설치 가이드 BIP 글로벌 stash + 다중 배차 선택 칩** `ac6fbf3`/`main.6c626f25.js` — 3파일(+97/-7) src/index.js·components/InstallPrompt.js·pages/DriverApp.js. (1) `beforeinstallprompt`는 페이지 로드 직후 한 번 발생 → `index.js`에 `window.__buslinkDeferredBIP` 글로벌 stash, `InstallPrompt` mount 시 회수+비움. DriverApp early-return(loading/error)에도 `<InstallPrompt/>` 추가(안전망). 기사앱 Firebase Auth+driver/dispatch 로드 동안 마운트 지연으로 BIP 미캐치 → EmployeeApp(`/p`) 익명로그인만 동작하던 원인 제거. (2) `loadDispatch` `snap.docs[0]` 단일 → `dispatches[]` + `activeDispatchId` 칩 선택, derived dispatch 로 기존 참조 100% 호환, localStorage `buslink_driver_active_dispatch_{today}` 영속(재진입 복원), 활성 변경 시 stops 재로드 useEffect. 배차 1건 이하 회귀 0(picker 미표시). curl ⓐ `appkey=58bf34` ⓑ manifest/apple-meta/autoload=false 유지 ⓒ 새 번들 ≠ 옛 5해시 ⓓ 적용 실증: `__buslinkDeferredBIP` 6건 / `\\uc624\\ub298 \\ubc30\\ucc28`(오늘 배차) 6건 / `\\ub178\\uc120`(노선) 68건 / `\\ub178\\uc120?` 1건 / `buslink_driver_active_dispatch_` 2건 / `dispatches` 7건 / `routeId` 46건. 신규 경고 0.
 - [x] **2026-05-20 노선 그리기 편집 UX 개선·배포 — 중간 삽입(⊕)·앞에 추가·선택 삭제·3색 핀·번호 라벨** `1849cce`/`main.7d89705e.js` — AdminApp.js 단독 +78/-18(parse OK). 신규 state `selectedIdx`/`prependMode`, 신규 핸들러 `pathInsertPoint`/`pathPrependPoint`/`pathDeleteSelected`(기존 add/move/delete/undo/clear/seed/save 본체 불변). 정점 마커: 노란 별→SVG 핀 출발 `#00BF40`/도착 `#FF4D6A`/중간 `#0066FF`, 선택 시 검정 외곽선. CustomOverlayMap 번호/역할 라벨(출발/도착/#N). 세그먼트 중점 ⊕ 클릭=중간 삽입+자동 선택. 마커 onClick 즉시삭제→선택(오삭제 방지). curl ⓐ `appkey=58bf34` ⓑ manifest/apple-meta/autoload=false 유지 ⓒ 새 번들 ≠ 옛 4해시 ⓓ prod 번들에 색 코드 16건(`00BF40`×3+`FF4D6A`×13) 인라인 — 적용 실증. 신규 경고 0.
 - [x] **2026-05-20 머지 prod 배포 — 노선 그리기 회귀 복구·번들해시·curl 6항목 실측** — master HEAD `d06bb7f` 배포(`main.dc99419e.js`). curl ⓐ `appkey=58bf34` ⓑ manifest/apple-meta/autoload=false 전부 유지 ⓒ manifest 3종 200·scope `/`·`/p`·`/` ⓓ 아이콘 6종 200/올바른 ct ⓔ 새 번들 ≠ 옛 3해시(`d85ec794`/`1614fa6b`/`80d0f31e`) ⓕ 머지 실증: `정류장 순서대로 자동 연결`(\\u esc) 1건·`routePath` 10건·`노선`(\\ub178\\uc120) 67건. 신규 경고 0(기존 LoginApp/PartnerApp/AdminApp/DriverApp/EmployeeApp no-unused-vars만). 회귀 0.
 - [x] **2026-05-20 main→master 머지** — origin/main 4커밋(`5fa0737`·`2ec17c0`·`c970c07`·`0495924`) 통합: 노선 사전경로 그리기 UI + `lib/routeProgress.js` + `components/PermissionGate.js`·`lib/usePermissions.js` + gps 콜드스타트 + `.env.example` + 문제 A 오진 정정 docs. 코드 충돌 3건(EmployeeApp/DriverApp imports + EmployeeApp `<Map onCreate>` — main 더블 relayout 채택) + 문서 2건 해결. 흰화면 보강: 제 autoload=false(1597097) + main의 onCreate `relayout()+setTimeout 300ms` 공존 = 더 견고.
