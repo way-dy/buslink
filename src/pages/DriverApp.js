@@ -381,18 +381,6 @@ export default function DriverApp({ companyId: propCompanyId }) {
   return (
     <div style={S.container}>
       <InstallPrompt />
-      {/* [DIAG-INSTALL2 제거예정] — 설치팝업·설치카드 미표시 원인 진단 (1회 확인 후 다음 커밋 제거) */}
-      <div style={{ position: 'fixed', top: 4, right: 4, zIndex: 99999, background: 'rgba(0,0,0,0.85)', color: '#fff', fontSize: 10, padding: '5px 7px', borderRadius: 5, lineHeight: 1.35, fontFamily: 'monospace', maxWidth: 220, pointerEvents: 'none', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-        {(() => {
-          const stdln = (typeof window !== 'undefined' && ((window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true)) ? 'y' : 'n';
-          const bip = (typeof window !== 'undefined' && window.__buslinkDeferredBIP) ? 'y' : 'n';
-          let ls = 'null';
-          try { ls = (typeof localStorage !== 'undefined' && localStorage.getItem('buslink_pwa_prompt')) || 'null'; } catch { ls = 'err'; }
-          const sw = (typeof navigator !== 'undefined' && 'serviceWorker' in navigator && navigator.serviceWorker.controller) ? 'ctrl' : 'no';
-          const ios = /iPad|iPhone|iPod/.test(typeof navigator !== 'undefined' ? navigator.userAgent || '' : '') ? 'y' : 'n';
-          return `STDLN:${stdln} BIP:${bip}\nSW:${sw} iOS:${ios}\nLS:${ls}`;
-        })()}
-      </div>
       <div style={S.card}>
         {/* 헤더 */}
         <div style={S.header}>
@@ -581,15 +569,16 @@ export default function DriverApp({ companyId: propCompanyId }) {
                       }}>
                         {stop.name}
                       </div>
-                      {/* 계획·실제 시각 — offsetMin 설정된 정류장만(폴백은 정류장명만) */}
+                      {/* 계획·실제 시각 — offsetMin 설정된 정류장만(폴백은 정류장명만).
+                          예상/지연은 운행 중 또는 도착 실측이 있을 때만(운행 시작 전엔 의미 없음 — 계획만). */}
                       {est && est.plannedAt && (
                         <div style={{ fontSize: 12, marginTop: 2, fontWeight: 600, color: "var(--color-label-mute)" }}>
                           {arrived ? "도착 " : "계획 "}
                           <span style={{ color: arrived ? 'var(--color-positive)' : 'var(--color-primary-deep)', fontWeight: 800 }}>{arrived ? est.estimatedAt : est.plannedAt}</span>
-                          {!arrived && est.estimatedAt && est.estimatedAt !== est.plannedAt && (
+                          {!arrived && driving && est.estimatedAt && est.estimatedAt !== est.plannedAt && (
                             <> · 예상 <span style={{ color: 'var(--color-primary-deep)', fontWeight: 800 }}>{est.estimatedAt}</span></>
                           )}
-                          {lab.label && lab.tone !== 'mute' && (
+                          {(arrived || driving) && lab.label && lab.tone !== 'mute' && (
                             <> · <span style={{ color: labColor, fontWeight: 800 }}>{lab.label}</span></>
                           )}
                         </div>
