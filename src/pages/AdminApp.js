@@ -728,7 +728,9 @@ function RoutesTab({ companyId }) {
   const resetAddrSearch = () => { setAddrQuery(""); setAddrResults([]); setAddrSearching(false); setAddrMsg(""); };
   const openStopAdd = () => {
     setEditStop(null);
-    setStopForm({ name:"", address:"", lat:"", lng:"", photo:"", description:"", plannedTime:"" });
+    // 첫 정류장(stops 비어있음)이면 plannedTime을 노선 출발시각으로 prefill — 0분.
+    const initialPlanned = (stops.length === 0 && stopsRoute?.departTime) ? stopsRoute.departTime : "";
+    setStopForm({ name:"", address:"", lat:"", lng:"", photo:"", description:"", plannedTime: initialPlanned });
     setPickerPin(null);
     resetAddrSearch();
     // 기존 정류장이 있으면 첫 번째 정류장 위치로 중심 설정
@@ -861,14 +863,17 @@ function RoutesTab({ companyId }) {
     const lat = parseFloat(stopForm.lat), lng = parseFloat(stopForm.lng);
     if (isNaN(lat) || isNaN(lng)) return alert("위도/경도는 숫자로 입력해주세요");
     setStopLoading(true);
-    // plannedTime("HH:MM") → 노선 departTime 기준 offsetMin(분) 변환 저장.
-    // 빈값=null(미설정, 폴백). 노선 departTime 없거나 형식 오류면 저장 거부.
+    // plannedTime("HH:MM") → 노선 departTime 기준 offsetMin(분, ≥0) 변환 저장.
+    // 빈값=null(미설정, 폴백). 노선 departTime 없거나 형식 오류·노선 출발보다 빠르면 거부.
     const rawTime = (stopForm.plannedTime ?? "").toString().trim();
     let offsetMin = null;
     if (rawTime !== "") {
       if (!stopsRoute?.departTime) { setStopLoading(false); return alert("노선 출발시각이 먼저 설정되어야 정류장 진입시각을 계산할 수 있습니다"); }
       const off = offsetMinFromPlanTime(stopsRoute.departTime, rawTime);
-      if (off == null) { setStopLoading(false); return alert("정류장 진입시각 형식이 올바르지 않습니다 (HH:MM)"); }
+      if (off == null) {
+        setStopLoading(false);
+        return alert(`정류장 진입시각은 노선 출발시각(${stopsRoute.departTime}) 이후여야 합니다.\n\n첫 정류장이라면 노선 출발시각과 같은 시각(${stopsRoute.departTime})을 입력하세요. 노선 출발시각 자체를 바꾸려면 노선 관리에서 수정해 주세요(모든 정류장 절대시각이 자동 따라옵니다).`);
+      }
       offsetMin = off;
     }
     const data = { name:stopForm.name.trim(), address:stopForm.address.trim(), lat, lng, photo:stopForm.photo||"", description:(stopForm.description||"").trim(), offsetMin, updatedAt:new Date().toISOString() };

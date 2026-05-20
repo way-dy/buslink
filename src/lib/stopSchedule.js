@@ -38,15 +38,16 @@ export function planTimeForStop(departTime, offsetMin) {
   return fmtHHMM(base + offsetMin);
 }
 
-// 역변환: "HH:MM" 정류장 진입시각 + 노선 출발시각 → offsetMin(분).
-// 입력값 비정상이면 null. 진입시각이 출발시각보다 빠르면 자정 넘김으로 +24h 보정.
+// 역변환: "HH:MM" 정류장 진입시각 + 노선 출발시각 → offsetMin(분, ≥0).
+// 입력값 비정상이거나 진입시각이 출발시각보다 빠르면 null(통근버스 모델: 정류장은
+// 노선 출발 이후만 — 자정 넘김 노선이 필요해지면 별도 처리). 0 허용(첫 정류장).
 // AdminApp 정류장 폼이 시각(HH:MM)을 입력받고 저장 시 분으로 변환할 때 사용.
 export function offsetMinFromPlanTime(departTime, plannedTime) {
   const base = parseHHMM(departTime);
   const t = parseHHMM(plannedTime);
   if (base == null || t == null) return null;
-  let off = t - base;
-  if (off < 0) off += 24 * 60;
+  const off = t - base;
+  if (off < 0) return null;
   return off;
 }
 
