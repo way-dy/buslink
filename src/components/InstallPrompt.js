@@ -41,13 +41,31 @@ function isIosSafari() {
   return isSafari;
 }
 
+// 안드로이드 Chrome/삼성 인터넷(Samsung Internet) 등 PWA 설치 지원 브라우저 — in-app 브라우저는 제외
+function isAndroidPwaCapable() {
+  const ua = window.navigator.userAgent || "";
+  if (!/Android/.test(ua)) return false;
+  // 카카오톡·라인·페북 등 인앱 브라우저는 BIP 미지원 + PWA 설치 메뉴도 없음 → 안내 무용
+  if (/FBAN|FBAV|Instagram|KAKAOTALK|Line\//.test(ua)) return false;
+  // Chrome / Edge / Samsung Internet 모두 PWA 설치 지원
+  return /Chrome|SamsungBrowser|EdgA/.test(ua);
+}
+
 // 최근에 닫았으면(3일 이내) true
+// ★ installed 플래그 검증식: 실제 standalone 아닌데 플래그만 남아있으면 PWA 삭제로 간주 → flag 자동 청소.
+// 사용자가 홈 아이콘 길게 눌러 PWA 삭제해도 origin localStorage는 잔존 → 영구 차단 결함(iOS 빈번).
 function isSnoozed() {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return false;
     const { dismissedAt, installed } = JSON.parse(raw);
-    if (installed) return true; // 영구 비표시
+    if (installed) {
+      // standalone이면 진짜 설치 상태 — 영구 비표시 유지(여기 도달 전 isStandalone() 분기에서 처리되나 안전망)
+      if (isStandalone()) return true;
+      // standalone 아닌데 installed flag만 → PWA 삭제됨 → flag 청소하고 안내 재노출
+      try { localStorage.removeItem(LS_KEY); } catch {}
+      return false;
+    }
     if (!dismissedAt) return false;
     return Date.now() - dismissedAt < SNOOZE_DAYS * DAY_MS;
   } catch {
@@ -132,11 +150,24 @@ export default function InstallPrompt() {
       }, 1500);
     }
 
+    // 안드로이드 Chrome BIP 영구 차단 케이스 폴백: 한 번 설치 후 홈에서 삭제해도
+    // Chrome 내부가 "이미 설치됨"으로 기억해 BIP 미발화 → 우리 카드 자체 미표시.
+    // 3초까지 BIP 안 오면 수동 안내 모드("android-manual")로 — "Chrome 메뉴 → 홈 화면에 추가" 가이드.
+    let androidTimer = null;
+    if (isAndroidPwaCapable()) {
+      androidTimer = setTimeout(() => {
+        if (mounted) {
+          setMode((prev) => (prev === "android" ? prev : "android-manual"));
+        }
+      }, 3000);
+    }
+
     return () => {
       mounted = false;
       window.removeEventListener("beforeinstallprompt", onBIP);
       window.removeEventListener("appinstalled", onInstalled);
       if (iosTimer) clearTimeout(iosTimer);
+      if (androidTimer) clearTimeout(androidTimer);
     };
   }, []);
 
@@ -216,7 +247,7 @@ export default function InstallPrompt() {
             >
               앱으로 설치하면 더 빠르게 이용할 수 있어요
             </div>
-            {mode === "android" ? (
+            {mode === "android" && (
               <div
                 style={{
                   fontSize: 13,
@@ -226,7 +257,20 @@ export default function InstallPrompt() {
               >
                 홈 화면에 BusLink 를 추가하면 앱처럼 바로 실행돼요.
               </div>
-            ) : (
+            )}
+            {mode === "android-manual" && (
+              <div
+                style={{
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                  color: "var(--color-label-mute, rgba(46,47,51,0.62))",
+                }}
+              >
+                Chrome 우상단 메뉴 <b style={{ color: "var(--color-label, #171719)" }}>⋮</b> 를 눌러<br />
+                <b style={{ color: "var(--color-label, #171719)" }}>'홈 화면에 추가'</b> 또는 <b style={{ color: "var(--color-label, #171719)" }}>'앱 설치'</b> 를 선택하세요.
+              </div>
+            )}
+            {mode === "ios" && (
               <div
                 style={{
                   fontSize: 13,
