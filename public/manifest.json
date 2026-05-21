@@ -15,7 +15,8 @@
       "purpose": "any"
     }
   ],
-  "start_url": "/",
+  "id": "/?app=admin",
+  "start_url": "/?app=admin",
   "scope": "/",
   "display": "standalone",
   "theme_color": "#0066FF",

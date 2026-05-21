@@ -15,6 +15,7 @@
       "purpose": "any"
     }
   ],
+  "id": "/p",
   "start_url": "/p",
   "scope": "/p",
   "display": "standalone",
