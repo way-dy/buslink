@@ -17,6 +17,8 @@ import { planTimeForStop, offsetMinFromPlanTime } from "../lib/stopSchedule";
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 // 협력사 필터 공통 컴포넌트 — 다수 탭에서 재사용
 import { PartnerFilter } from "../components/PartnerFilter";
+// 탭 단위 에러 경계 — 자식 throw 시 흰 화면 방지 + 에러 메시지 가시화
+import { ErrorBoundary } from "../components/ErrorBoundary";
 
 const TABS = ["대시보드", "실시간 관제", "배차 관리", "배차 일정", "노선 관리", "기사 관리", "차량 관리", "시뮬레이터", "운행 이력", "협력사 관리", "공지 발송"];
 const TAB_ICONS = ["grid", "pin", "flag", "calendar", "route", "user", "bus", "play", "clock", "globe", "bell"];
@@ -136,17 +138,17 @@ export default function AdminApp({ user, companyId }) {
           </div>
         )}
 
-        {tab === 0 && <DashboardTab companyId={companyId} drivers={drivers} vehicles={vehicles} onNav={setTab} />}
-        {tab === 1 && <MapTab companyId={companyId} />}
-        {tab === 2 && <DispatchTab companyId={companyId} vehicles={vehicles} drivers={drivers} />}
-        {tab === 3 && <DispatchScheduleTab companyId={companyId} vehicles={vehicles} drivers={drivers} />}
-        {tab === 4 && <RoutesTab companyId={companyId} />}
-        {tab === 5 && <DriverTab companyId={companyId} vehicles={vehicles} />}
-        {tab === 6 && <VehicleTab companyId={companyId} vehicles={vehicles} />}
-        {tab === 7 && <SimulatorTab companyId={companyId} vehicles={vehicles} drivers={drivers} />}
-        {tab === 8 && <HistoryTab companyId={companyId} vehicles={vehicles} />}
-        {tab === 9 && <PartnerTab companyId={companyId} />}
-        {tab === 10 && <NoticeTab companyId={companyId} />}
+        {tab === 0 && <ErrorBoundary label="대시보드"><DashboardTab companyId={companyId} drivers={drivers} vehicles={vehicles} onNav={setTab} /></ErrorBoundary>}
+        {tab === 1 && <ErrorBoundary label="실시간 관제"><MapTab companyId={companyId} /></ErrorBoundary>}
+        {tab === 2 && <ErrorBoundary label="배차 관리"><DispatchTab companyId={companyId} vehicles={vehicles} drivers={drivers} /></ErrorBoundary>}
+        {tab === 3 && <ErrorBoundary label="배차 일정"><DispatchScheduleTab companyId={companyId} vehicles={vehicles} drivers={drivers} /></ErrorBoundary>}
+        {tab === 4 && <ErrorBoundary label="노선 관리"><RoutesTab companyId={companyId} /></ErrorBoundary>}
+        {tab === 5 && <ErrorBoundary label="기사 관리"><DriverTab companyId={companyId} vehicles={vehicles} /></ErrorBoundary>}
+        {tab === 6 && <ErrorBoundary label="차량 관리"><VehicleTab companyId={companyId} vehicles={vehicles} /></ErrorBoundary>}
+        {tab === 7 && <ErrorBoundary label="시뮬레이터"><SimulatorTab companyId={companyId} vehicles={vehicles} drivers={drivers} /></ErrorBoundary>}
+        {tab === 8 && <ErrorBoundary label="운행 이력"><HistoryTab companyId={companyId} vehicles={vehicles} /></ErrorBoundary>}
+        {tab === 9 && <ErrorBoundary label="협력사 관리"><PartnerTab companyId={companyId} /></ErrorBoundary>}
+        {tab === 10 && <ErrorBoundary label="공지 발송"><NoticeTab companyId={companyId} /></ErrorBoundary>}
       </div>
     </div>
   );
