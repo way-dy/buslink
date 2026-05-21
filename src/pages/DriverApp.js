@@ -43,6 +43,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
       || (d.partnerName || "").toLowerCase().includes(q);
   });
   const [stops, setStops] = useState([]);
+  const [routePath, setRoutePath] = useState([]); // 노선 사전경로 — GPS 복구 백필·estimates 구간전파용
   const [currentStopIdx, setCurrentStopIdx] = useState(-1);
   const [boardingToken, setBoardingToken] = useState(null);   // 현재 탑승 토큰
   const [qrUrl, setQrUrl] = useState(null);        // 탑승 링크 URL
@@ -166,6 +167,16 @@ export default function DriverApp({ companyId: propCompanyId }) {
     } catch (e) {
       console.warn("[BusLink] 정류장 로드 실패:", e.message);
     }
+    // 노선 사전경로(routePath) 로드 — GPS 복구 시 정류장 진행률 백필·estimates
+    // 구간전파에 사용. 빈배열/없음이면 직선 폴백(하위호환 — 회귀 0).
+    try {
+      const rd = await getDoc(doc(db, "companies", cid, "routes", routeId));
+      const rp = rd.exists() ? rd.data().routePath : null;
+      setRoutePath(Array.isArray(rp) ? rp : []);
+    } catch (e) {
+      console.warn("[BusLink] 노선 경로 로드 실패:", e.message);
+      setRoutePath([]);
+    }
   };
 
   // 운행 중 "GPS 신호 확보 중…" 안내 자동 해제 — 실제 측위가 들어오면 표시 끔.
@@ -225,14 +236,17 @@ export default function DriverApp({ companyId: propCompanyId }) {
 
   // ── 정류장 estimates(계획·예상시각·지연) ──
   // 기사 화면엔 GPS 가중 무의미(차량 자기 좌표) → vehiclePos 미주입, plan+delay 모드.
-  // todayDispatch.stopArrivals 갱신 → 누적지연 자동 반영. offsetMin 미설정 = unplanned.
+  // routePath는 주입 — computeStopEstimates 단조증가 구간전파(chainCandidate)가
+  // routePath 구간거리 기반으로 더 정밀해짐(vehiclePos 없으면 gpsCandidate는 미발생,
+  // 회귀 표면 없음). todayDispatch.stopArrivals 갱신 → 누적지연 자동 반영.
+  // 단조증가 로직이 "도착예정시간이 현재시간 이전" 결함을 해결(이슈 #2).
   const stopEstimates = computeStopEstimates({
     stops,
     departTime: dispatch?.departTime,
     actualArrivals: stopArrivals,
     vehiclePos: null,
     speed: null,
-    routePath: null,
+    routePath: Array.isArray(routePath) && routePath.length >= 2 ? routePath : null,
   });
   const estByStopId = Object.fromEntries(stopEstimates.map(e => [e.stopId, e]));
 
@@ -275,8 +289,13 @@ export default function DriverApp({ companyId: propCompanyId }) {
       driverId: driver.id, driverName: driver.name || "",
       routeId: dispatch?.routeId || "", routeName: dispatch?.routeName || "",
       stops,
-      onStopReached: async (stop, dist) => {
-        setCurrentStopIdx(stops.findIndex(s => s.id === stop.id));
+      // 노선 사전경로 — GPS 복구 시 진행률 기반 정류장 누락 백필(빈배열=직선 폴백).
+      routePath: Array.isArray(routePath) ? routePath : [],
+      onStopReached: async (stop, dist, viaBackfill) => {
+        // 백필이 한 콜백에서 여러 정류장을 순차 호출할 수 있음 → Math.max로 역행 방지
+        // (옛 정류장 인덱스가 현재값을 끌어내리지 않도록).
+        const newIdx = stops.findIndex(s => s.id === stop.id);
+        if (newIdx >= 0) setCurrentStopIdx(prev => Math.max(prev, newIdx));
         sendNotification(stop, dist);
         // ── stopArrivals 기록(멱등) ─────────────────────────────
         // 활성 dispatch 있을 때만, 같은 stopId가 이미 있으면 덮어쓰지 않음(서버측 가드).
@@ -304,6 +323,10 @@ export default function DriverApp({ companyId: propCompanyId }) {
               actualAt: serverTimestamp(),
               plannedAt: plannedAt || null,
               delaySec,
+              // 백필(GPS 복구 시 진행률로 회복한 통과 누락분) 식별 플래그.
+              // 통신장애 중 통과분은 actualAt=복구시각이라 delaySec이 부정확할 수
+              // 있음 — 향후 진단용. computeStopEstimates는 actualAt만 쓰므로 무영향.
+              estimated: !!viaBackfill,
             },
           });
         } catch (e) {

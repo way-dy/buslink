@@ -4,16 +4,33 @@
 //   - planTimeForStop: 노선 출발시각(departTime "HH:MM") + 정류장 offsetMin(분)
 //     → 정류장 계획 진입시각("HH:MM" 또는 null).
 //   - computeStopEstimates: 정류장별 status·계획시각·예상시각·지연(초) 산출.
-//     실 도착(actualArrivals) 누적지연을 미통과 정류장에 적용 + 다음 1개는
-//     GPS 잔여거리/속도와 30:70 가중평균(2026-05-21 ETA 안정화: GPS 비중 축소,
-//     plan+delay 안정성 우세 — GPS 노이즈 30~70km/h 흔들림 vs plan+delay는
-//     정류장 통과 후 1회만 갱신). offsetMin 미설정 정류장은 calcETA 폴백.
+//     정류장을 order 순서대로 순회하며 estMs를 "단조증가"로 강제(2026-05-22):
+//     각 정류장 estMs[i] = max(plan+누적지연, 직전 estMs+구간이동시간, [next]GPS) 후
+//     estMs[i] >= estMs[i-1]+MIN_STOP_GAP_SEC + estMs[i] >= now+버퍼(과거 금지).
+//     → 도착지·이전 정류장 동일값·역전·과거 시각 표시 결함 원천 차단.
+//     next 정류장은 plan+delay 70 : gps 30 가중(GPS 노이즈 비중 축소) 후 같은
+//     단조증가·과거금지 후처리. offsetMin 미설정 정류장은 calcETA 폴백.
 //   - formatPassengerEta: 부드러워진 ETA(초)를 버킷 라벨(곧 도착/N분 후/약 N분/
 //     HH:MM 예상)로 변환 + 신뢰도 톤(primary/warn/mute).
 // react-kakao-maps-sdk · Firebase import 없음(순수 계산).
 // ---------------------------------------------------------------------------
 
 import { haversine, projectToPolyline, buildCumulativeLengths } from "./routeProgress";
+
+// ── 단조증가 estimates 상수 ──────────────────────────────────────────────────
+// computeStopEstimates는 정류장을 order 순서대로 순회하며 estMs를 "단조증가"로
+// 강제한다. 단조증가가 필요한 이유 = 다음 3가지 결함을 원천 차단:
+//   ① 동일값: 여러 미통과 정류장의 plan+delay 추정이 모두 과거가 되면 과거 보정
+//      clamp가 전부 T_NOW로 끌어올려 도착지·이전 정류장이 같은 시각으로 표시됨.
+//   ② 역전: nextIdx보다 그 다음 정류장의 plan+delay가 더 이른 시각이 될 수 있음.
+//   ③ 과거 표시: 누적지연이 작으면 plannedMs+delay가 현재시각 이전이 되어
+//      "도착예정시간이 현재시간 이전"으로 표시됨.
+// 해법 = 각 정류장 estMs[i] >= estMs[i-1] + MIN_STOP_GAP_SEC 보장 +
+//        estMs[i] >= T_NOW + MIN_FUTURE_BUFFER_SEC(과거 금지).
+const MIN_STOP_GAP_SEC = 25;       // 정류장 간 최소 시각 간격(초) — 동일값·역전 차단
+const MIN_FUTURE_BUFFER_SEC = 30;  // 미통과 정류장 estimate 최소 미래 버퍼(초)
+const DEFAULT_SPEED_KMH = 30;      // routePath/속도 없을 때 구간이동시간 기본 속도
+const MIN_EFFECTIVE_SPEED_KMH = 20; // 정차/저속 노이즈 하한 — 구간이동시간 계산용
 
 // "HH:MM" 문자열을 0~24*60 분으로. 형식 불량(빈값/NaN/범위 초과) 시 null.
 function parseHHMM(s) {
@@ -139,14 +156,56 @@ export function computeStopEstimates({
     if (arrivals[stops[i].id] == null) { nextIdx = i; break; }
   }
 
-  return stops.map((s, i) => {
+  // 4) 정류장별 routePath 진행거리(progress, m) 사전 산출 — 구간이동시간 계산용.
+  //    routePath 미설정이면 null(직선거리 폴백).
+  const stopProgress = stops.map(s =>
+    (usePath && typeof s.lat === "number" && typeof s.lng === "number")
+      ? (projectToPolyline({ lat: s.lat, lng: s.lng }, routePath, cum)?.progress ?? null)
+      : null
+  );
+
+  // 두 정류장(인덱스 a→b) 간 구간 이동시간(ms). routePath 구간거리가 있으면 그것을,
+  // 없으면 haversine 직선거리를. 유효속도 = max(차량속도, 20km/h)(저속 노이즈 하한).
+  const segTravelMs = (a, b) => {
+    let distM = null;
+    if (stopProgress[a] != null && stopProgress[b] != null) {
+      distM = Math.max(0, stopProgress[b] - stopProgress[a]);
+    } else {
+      const pa = stops[a], pb = stops[b];
+      if (pa && pb && typeof pa.lat === "number" && typeof pb.lat === "number") {
+        distM = haversine({ lat: pa.lat, lng: pa.lng }, { lat: pb.lat, lng: pb.lng });
+      }
+    }
+    if (distM == null) distM = 0;
+    // 유효속도: 차량 속도 반영하되 20km/h 하한(정차 중 chain이 무한대로 늘어남 방지).
+    const effSpeed = Math.max(
+      (typeof speed === "number" && speed > MIN_EFFECTIVE_SPEED_KMH)
+        ? speed : DEFAULT_SPEED_KMH,
+      MIN_EFFECTIVE_SPEED_KMH
+    );
+    return (distM / 1000) / effSpeed * 3600 * 1000;
+  };
+
+  // 5) 정류장 메타(plannedAt/plannedMs/offset)를 1패스로 산출.
+  const meta = stops.map((s) => {
     const offset = (typeof s.offsetMin === "number" && isFinite(s.offsetMin))
       ? s.offsetMin : null;
     const plannedAt = (hasPlanBase && offset != null) ? fmtHHMM(baseMin + offset) : null;
     const plannedMs = (hasPlanBase && offset != null)
       ? hhmmToTodayMillis(plannedAt, T_NOW) : null;
+    return { offset, plannedAt, plannedMs };
+  });
 
-    // (a) 이미 통과(실 도착 있음) → 실측.
+  // 6) order 순서대로 순회하며 estMs를 단조증가로 누적 산출.
+  //    prevEstMs = 직전 정류장의 확정 estMs(arrived는 actualMs, 미통과는 보정된 estMs).
+  //    prevEstMs가 null이면(노선 시작 전 기준점 없음) T_NOW를 기준으로 사용.
+  let prevEstMs = null;
+  const out = [];
+  for (let i = 0; i < stops.length; i++) {
+    const s = stops[i];
+    const { offset, plannedAt, plannedMs } = meta[i];
+
+    // (a) 이미 통과(실 도착 있음) → 실측. prevEstMs를 actualMs로 갱신(체인 기준점).
     if (arrivals[s.id] != null) {
       const actualMs = arrivals[s.id];
       const estimatedAt = fmtHHMM(
@@ -154,80 +213,109 @@ export function computeStopEstimates({
       );
       const delaySec = (plannedMs != null)
         ? Math.round((actualMs - plannedMs) / 1000) : null;
-      return {
+      prevEstMs = actualMs;
+      out.push({
         stopId: s.id, plannedAt, estimatedAt, delaySec,
         status: "arrived", source: "actual",
-      };
+      });
+      continue;
     }
 
     // (b) offsetMin 없음 = 계획 자체가 없음 → 폴백(calcETA류) 단위로 표시.
+    //     체인 기준점(prevEstMs)은 갱신하지 않음(계획 시각이 없어 신뢰 불가).
     if (offset == null) {
-      // 폴백 ETA는 페이지에서 calcETA 직접 호출하므로 여기선 status만 알린다.
-      return {
+      out.push({
         stopId: s.id, plannedAt: null, estimatedAt: null, delaySec: null,
         status: "unplanned", source: "fallback",
-      };
+      });
+      continue;
     }
 
-    // (c) 계획 + 누적지연 적용.
-    const planDelayMs = plannedMs != null
+    // ── 미통과·계획 있음 정류장 = 후보 3개를 산출해 max로 결합 ──
+    // (c) planCandidate = 계획시각 + 누적지연.
+    const planCandidate = plannedMs != null
       ? plannedMs + cumulativeDelaySec * 1000
       : null;
 
-    // (d) "다음 1개" 정류장은 GPS 잔여거리 기반 추정 + 가중 평균.
-    let gpsMs = null;
+    // (d) gpsCandidate = nextIdx 정류장 한정 GPS 잔여거리/속도 추정.
+    let gpsCandidate = null;
     if (i === nextIdx && v) {
-      let remainM;
-      if (usePath && busProgress != null) {
-        const stopProj = projectToPolyline({ lat: s.lat, lng: s.lng }, routePath, cum);
-        if (stopProj) remainM = Math.max(0, stopProj.progress - busProgress);
+      let remainM = null;
+      if (usePath && busProgress != null && stopProgress[i] != null) {
+        remainM = Math.max(0, stopProgress[i] - busProgress);
       }
       if (remainM == null) {
-        // 폴백: 직선 거리
-        remainM = haversine(v, { lat: s.lat, lng: s.lng });
+        remainM = haversine(v, { lat: s.lat, lng: s.lng }); // 직선거리 폴백
       }
       const etaMinFloat = (remainM / 1000) / spdKmh * 60;
-      gpsMs = T_NOW + Math.max(0, etaMinFloat) * 60 * 1000;
+      gpsCandidate = T_NOW + Math.max(0, etaMinFloat) * 60 * 1000;
     }
 
-    // (e) 가중 평균 — 둘 다 있을 때 plan+delay 70 : gps 30 (2026-05-21).
-    // GPS 잔여거리/속도 추정은 노이즈가 크므로(같은 50km/h라도 30~70 흔들림)
-    // 계획+누적지연(정류장 통과 후 1회만 갱신) 쪽에 더 비중. 누적지연이 미반영된
-    // 노선 첫 정류장도 plan 자체로 안정 — 5km/h 임계점프(`(speed>5?speed:30)`)에
-    // 직접 노출되는 표면을 줄임. UI(`useSmoothedEta`)와 함께 이중 완충.
+    // (e) chainCandidate = 직전 정류장 estMs + 구간이동시간.
+    //     prevEstMs가 없으면(노선 시작점·기준 부재) T_NOW를 기준으로 chain 시작.
+    const chainBase = (prevEstMs != null) ? prevEstMs : T_NOW;
+    let chainCandidate = null;
+    if (i > 0) {
+      chainCandidate = chainBase + segTravelMs(i - 1, i);
+    }
+
+    // (f) 후보 결합.
+    //   - nextIdx 정류장: 기존 정책대로 plan+delay 70 : gps 30 가중평균(GPS 노이즈
+    //     비중 축소)을 우선 산출 → 그 뒤 chain·단조증가·과거금지 후처리.
+    //   - upcoming 정류장: planCandidate와 chainCandidate 중 max(둘 다 미래 보장의
+    //     하한 — 단조증가는 아래에서 강제). source는 chain 우세면 'plan+delay' 유지
+    //     (체인은 plan 기반 전파라 신뢰도 동일 계열).
     let estMs = null;
     let source = "plan+delay";
-    if (planDelayMs != null && gpsMs != null) {
-      estMs = 0.7 * planDelayMs + 0.3 * gpsMs;
-      source = "gps";
-    } else if (planDelayMs != null) {
-      estMs = planDelayMs;
-      source = "plan+delay";
-    } else if (gpsMs != null) {
-      estMs = gpsMs;
-      source = "gps";
+    if (i === nextIdx) {
+      // next: plan+delay와 gps 가중평균.
+      if (planCandidate != null && gpsCandidate != null) {
+        estMs = 0.7 * planCandidate + 0.3 * gpsCandidate;
+        source = "gps";
+      } else if (gpsCandidate != null) {
+        estMs = gpsCandidate;
+        source = "gps";
+      } else if (planCandidate != null) {
+        estMs = planCandidate;
+        source = "plan+delay";
+      }
+      // next도 chain 후보가 더 늦으면 그쪽 채택(역전 방지).
+      if (chainCandidate != null) {
+        estMs = (estMs != null) ? Math.max(estMs, chainCandidate) : chainCandidate;
+      }
+    } else {
+      // upcoming: plan+delay와 chain 중 더 늦은(=보수적) 시각.
+      const cands = [planCandidate, chainCandidate].filter(x => x != null);
+      if (cands.length > 0) estMs = Math.max(...cands);
     }
-    // 누적지연 참조점이 없고 다음정류장도 아닌 경우는 estMs == planDelayMs(==plannedMs).
+    if (estMs == null) estMs = planCandidate; // 최종 폴백(이론상 plannedMs는 항상 존재)
 
-    // 과거로 추정된 경우(이미 지났어야 함) — 약한 보정: '지금 또는 임박'으로 끌어올림.
-    // (status 자체는 next/upcoming 유지 — 도착감지가 곧 actual로 덮어씀.)
-    if (estMs != null && estMs < T_NOW - 30 * 1000) {
-      estMs = T_NOW;
+    // (g) 단조증가 강제 — 직전 정류장 estMs보다 최소 MIN_STOP_GAP_SEC 이후.
+    //     동일값·역전을 원천 차단(이슈 2·3의 핵심 메커니즘 제거).
+    if (prevEstMs != null) {
+      estMs = Math.max(estMs, prevEstMs + MIN_STOP_GAP_SEC * 1000);
     }
+    // (h) 과거 금지 — 미통과 정류장 estimate는 항상 미래.
+    //     단조증가가 우선(i가 크면 누적 segTravelTime으로 자연히 미래).
+    estMs = Math.max(estMs, T_NOW + MIN_FUTURE_BUFFER_SEC * 1000);
 
-    const estimatedAt = estMs != null
-      ? fmtHHMM(new Date(estMs).getHours() * 60 + new Date(estMs).getMinutes())
-      : null;
-    const delaySec = (estMs != null && plannedMs != null)
+    // 체인 기준점 갱신.
+    prevEstMs = estMs;
+
+    const estimatedAt = fmtHHMM(
+      new Date(estMs).getHours() * 60 + new Date(estMs).getMinutes()
+    );
+    const delaySec = (plannedMs != null)
       ? Math.round((estMs - plannedMs) / 1000)
       : (hasDelayRef ? cumulativeDelaySec : null);
 
-    return {
+    out.push({
       stopId: s.id, plannedAt, estimatedAt, delaySec,
       status: i === nextIdx ? "next" : "upcoming",
       source,
-    };
-  });
+    });
+  }
+  return out;
 }
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -1,10 +1,14 @@
 import { db } from "../firebase";
 import { doc, setDoc, addDoc, deleteDoc, collection, serverTimestamp } from "firebase/firestore";
+import { projectToPolyline, buildCumulativeLengths } from "./routeProgress";
 
 const MIN_DISTANCE_M = 5;
 const MIN_INTERVAL_MS = 3000;
 const HEARTBEAT_MS = 15000; // 정차·미세이동이어도 이 주기마다 강제 1회 전송 (실시간 리스너 갱신 보장)
 const STOP_ARRIVE_M = 100; // 100m 이내 = 정류장 도착
+// 통신장애 복구 백필 마진: 버스 진행률이 정류장 진행률 + 이 거리(m)를 넘었는데
+// 아직 visitedStops에 없으면 GPS 끊김 중 통과한 것으로 판정.
+const PASS_MARGIN_M = 40;
 
 // ── GPS 측위 옵션 (콜드스타트 출발지 미수신 수정, 2026-05-18) ──
 // 초기 1회 fix: 정밀도보다 "즉시 한 점"이 목적 — 캐시 허용·짧은 타임아웃으로 출발 직후 공백 제거.
@@ -71,13 +75,33 @@ export async function clearGPS({ companyId, vehicleId }) {
 
 // ✅ startGPS: stops + onStopReached 콜백 추가
 // onGpsError(있을 때만 호출, 하위호환): 측위 실패를 상위(DriverApp)로 전파해 화면 안내.
-export function startGPS({ companyId, vehicleId, vehicleNo, driverId, driverName, routeId, routeName, stops = [], onStopReached, onGpsError }) {
+// routePath(옵션, [{lat,lng}]): 노선 사전경로. 유효(길이≥2)하면 GPS 신호 복구 시
+//   진행률 기반 백필로 통신장애 중 통과한 정류장을 회복. 없으면 100m 직접 감지만(폴백).
+export function startGPS({ companyId, vehicleId, vehicleNo, driverId, driverName, routeId, routeName, stops = [], routePath = [], onStopReached, onGpsError }) {
   // 상태 격리: 모듈 전역이 아닌 startGPS 클로저 지역 변수 (다중 watch·해제 시 누수 방지)
   let lastPos = null;
   let lastSentTime = 0;
   let trailingTimer = null; // 스로틀로 버려진 마지막 좌표의 지연 전송 타이머
   let watchRestarted = false; // TIMEOUT 시 watch 1회 재시작 가드 (재시작 무한루프 방지)
   const visitedStops = new Set(); // 이미 도착 처리된 정류장 ID
+
+  // ── 통신장애 정류장 누락 백필 준비 (2026-05-22) ──────────────────────────
+  // 문제: watchPosition 콜백이 GPS 끊김(터널·약전계)으로 끊기면 버스가 정류장
+  //   100m 반경을 통과하는 순간 콜백이 없어 visitedStops에 영구 미등록 → currentStopIdx
+  //   가 옛 정류장에 멈춤. 100m 직접 감지만으로는 복구 불가.
+  // 해법: routePath 유효 시 버스/정류장을 폴리라인에 투영해 진행률(progress)을 비교.
+  //   GPS 복구 후 buthProgress가 어떤 정류장 progress + PASS_MARGIN_M을 넘었는데
+  //   visitedStops에 없으면 = 통과 누락 → order 낮은 것부터 순차 onStopReached 호출.
+  const usePath = Array.isArray(routePath) && routePath.length >= 2;
+  const pathCum = usePath ? buildCumulativeLengths(routePath) : null;
+  // 각 정류장 progress 사전 산출 1회 캐시(반복 투영 비용 절감).
+  const stopProg = usePath
+    ? stops.map(s => {
+        if (typeof s.lat !== "number" || typeof s.lng !== "number") return null;
+        const proj = projectToPolyline({ lat: s.lat, lng: s.lng }, routePath, pathCum);
+        return proj ? proj.progress : null;
+      })
+    : null;
 
   // 실제 전송 + 상태 갱신 공통 처리
   const flush = async (pos) => {
@@ -86,6 +110,47 @@ export function startGPS({ companyId, vehicleId, vehicleNo, driverId, driverName
     lastPos = { lat: pos.lat, lng: pos.lng, speed: pos.speed, accuracy: pos.accuracy };
     lastSentTime = Date.now();
     await sendGPS({ companyId, vehicleId, vehicleNo, driverId, driverName, routeId, routeName, lat: pos.lat, lng: pos.lng, speed: pos.speed, accuracy: pos.accuracy });
+  };
+
+  // 정류장 도착 감지 — 콜백마다 호출. 두 경로:
+  //   ① 100m 직접 감지(STOP_ARRIVE_M) — 기존 동작 유지(정밀 케이스).
+  //   ② routePath 진행률 백필 — GPS 끊김 중 100m 반경을 못 잡고 통과한 정류장을
+  //      복구 후 회복(통신장애 정류장 누락 해결). order 낮은 것부터 순차 호출.
+  // onStopReached가 한 콜백에서 여러 번·순차 호출될 수 있음 — 호출측(DriverApp)이 멱등.
+  const detectStops = (curr) => {
+    if (stops.length === 0 || !onStopReached) return;
+
+    // ① 100m 직접 감지 (기존 로직 — 폴백·정밀 케이스). viaBackfill=false.
+    stops.forEach(stop => {
+      if (visitedStops.has(stop.id)) return;
+      const dist = getDistance(curr, { lat: stop.lat, lng: stop.lng });
+      if (dist <= STOP_ARRIVE_M) {
+        visitedStops.add(stop.id);
+        onStopReached(stop, Math.round(dist), false);
+      }
+    });
+
+    // ② routePath 진행률 백필 — usePath 유효할 때만(미설정이면 skip = 회귀 0).
+    if (usePath && stopProg) {
+      const proj = projectToPolyline(curr, routePath, pathCum);
+      if (proj) {
+        const busProgress = proj.progress;
+        // order(=배열) 낮은 정류장부터 순차 — currentStopIdx 역행 방지.
+        for (let i = 0; i < stops.length; i++) {
+          const stop = stops[i];
+          if (visitedStops.has(stop.id)) continue;
+          const sp = stopProg[i];
+          if (sp == null) continue;
+          if (busProgress > sp + PASS_MARGIN_M) {
+            visitedStops.add(stop.id);
+            // 추정 거리 = 현재 좌표 → 정류장 직선거리(통과 누락분이라 정확한 통과
+            // 시각·거리는 추정 불가 — 진단/알림용 근사값). viaBackfill=true.
+            const approxDist = Math.round(getDistance(curr, { lat: stop.lat, lng: stop.lng }));
+            onStopReached(stop, approxDist, true);
+          }
+        }
+      }
+    }
   };
 
   // 콜드스타트 첫 측위가 watch 첫 콜백(최대 30초)보다 늦으면 출발 직후 공백 발생 →
@@ -120,16 +185,8 @@ export function startGPS({ companyId, vehicleId, vehicleNo, driverId, driverName
       };
 
       // 정류장 근접 감지 (GPS 필터링 전에 먼저 체크 — 기존 동작 유지)
-      if (stops.length > 0 && onStopReached) {
-        stops.forEach(stop => {
-          if (visitedStops.has(stop.id)) return;
-          const dist = getDistance(curr, { lat: stop.lat, lng: stop.lng });
-          if (dist <= STOP_ARRIVE_M) {
-            visitedStops.add(stop.id);
-            onStopReached(stop, Math.round(dist));
-          }
-        });
-      }
+      // 100m 직접 감지 + routePath 진행률 백필(통신장애 누락 복구).
+      detectStops(curr);
 
       const moved = !lastPos || getDistance(lastPos, curr) >= MIN_DISTANCE_M;
       const intervalOk = now - lastSentTime >= MIN_INTERVAL_MS;
@@ -163,12 +220,17 @@ export function startGPS({ companyId, vehicleId, vehicleNo, driverId, driverName
           try {
             navigator.geolocation.clearWatch(watchId);
             const rid = navigator.geolocation.watchPosition(
-              (p) => flush({
-                lat: p.coords.latitude, lng: p.coords.longitude,
-                speed: Math.round((p.coords.speed || 0) * 3.6),
-                accuracy: Math.round(p.coords.accuracy),
-                _ts: p.timestamp || Date.now(),
-              }).catch((e) => console.error("[BusLink] GPS 전송 오류:", e)),
+              (p) => {
+                const rc = {
+                  lat: p.coords.latitude, lng: p.coords.longitude,
+                  speed: Math.round((p.coords.speed || 0) * 3.6),
+                  accuracy: Math.round(p.coords.accuracy),
+                  _ts: p.timestamp || Date.now(),
+                };
+                // GPS 복구 직후 — 통신장애 중 통과한 정류장 백필이 가장 필요한 시점.
+                detectStops(rc);
+                flush(rc).catch((e) => console.error("[BusLink] GPS 전송 오류:", e));
+              },
               (e) => console.warn("[BusLink] GPS 재시작 후 오류:", e.message),
               WATCH_OPTS
             );

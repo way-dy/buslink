@@ -6,7 +6,7 @@
 `companies/{companyId}/`:
 - `routes/{routeId}` — `name/code/type/shift/seats/departTime/partnerCode…` + (선택) **`routePath: [{lat,lng}]`**(관리자가 수동으로 그린 경로 폴리라인, plain number·GeoPoint 아님. 빈배열/없음=미설정→승객앱 stops 직선 폴백)
 - `routes/{routeId}/stops/{stopId}` — `name/address/lat/lng/order` + (선택) `photo`(클라 압축 JPEG data URI 문자열, Storage 미사용)·`description`(승객 안내문)·**`offsetMin`**(number, 노선 `departTime` 기준 진입 분 오프셋. null/없음=미설정→폴백)
-- `dispatches/{date}/list/{dispatchId}` + (선택) **`stopArrivals: { [stopId]: { actualAt: serverTimestamp, plannedAt: "HH:MM"|null, delaySec: number|null } }`**(기사가 도착감지 시 기록, 첫 도착만 멱등 기록·덮어쓰기 금지) · CF가 펼친 분은 `scheduleId/source:"schedule"` 필드 추가
+- `dispatches/{date}/list/{dispatchId}` + (선택) **`stopArrivals: { [stopId]: { actualAt: serverTimestamp, plannedAt: "HH:MM"|null, delaySec: number|null, estimated: boolean } }`**(기사가 도착감지 시 기록, 첫 도착만 멱등 기록·덮어쓰기 금지. `estimated:true`=GPS 복구 진행률 백필로 회복한 통과 누락분, 2026-05-22) · CF가 펼친 분은 `scheduleId/source:"schedule"` 필드 추가
 - **`dispatchSchedules/{scheduleId}`** — 반복 배차 패턴 정본(2026-05-20). `name/routeId/routeName/driverId/driverName/vehicleId/vehicleNo/departTime/startDate/endDate(null=무기한)/weekdays:number[](0=일~6=토)/excludeDates:string[]/excludeHolidays:boolean/active:boolean`. CF `expandDispatchSchedules`가 매일 새벽 향후 7일치 dispatches로 펼침(멱등 ID=`${scheduleId}_${day}`)
 - `drivers/{driverId}`, `vehicles/{vehicleId}`
 - `passengers/{empNo}` (PIN 해시·노선 배정)
