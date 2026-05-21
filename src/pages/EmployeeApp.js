@@ -1632,6 +1632,61 @@ function SettingsTab({ companyId, session, onLogout, onSessionUpdate }) {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState(session.pinInitial ? { type:"warn", text:"초기 PIN(000000)을 사용 중입니다. 변경해주세요." } : null);
 
+  // ── 🔔 알림 진단 카드 (2026-05-21) ──
+  // 운영 진단·복구 인프라 — "공지가 안 와요" 호소 시 사용자가 본인 권한·토큰 자가 점검·재발급.
+  // 토큰 invalid → 자동 삭제 → fcmTokens 0건 자연흐름의 사용자측 회복 통로.
+  const [permState, setPermState] = useState(() => (typeof Notification !== "undefined" ? Notification.permission : "default"));
+  const [tokenDoc, setTokenDoc] = useState(null); // { token, updatedAt } | null | undefined(로딩)
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagResult, setDiagResult] = useState(null); // { ok, text }
+
+  const loadTokenDoc = useCallback(async () => {
+    if (!session?.empNo || !companyId) return;
+    try {
+      const snap = await getDoc(doc(db, "companies", companyId, "fcmTokens", session.empNo));
+      setTokenDoc(snap.exists() ? snap.data() : null);
+    } catch (e) {
+      console.warn("[알림 진단] 토큰 조회 실패:", e.message);
+      setTokenDoc(null);
+    }
+  }, [companyId, session?.empNo]);
+
+  useEffect(() => { loadTokenDoc(); }, [loadTokenDoc]);
+
+  const handleReissue = async () => {
+    setDiagLoading(true); setDiagResult(null);
+    try {
+      const r = await initNotifications({
+        companyId, empNo: session.empNo, partnerCode: session.partnerCode || null,
+      });
+      // 권한 거부
+      if (typeof Notification !== "undefined") setPermState(Notification.permission);
+      if (r?.granted === false) {
+        setDiagResult({ ok:false, text:"알림 권한이 거부되었습니다. 브라우저 주소창 자물쇠 아이콘 → 알림 → 허용으로 변경 후 다시 시도해주세요." });
+      } else if (!r?.token) {
+        setDiagResult({ ok:false, text:"토큰 발급에 실패했습니다" + (r?.error ? ": " + r.error : "") });
+      } else {
+        setDiagResult({ ok:true, text:"재발급 완료 — 이제 공지 푸시가 정상 수신됩니다" });
+      }
+      await loadTokenDoc();
+    } catch (e) {
+      setDiagResult({ ok:false, text:"오류: " + (e?.message || String(e)) });
+    }
+    setDiagLoading(false);
+  };
+
+  const fmtTime = (ts) => {
+    if (!ts) return "–";
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return d.toLocaleString("ko-KR", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" });
+  };
+  const tokenTail = tokenDoc?.token ? `...${tokenDoc.token.slice(-4)}` : null;
+  const permPill = permState === "granted"
+    ? { bg:"#E6F7EB", fg:"#007A29", border:"#A7E2BB", text:"허용됨" }
+    : permState === "denied"
+      ? { bg:"#FCE5E5", fg:"#A81818", border:"#F6C9C9", text:"거부됨" }
+      : { bg:"var(--color-bg-soft)", fg:"var(--color-label-mute)", border:"var(--color-line)", text:"미선택" };
+
   const handlePinChange = async () => {
     if (newPin.length < 4) return setMsg({ type:"error", text:"PIN은 4자리 이상이어야 합니다" });
     if (newPin !== confirmPin) return setMsg({ type:"error", text:"새 PIN이 일치하지 않습니다" });
@@ -1677,6 +1732,50 @@ function SettingsTab({ companyId, session, onLogout, onSessionUpdate }) {
             {msg.text}
           </div>
         )}
+
+        {/* 🔔 알림 진단 카드 (2026-05-21) — 권한·토큰 자가 점검·재발급 */}
+        <div style={{ background: "var(--color-bg)", borderRadius: "var(--radius-16)", padding: "16px 18px", border: "1px solid var(--color-line)", boxShadow: "var(--shadow-emphasize)" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-label)", marginBottom: 12 }}>🔔 알림 진단</div>
+
+          {/* 권한 상태 */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--color-line)" }}>
+            <span style={{ fontSize: 13, color: "var(--color-label-mute)" }}>권한 상태</span>
+            <span style={{ background: permPill.bg, color: permPill.fg, border: `1px solid ${permPill.border}`, borderRadius: 8, padding: "3px 10px", fontSize: 12, fontWeight: 700 }}>
+              {permPill.text}
+            </span>
+          </div>
+
+          {/* 등록된 토큰 */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--color-line)", gap: 8 }}>
+            <span style={{ fontSize: 13, color: "var(--color-label-mute)", flexShrink: 0 }}>등록된 토큰</span>
+            <span style={{ fontSize: 12, color: tokenTail ? "var(--color-label)" : "var(--color-destructive)", fontWeight: 600, textAlign: "right", lineHeight: 1.45 }}>
+              {tokenTail ? (
+                <>
+                  발급됨 <span style={{ color: "var(--color-label-mute)", fontWeight: 500 }}>({tokenTail})</span>
+                  <div style={{ fontSize: 11, color: "var(--color-label-alt)", fontWeight: 500 }}>갱신: {fmtTime(tokenDoc?.updatedAt)}</div>
+                </>
+              ) : "미발급"}
+            </span>
+          </div>
+
+          {/* 재발급 결과 */}
+          {diagResult && (
+            <div style={{ marginTop: 10, background: diagResult.ok ? "#E6F7EB" : "#FCE5E5", border: `1px solid ${diagResult.ok ? "#A7E2BB" : "#F6C9C9"}`, borderRadius: 8, padding: "9px 12px", fontSize: 12, fontWeight: 600, color: diagResult.ok ? "#007A29" : "#A81818", lineHeight: 1.5 }}>
+              {diagResult.ok ? "✅ " : "⚠ "}{diagResult.text}
+            </div>
+          )}
+
+          {/* 재발급 버튼 */}
+          <button onClick={handleReissue} disabled={diagLoading}
+            style={{ marginTop: 12, width: "100%", background: "var(--color-primary)", border: "none", borderRadius: "var(--radius-12)", padding: "12px", color: "#fff", fontSize: 14, fontWeight: 700, cursor: diagLoading ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: diagLoading ? 0.6 : 1, boxShadow: "var(--shadow-strong)" }}>
+            {diagLoading ? "재발급 중..." : "🔄 알림 재발급"}
+          </button>
+
+          <div style={{ marginTop: 8, fontSize: 11, color: "var(--color-label-alt)", lineHeight: 1.5 }}>
+            ※ 공지 푸시가 안 오면 위 버튼을 누르세요. 권한이 "거부됨"이면 브라우저 주소창의<br/>
+            자물쇠 아이콘 → 알림 → <b>허용</b>으로 변경 후 다시 시도해주세요.
+          </div>
+        </div>
 
         <div style={{ background: "var(--color-bg)", borderRadius: "var(--radius-16)", overflow: "hidden", border: "1px solid var(--color-line)", boxShadow: "var(--shadow-emphasize)" }}>
           <button onClick={() => setShowPinChange(p => !p)}

@@ -2564,6 +2564,9 @@ function NoticeTab({ companyId }) {
   const [result, setResult] = useState(null);
   const [activeQueueId, setActiveQueueId] = useState(null); // 발송 직후 fcmQueue 결과 구독
   const [queueDoc, setQueueDoc] = useState(null);
+  // 진단 패널 silent-fail 방지: onSnapshot 권한 거부/네트워크 오류 등을 가시화.
+  // notices·partnerCodes·fcmTokens 3개 구독 오류 모두 같은 state에 누적(나중 발생 오류로 덮어쓰기).
+  const [snapshotError, setSnapshotError] = useState(null);
 
   // 발송 이력 구독
   useEffect(() => {
@@ -2573,7 +2576,11 @@ function NoticeTab({ companyId }) {
         collection(db, "companies", companyId, "notices"),
         orderBy("createdAt", "desc")
       ),
-      snap => setNotices(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      snap => setNotices(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      err => {
+        console.warn("[NoticeTab] notices 구독 오류:", err.message);
+        setSnapshotError({ src: "notices", msg: err.message });
+      }
     );
   }, [companyId]);
 
@@ -2582,7 +2589,11 @@ function NoticeTab({ companyId }) {
     if (!companyId) return;
     return onSnapshot(
       query(collection(db, "partnerCodes"), where("companyId", "==", companyId)),
-      snap => setPartners(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      snap => setPartners(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      err => {
+        console.warn("[NoticeTab] partnerCodes 구독 오류:", err.message);
+        setSnapshotError({ src: "partnerCodes", msg: err.message });
+      }
     );
   }, [companyId]);
 
@@ -2591,7 +2602,11 @@ function NoticeTab({ companyId }) {
     if (!companyId) return;
     return onSnapshot(
       collection(db, "companies", companyId, "fcmTokens"),
-      snap => setTokens(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      snap => setTokens(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      err => {
+        console.warn("[NoticeTab] fcmTokens 구독 오류:", err.message);
+        setSnapshotError({ src: "fcmTokens", msg: err.message });
+      }
     );
   }, [companyId]);
 
@@ -2678,7 +2693,12 @@ function NoticeTab({ companyId }) {
       return (
         <div style={{ background:"#E6F7EB", border:"1px solid #A7E2BB", borderRadius:8, padding:"10px 14px", fontSize:13, color:"#007A29", fontWeight:600 }}>
           ✅ 발송 완료 — 총 {tot}건 중 성공 {ok}건 / 실패 {fail}건
-          {fail > 0 && <div style={{ fontSize:11, color:"#A86500", marginTop:4, fontWeight:500 }}>※ 실패 토큰은 자동 정리됩니다(만료 토큰 등)</div>}
+          {fail > 0 && (
+            <div style={{ fontSize:11, color:"#A86500", marginTop:4, fontWeight:500, lineHeight:1.55 }}>
+              ※ 실패 토큰은 자동 정리됩니다(만료/무효 토큰).<br/>
+              📌 해당 직원이 EmployeeApp(<code>/p</code>) 재로그인 + 설정 → 🔔 알림 진단 → 재발급 필요
+            </div>
+          )}
         </div>
       );
     }
@@ -2686,6 +2706,10 @@ function NoticeTab({ companyId }) {
       return (
         <div style={{ background:"#FFF7E0", border:"1px solid #F6E0A0", borderRadius:8, padding:"10px 14px", fontSize:13, color:"#8A6500", fontWeight:600 }}>
           ⚠ 발송 대상 토큰이 없습니다 — 직원이 EmployeeApp 에서 알림 권한을 허용해야 합니다
+          <div style={{ fontSize:11, color:"#8A6500", marginTop:6, fontWeight:500, lineHeight:1.55 }}>
+            📌 원인: 해당 협력사 직원이 EmployeeApp(<code>/p</code>) → <b>설정</b> 탭 → <b>🔔 알림 진단</b>에서<br/>
+            권한 허용 + 토큰 재발급 필요(이전 토큰이 만료되어 자동 삭제되었을 수 있음)
+          </div>
         </div>
       );
     }
@@ -2707,6 +2731,17 @@ function NoticeTab({ companyId }) {
       </div>
 
       <div style={{ padding:"16px 20px", display:"flex", flexDirection:"column", gap:12, overflowY:"auto" }}>
+        {/* ── 진단 패널 silent-fail 경보 ─────────────── */}
+        {/* onSnapshot error 콜백이 잡은 권한/네트워크 오류 가시화 — 향후 진짜 silent fail 즉시 진단 */}
+        {snapshotError && (
+          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", borderRadius:8, padding:"10px 14px", fontSize:13, color:"#A81818", fontWeight:600 }}>
+            ⚠ {snapshotError.src} 구독 실패: {snapshotError.msg}
+            <div style={{ fontSize:11, color:"#A81818", marginTop:4, fontWeight:500 }}>
+              Firestore 권한·네트워크 확인 필요. 진단 패널이 실제 데이터를 못 읽는 상태입니다.
+            </div>
+          </div>
+        )}
+
         {/* ── 진단 패널 — 알림 수신 가능 분포 ─────────────── */}
         <div style={{ background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:10, padding:"12px 14px", boxShadow:"var(--shadow-emphasize)" }}>
           <div style={{ fontSize:12, fontWeight:700, color:"var(--color-label-mute)", marginBottom:8 }}>📊 알림 수신 가능 직원 분포 (fcmTokens)</div>
@@ -2731,8 +2766,10 @@ function NoticeTab({ companyId }) {
             )}
           </div>
           {tokens.length === 0 && (
-            <div style={{ marginTop:8, fontSize:11, color:"#A86500", lineHeight:1.5 }}>
-              ※ 등록된 FCM 토큰이 0건입니다. 직원이 EmployeeApp 에서 알림 권한을 허용해야 합니다.
+            <div style={{ marginTop:8, fontSize:11, color:"#A86500", lineHeight:1.55 }}>
+              ※ 등록된 FCM 토큰이 0건입니다. 직원이 EmployeeApp 에서 알림 권한을 허용해야 합니다.<br/>
+              📌 토큰이 invalid 상태였다면 발송 시 자동 삭제되어 0건이 됩니다 — 직원 본인이<br/>
+              <code>/p</code> → <b>설정</b> → <b>🔔 알림 진단</b> → <b>재발급</b> 버튼으로 갱신 가능
             </div>
           )}
         </div>
