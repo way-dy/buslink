@@ -5,7 +5,7 @@
 ## 함수 목록
 | 함수 | 트리거 | 역할 |
 |---|---|---|
-| `sendNoticeToCompany` | Firestore `onDocumentCreated("fcmQueue/{queueId}")` | 회사 `fcmTokens` 멀티캐스트, 500개 청크, 만료 토큰 자동 삭제 |
+| `sendNoticeToCompany` | Firestore `onDocumentCreated("fcmQueue/{queueId}")` | 회사 `fcmTokens` 멀티캐스트(2026-05-21: `partnerCode` 있으면 `.where("partnerCode","==",X)` 협력사 한정, 없으면 전체). 500개 청크, 만료 토큰 자동 삭제. 결과 `fcmQueue.status`(`sent`/`no_tokens`/`error`) + `totalTokens`/`successCount`/`failureCount` 기록 → AdminApp이 onSnapshot으로 실시간 표시 |
 | `createDriver` | `onCall` | Auth 계정 + `users/{uid}` + `companies/.../drivers` 동시 생성 |
 | `deleteDriver` | `onCall` | Auth/users/drivers 정합 삭제 |
 | `updateDriverPassword` | `onCall` | 기사 비밀번호 변경(≥6자) |
@@ -14,7 +14,7 @@
 | `expandDispatchSchedulesNow` | `onCall` | AdminApp "지금 펼치기" 즉시 트리거. 같은 companyId 한정. 멱등 `${scheduleId}_${day}` dispatch ID — 기존 일별 수동 수정 보존 |
 
 ## 트리거 흐름 — 공지/FCM
-AdminApp `sendNotice` → `companies/{cid}/notices` + 최상위 `fcmQueue` 문서 생성 → `sendNoticeToCompany`가 `companies/{cid}/fcmTokens` 토큰 수집 → `sendEachForMulticast` → `fcmQueue.status` 갱신(`sent`/`no_tokens`/`error`). 무효 토큰은 `fcmTokens`에서 자동 삭제.
+AdminApp `sendNotice({companyId, title, body, type, partnerCode?})` → `companies/{cid}/notices`(partnerCode 포함) + 최상위 `fcmQueue` 문서 생성 → `sendNoticeToCompany`가 partnerCode 있으면 `where("partnerCode","==",X)` 협력사 토큰만 수집(없으면 전체 — partnerCode 필드 누락한 기존 토큰도 포함) → `sendEachForMulticast` → `fcmQueue` 문서에 status(`sent`/`no_tokens`/`error`) + totalTokens/successCount/failureCount 갱신. NoticeTab은 발송 직후 `fcmQueue/{queueId}` 단일 doc onSnapshot 구독 → 결과 카드 실시간 표시(pending→완료/0건/오류). 무효 토큰은 `fcmTokens`에서 자동 삭제.
 
 ## 주의사항
 - onCall 함수는 모두 `request.auth` 필수(미인증 시 `unauthenticated`).

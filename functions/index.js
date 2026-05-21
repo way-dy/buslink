@@ -10,19 +10,25 @@ admin.initializeApp();
 // ════════════════════════════════════════════════════════
 exports.sendNoticeToCompany = onDocumentCreated("fcmQueue/{queueId}", async (event) => {
   const data = event.data.data();
-  const { companyId, title, body, type } = data;
-  console.log("[FCM] 발송 시작:", { companyId, title, type });
+  const { companyId, title, body, type, partnerCode } = data;
+  console.log("[FCM] 발송 시작:", { companyId, title, type, partnerCode: partnerCode || "(전체)" });
 
   try {
-    const tokensSnap = await admin.firestore()
+    // partnerCode 있으면 해당 협력사 토큰만, 없으면 전체.
+    // 기존 partnerCode 필드 없는 fcmTokens 문서는 "전체"에만 포함(특정 협력사 발송 시 제외).
+    let tokensQuery = admin.firestore()
       .collection("companies").doc(companyId)
-      .collection("fcmTokens").get();
+      .collection("fcmTokens");
+    if (partnerCode) {
+      tokensQuery = tokensQuery.where("partnerCode", "==", partnerCode);
+    }
+    const tokensSnap = await tokensQuery.get();
 
     const tokens = tokensSnap.docs.map(d => d.data().token).filter(Boolean);
-    console.log("[FCM] 토큰 수:", tokens.length);
+    console.log("[FCM] 토큰 수:", tokens.length, partnerCode ? `(협력사=${partnerCode})` : "(전체)");
 
     if (tokens.length === 0) {
-      await event.data.ref.update({ status: "no_tokens" });
+      await event.data.ref.update({ status: "no_tokens", totalTokens: 0, successCount: 0, failureCount: 0 });
       return;
     }
 
@@ -108,9 +114,10 @@ exports.sendNoticeToCompany = onDocumentCreated("fcmQueue/{queueId}", async (eve
       await Promise.all(deletePromises);
     }
 
-    console.log("[FCM] 완료 — 성공:", totalSuccess, "실패:", totalFail);
+    console.log("[FCM] 완료 — 성공:", totalSuccess, "실패:", totalFail, "총", tokens.length);
     await event.data.ref.update({
       status: "sent",
+      totalTokens: tokens.length,
       successCount: totalSuccess,
       failureCount: totalFail,
     });

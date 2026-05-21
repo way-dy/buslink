@@ -5,7 +5,7 @@ import { signOut } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import {
   collection, onSnapshot, query, where,
-  doc, addDoc, updateDoc, deleteDoc, getDocs, setDoc, orderBy
+  doc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, setDoc, orderBy
 } from "firebase/firestore";
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { sendGPS } from "../lib/gps";
@@ -15,6 +15,8 @@ import { compressImageFile } from "../lib/image";
 import { planTimeForStop, offsetMinFromPlanTime } from "../lib/stopSchedule";
 // 리디자인 3단계 — 실시간 관제(MapTab) 라이트 리스킨 전용. 타 탭 미사용.
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
+// 협력사 필터 공통 컴포넌트 — 다수 탭에서 재사용
+import { PartnerFilter } from "../components/PartnerFilter";
 
 const TABS = ["대시보드", "실시간 관제", "배차 관리", "배차 일정", "노선 관리", "기사 관리", "차량 관리", "시뮬레이터", "운행 이력", "협력사 관리", "공지 발송"];
 const TAB_ICONS = ["grid", "pin", "flag", "calendar", "route", "user", "bus", "play", "clock", "globe", "bell"];
@@ -157,6 +159,8 @@ function DashboardTab({ companyId, drivers, vehicles, onNav }) {
   const [dispatches, setDispatches] = useState([]);
   const [gpsVehicles, setGpsVehicles] = useState([]);
   const [boardings, setBoardings] = useState([]);
+  const [routes, setRoutes] = useState([]);
+  const [partnerCode, setPartnerCode] = useState("전체"); // 협력사 필터
 
   useEffect(() => {
     if (!companyId) return;
@@ -176,13 +180,27 @@ function DashboardTab({ companyId, drivers, vehicles, onNav }) {
     return onSnapshot(ref, snap => setBoardings(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
   }, [companyId]);
 
+  useEffect(() => {
+    if (!companyId) return;
+    return onSnapshot(collection(db, "companies", companyId, "routes"),
+      snap => setRoutes(snap.docs.map(d => ({ id:d.id, ...d.data() }))));
+  }, [companyId]);
+
+  // 협력사 필터 적용: routeId → partnerCode 매핑
+  const routeOf = (id) => routes.find(r => r.id === id);
+  const matchPartner = (rId) => partnerCode === "전체" || routeOf(rId)?.partnerCode === partnerCode;
+  const filteredDispatches = dispatches.filter(d => matchPartner(d.routeId));
+  const filteredGps = gpsVehicles.filter(v => matchPartner(v.routeId));
+  const filteredBoardings = boardings.filter(b => matchPartner(b.routeId));
+
+  // 협력사 미선택일 때만 전체 기사 카운트, 협력사 선택 시 의미 없으므로 "전체 기사" 그대로
   const driving = drivers.filter(d => d.status === "운행중").length;
   const waiting = drivers.filter(d => d.status !== "운행중").length;
 
   const stats = [
-    { label: "오늘 배차 노선", value: dispatches.length, sub: "금일 등록 기준", color: "var(--color-primary)" },
-    { label: "운행중 차량", value: gpsVehicles.length, sub: `기사 운행중 ${driving}명`, color: "var(--color-positive)" },
-    { label: "오늘 탑승 인원", value: boardings.length, sub: "QR 탑승 기준", color: "var(--color-positive)" },
+    { label: "오늘 배차 노선", value: filteredDispatches.length, sub: partnerCode === "전체" ? "금일 등록 기준" : "선택 협력사 기준", color: "var(--color-primary)" },
+    { label: "운행중 차량", value: filteredGps.length, sub: `기사 운행중 ${driving}명`, color: "var(--color-positive)" },
+    { label: "오늘 탑승 인원", value: filteredBoardings.length, sub: "QR 탑승 기준", color: "var(--color-positive)" },
     { label: "전체 기사", value: drivers.length, sub: `대기 ${waiting}명`, color: "var(--color-primary-deep)" },
   ];
 
@@ -197,7 +215,11 @@ function DashboardTab({ companyId, drivers, vehicles, onNav }) {
             {new Date().toLocaleDateString("ko-KR", { year:"numeric", month:"long", day:"numeric", weekday:"short" })}
           </div>
         </div>
-        <button style={S.addBtn} onClick={() => onNav(1)}>🗺 실시간 관제 →</button>
+        <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+          <span style={{ fontSize:11, color:"var(--color-label-alt)" }}>거래처:</span>
+          <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} />
+          <button style={S.addBtn} onClick={() => onNav(1)}>🗺 실시간 관제 →</button>
+        </div>
       </div>
 
       <div style={{ padding:"20px 24px", overflowY:"auto", flex:1 }}>
@@ -219,15 +241,15 @@ function DashboardTab({ companyId, drivers, vehicles, onNav }) {
               <span style={{ fontWeight:700, color:"var(--color-label)" }}>오늘 배차 현황</span>
               <button style={S.editBtn} onClick={() => onNav(2)}>배차 관리</button>
             </div>
-            {dispatches.length === 0 ? (
-              <div style={S.empty}>오늘 배차 내역이 없습니다</div>
+            {filteredDispatches.length === 0 ? (
+              <div style={S.empty}>{dispatches.length === 0 ? "오늘 배차 내역이 없습니다" : "선택 협력사 배차 없음"}</div>
             ) : (
               <table style={S.table}>
                 <thead>
                   <tr><th style={S.th}>출발</th><th style={S.th}>노선명</th><th style={S.th}>기사</th></tr>
                 </thead>
                 <tbody>
-                  {[...dispatches].sort((a,b) => a.departTime > b.departTime ? 1 : -1).map(d => (
+                  {[...filteredDispatches].sort((a,b) => a.departTime > b.departTime ? 1 : -1).map(d => (
                     <tr key={d.id} style={S.tr}>
                       <td style={S.td}><span style={S.timeBadge}>{d.departTime}</span></td>
                       <td style={{ ...S.td, color:"var(--color-primary)", fontWeight:600, fontSize:12, maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{d.routeName}</td>
@@ -271,11 +293,11 @@ function DashboardTab({ companyId, drivers, vehicles, onNav }) {
         </div>
 
         {/* GPS 수신 현황 */}
-        {gpsVehicles.length > 0 && (
+        {filteredGps.length > 0 && (
           <div style={{ background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:12, padding:"14px 18px", marginTop:16, boxShadow:"var(--shadow-emphasize)" }}>
-            <div style={{ fontWeight:700, marginBottom:12, color:"var(--color-label)" }}>📡 실시간 GPS 수신 차량 ({gpsVehicles.length}대)</div>
+            <div style={{ fontWeight:700, marginBottom:12, color:"var(--color-label)" }}>📡 실시간 GPS 수신 차량 ({filteredGps.length}대){partnerCode !== "전체" && <span style={{ fontSize:12, color:"var(--color-label-mute)", marginLeft:8, fontWeight:500 }}>(선택 협력사)</span>}</div>
             <div style={{ display:"flex", flexWrap:"wrap", gap:10 }}>
-              {gpsVehicles.map(v => (
+              {filteredGps.map(v => (
                 <div key={v.id} style={{ background:"var(--color-bg-alt)", border:"1px solid var(--color-line)", borderRadius:8, padding:"8px 14px", fontSize:12 }}>
                   <span style={{ color:"var(--color-positive)", marginRight:6 }}>●</span>
                   <span style={{ fontWeight:700, color:"var(--color-label)" }}>{v.vehicleNo || v.vehicleId}</span>
@@ -479,6 +501,7 @@ function DispatchTab({ companyId, vehicles, drivers }) {
   const [editOriginalDate, setEditOriginalDate] = useState(null); // ★ 수정 시 원본 날짜 추적
   const [form, setForm] = useState({ driverId:"", routeId:"", routeName:"", vehicleNo:"", vehicleId:"", departTime:"" });
   const [loading, setLoading] = useState(false);
+  const [partnerCode, setPartnerCode] = useState("전체"); // 협력사 필터
 
   useEffect(() => {
     if (!companyId || !date) return; // ★ date 빈값 방지
@@ -566,12 +589,22 @@ function DispatchTab({ companyId, vehicles, drivers }) {
   };
 
   const driverName = (id) => drivers.find(d => d.id === id)?.name ?? id;
+  // routeId → route(partnerCode/partnerName) 매핑
+  const routeOf = (id) => routes.find(r => r.id === id);
+  // 협력사 필터 적용
+  const filteredDispatches = dispatches.filter(d => {
+    if (partnerCode === "전체") return true;
+    const r = routeOf(d.routeId);
+    return r?.partnerCode === partnerCode;
+  });
 
   return (
     <div style={S.panel}>
       <div style={S.panelHeader}>
         <span style={{ fontSize:16, fontWeight:700 }}>배차 관리</span>
         <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+          <span style={{ fontSize:11, color:"var(--color-label-alt)" }}>거래처:</span>
+          <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} />
           <input type="date" value={date} onChange={e => { if (e.target.value) setDate(e.target.value); }} style={S.dateInput} />
           <button style={S.addBtn} onClick={openAdd}>+ 배차 등록</button>
           {dispatches.length > 0 && (
@@ -581,12 +614,19 @@ function DispatchTab({ companyId, vehicles, drivers }) {
       </div>
       <div style={S.tableWrap}>
         <table style={S.table}>
-          <thead><tr>{["출발시간","노선명","차량번호","기사"].map(h=><th key={h} style={S.th}>{h}</th>)}<th style={S.th}>관리</th></tr></thead>
+          <thead><tr>{["출발시간","협력사","노선명","차량번호","기사"].map(h=><th key={h} style={S.th}>{h}</th>)}<th style={S.th}>관리</th></tr></thead>
           <tbody>
-            {dispatches.length === 0 ? <tr><td colSpan={5} style={{...S.td,textAlign:"center",color:"var(--color-label-alt)"}}>배차 내역이 없습니다</td></tr>
-            : [...dispatches].sort((a,b)=>a.departTime>b.departTime?1:-1).map(d=>(
+            {filteredDispatches.length === 0 ? <tr><td colSpan={6} style={{...S.td,textAlign:"center",color:"var(--color-label-alt)"}}>{dispatches.length === 0 ? "배차 내역이 없습니다" : "이 협력사에 해당하는 배차가 없습니다"}</td></tr>
+            : [...filteredDispatches].sort((a,b)=>a.departTime>b.departTime?1:-1).map(d=>{
+              const r = routeOf(d.routeId);
+              return (
               <tr key={d.id} style={S.tr}>
                 <td style={S.td}><span style={S.timeBadge}>{d.departTime}</span></td>
+                <td style={{...S.td,fontSize:12}}>
+                  {r?.partnerName ? (
+                    <span style={{ background:"var(--color-bg-soft)", color:"var(--color-label-mute)", borderRadius:6, padding:"2px 7px", fontSize:11, fontWeight:600, whiteSpace:"nowrap" }}>{r.partnerName}</span>
+                  ) : <span style={{ color:"var(--color-label-alt)" }}>–</span>}
+                </td>
                 <td style={{...S.td,color:"var(--color-primary)",fontWeight:600}}>{d.routeName}</td>
                 <td style={S.td}>{d.vehicleNo}</td>
                 <td style={S.td}>{driverName(d.driverId)}</td>
@@ -595,7 +635,8 @@ function DispatchTab({ companyId, vehicles, drivers }) {
                   <button style={S.delBtn} onClick={()=>handleDelete(d.id)}>삭제</button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -655,6 +696,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers }) {
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState(blankScheduleForm());
   const [loading, setLoading] = useState(false);
+  const [partnerCode, setPartnerCode] = useState("전체"); // 협력사 필터
 
   useEffect(() => {
     if (!companyId) return;
@@ -822,11 +864,19 @@ function DispatchScheduleTab({ companyId, vehicles, drivers }) {
   };
   const periodLabel = (s) => `${s.startDate || "–"} ~ ${s.endDate || "무기한"}`;
 
+  const routeOf = (id) => routes.find(r => r.id === id);
+  const filteredSchedules = schedules.filter(s => {
+    if (partnerCode === "전체") return true;
+    return routeOf(s.routeId)?.partnerCode === partnerCode;
+  });
+
   return (
     <div style={S.panel}>
       <div style={S.panelHeader}>
         <span style={{ fontSize:16, fontWeight:700 }}>배차 일정 (반복 패턴)</span>
         <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+          <span style={{ fontSize:11, color:"var(--color-label-alt)" }}>거래처:</span>
+          <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} />
           <span style={{ fontSize:11, color:"var(--color-label-alt)" }}>매일 새벽 00:30 자동 펼침 · 향후 7일치</span>
           <button style={{...S.editBtn, fontSize:12, padding:"6px 10px"}} onClick={handleExpandNow} disabled={loading}>지금 펼치기</button>
           <button style={S.addBtn} onClick={openAdd}>+ 일정 등록</button>
@@ -834,12 +884,19 @@ function DispatchScheduleTab({ companyId, vehicles, drivers }) {
       </div>
       <div style={S.tableWrap}>
         <table style={S.table}>
-          <thead><tr>{["이름","노선","기사","차량","출발","요일","기간","제외","상태"].map(h=><th key={h} style={S.th}>{h}</th>)}<th style={S.th}>관리</th></tr></thead>
+          <thead><tr>{["이름","협력사","노선","기사","차량","출발","요일","기간","제외","상태"].map(h=><th key={h} style={S.th}>{h}</th>)}<th style={S.th}>관리</th></tr></thead>
           <tbody>
-            {schedules.length === 0 ? <tr><td colSpan={10} style={{...S.td,textAlign:"center",color:"var(--color-label-alt)"}}>등록된 배차 일정이 없습니다 — "+ 일정 등록"으로 시작하세요</td></tr>
-            : [...schedules].sort((a,b)=>(a.name||"").localeCompare(b.name||"")).map(s => (
+            {filteredSchedules.length === 0 ? <tr><td colSpan={11} style={{...S.td,textAlign:"center",color:"var(--color-label-alt)"}}>{schedules.length === 0 ? "등록된 배차 일정이 없습니다 — \"+ 일정 등록\"으로 시작하세요" : "이 협력사에 해당하는 일정이 없습니다"}</td></tr>
+            : [...filteredSchedules].sort((a,b)=>(a.name||"").localeCompare(b.name||"")).map(s => {
+              const r = routeOf(s.routeId);
+              return (
               <tr key={s.id} style={S.tr}>
                 <td style={{...S.td, fontWeight:600}}>{s.name || "(이름 없음)"}</td>
+                <td style={{...S.td, fontSize:12}}>
+                  {r?.partnerName ? (
+                    <span style={{ background:"var(--color-bg-soft)", color:"var(--color-label-mute)", borderRadius:6, padding:"2px 7px", fontSize:11, fontWeight:600, whiteSpace:"nowrap" }}>{r.partnerName}</span>
+                  ) : <span style={{ color:"var(--color-label-alt)" }}>–</span>}
+                </td>
                 <td style={{...S.td, color:"var(--color-primary)", fontWeight:600}}>{s.routeName || "–"}</td>
                 <td style={S.td}>{s.driverName || "–"}</td>
                 <td style={S.td}>{s.vehicleNo || "–"}</td>
@@ -866,7 +923,8 @@ function DispatchScheduleTab({ companyId, vehicles, drivers }) {
                   <button style={S.delBtn} onClick={()=>handleDelete(s)}>삭제</button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -2177,7 +2235,34 @@ function HistoryTab({ companyId, vehicles }) {
   const [loading, setLoading] = useState(false);
   const [center, setCenter] = useState({ lat:37.3894, lng:126.9522 });
   const [selected, setSelected] = useState(null);
+  const [partnerCode, setPartnerCode] = useState("전체"); // 협력사 필터
+  // 차량 → 협력사 매핑(routes + dispatchSchedules 의 vehicleId 기반)
+  const [routes, setRoutes] = useState([]);
+  const [schedules, setSchedules] = useState([]);
   const vehicle = vehicles.find(v=>v.id===vehicleId);
+
+  useEffect(() => {
+    if (!companyId) return;
+    return onSnapshot(collection(db, "companies", companyId, "routes"),
+      snap => setRoutes(snap.docs.map(d => ({ id:d.id, ...d.data() }))));
+  }, [companyId]);
+  useEffect(() => {
+    if (!companyId) return;
+    return onSnapshot(collection(db, "companies", companyId, "dispatchSchedules"),
+      snap => setSchedules(snap.docs.map(d => ({ id:d.id, ...d.data() }))));
+  }, [companyId]);
+
+  // vehicleId → partnerCode 추정: 그 차량에 등록된 schedule 의 routeId → routes.partnerCode
+  // (schedule 없으면 routes 의 vehicleId 매칭은 routes 에 vehicleId 필드 없음 — schedule 기반으로 한정)
+  const vehiclePartnerOf = (vid) => {
+    const sched = schedules.find(s => s.vehicleId === vid);
+    if (!sched) return null;
+    return routes.find(r => r.id === sched.routeId)?.partnerCode || null;
+  };
+  const filteredVehicles = vehicles.filter(v => {
+    if (partnerCode === "전체") return true;
+    return vehiclePartnerOf(v.id) === partnerCode;
+  });
 
   const handleLoad = async () => {
     if (!vehicleId) return alert("차량을 선택해주세요");
@@ -2204,10 +2289,13 @@ function HistoryTab({ companyId, vehicles }) {
         </div>
         <div style={{padding:16,display:"flex",flexDirection:"column",gap:10}}>
           <div><label style={S.label}>날짜</label><input type="date" style={S.dateInput} value={date} onChange={e=>{ if(e.target.value) setDate(e.target.value); }}/></div>
-          <div><label style={S.label}>차량</label>
+          <div><label style={S.label}>거래처</label>
+            <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} compact={false} />
+          </div>
+          <div><label style={S.label}>차량 {partnerCode!=="전체" && <span style={{color:"var(--color-label-alt)",fontSize:11}}>({filteredVehicles.length}대)</span>}</label>
             <select style={S.input} value={vehicleId} onChange={e=>setVehicleId(e.target.value)}>
               <option value="">차량 선택</option>
-              {vehicles.map(v=><option key={v.id} value={v.id}>{v.plateNo}</option>)}
+              {filteredVehicles.map(v=><option key={v.id} value={v.id}>{v.plateNo}</option>)}
             </select>
           </div>
           <button style={{...S.addBtn,padding:"10px"}} onClick={handleLoad} disabled={loading}>{loading?"조회 중...":"🔍 이력 조회"}</button>
@@ -2466,9 +2554,14 @@ function NoticeTab({ companyId }) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [type, setType] = useState("normal"); // normal | emergency
+  const [partnerCode, setPartnerCode] = useState("전체"); // 협력사 선택 ("전체" | partnerCode)
   const [loading, setLoading] = useState(false);
   const [notices, setNotices] = useState([]);
+  const [partners, setPartners] = useState([]); // 진단/배지용 partnerName 매핑
+  const [tokens, setTokens] = useState([]); // 전체 fcmTokens (회사 내)
   const [result, setResult] = useState(null);
+  const [activeQueueId, setActiveQueueId] = useState(null); // 발송 직후 fcmQueue 결과 구독
+  const [queueDoc, setQueueDoc] = useState(null);
 
   // 발송 이력 구독
   useEffect(() => {
@@ -2482,13 +2575,68 @@ function NoticeTab({ companyId }) {
     );
   }, [companyId]);
 
+  // 협력사 목록 구독(배지용)
+  useEffect(() => {
+    if (!companyId) return;
+    return onSnapshot(
+      query(collection(db, "partnerCodes"), where("companyId", "==", companyId)),
+      snap => setPartners(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    );
+  }, [companyId]);
+
+  // fcmTokens 전체 구독(진단·대상자 수 표시)
+  useEffect(() => {
+    if (!companyId) return;
+    return onSnapshot(
+      collection(db, "companies", companyId, "fcmTokens"),
+      snap => setTokens(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    );
+  }, [companyId]);
+
+  // 발송 후 fcmQueue 결과 실시간 구독
+  useEffect(() => {
+    if (!activeQueueId) { setQueueDoc(null); return; }
+    return onSnapshot(
+      doc(db, "fcmQueue", activeQueueId),
+      snap => setQueueDoc(snap.exists() ? { id: snap.id, ...snap.data() } : null),
+      err => console.warn("[NoticeTab] queue 구독 오류:", err.message)
+    );
+  }, [activeQueueId]);
+
+  // 대상자 수 계산
+  // 협력사 선택 시: where partnerCode == X
+  // 전체 선택 시: 모든 토큰(partnerCode null/누락 포함 — CF 와 일관)
+  const targetCount = partnerCode === "전체"
+    ? tokens.length
+    : tokens.filter(t => t.partnerCode === partnerCode).length;
+
+  // 협력사별 토큰 분포(진단)
+  const tokensByPartner = (() => {
+    const map = new Map();
+    let nullCount = 0;
+    for (const t of tokens) {
+      const c = t.partnerCode || null;
+      if (c === null) nullCount++;
+      else map.set(c, (map.get(c) || 0) + 1);
+    }
+    return { map, nullCount };
+  })();
+
+  // partnerCode → partnerName 매핑
+  const partnerNameOf = (code) => partners.find(p => (p.code || p.id) === code)?.partnerName || code;
+
   const handleSend = async () => {
     if (!title.trim() || !body.trim()) return alert("제목과 내용을 입력해주세요");
-    setLoading(true); setResult(null);
+    if (targetCount === 0 && !window.confirm("발송할 토큰이 0건입니다. 그래도 발송하시겠습니까?\n(공지는 기록되지만 푸시는 전송되지 않습니다)")) return;
+    setLoading(true); setResult(null); setActiveQueueId(null); setQueueDoc(null);
     try {
-      await sendNotice({ companyId, title, body, type });
-      setResult({ ok: true, msg: "공지가 발송되었습니다\n(인앱 배너 즉시 표시, FCM 푸시는 알림 허용 직원에게 발송)" });
-      setTitle(""); setBody(""); setType("normal");
+      const { queueId } = await sendNotice({
+        companyId, title, body, type,
+        partnerCode: partnerCode === "전체" ? null : partnerCode,
+      });
+      setActiveQueueId(queueId); // 실시간 결과 구독 시작
+      setResult({ ok: true, msg: "공지가 발송되었습니다 — 발송 결과는 아래 카드에 실시간 표시됩니다" });
+      setTitle(""); setBody("");
     } catch (e) {
       setResult({ ok: false, msg: "발송 실패: " + e.message });
     }
@@ -2505,14 +2653,83 @@ function NoticeTab({ companyId }) {
     return d.toLocaleString("ko-KR", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" });
   };
 
+  // 발송 결과 카드(queueDoc 상태별)
+  const renderQueueResult = () => {
+    if (!queueDoc) return null;
+    const s = queueDoc.status;
+    if (s === "pending") {
+      return (
+        <div style={{ background:"#FFF7E0", border:"1px solid #F6E0A0", borderRadius:8, padding:"10px 14px", fontSize:13, color:"#8A6500", fontWeight:600 }}>
+          ⏳ 발송 처리 중...
+        </div>
+      );
+    }
+    if (s === "sent") {
+      const ok = queueDoc.successCount ?? 0;
+      const fail = queueDoc.failureCount ?? 0;
+      const tot = queueDoc.totalTokens ?? (ok + fail);
+      return (
+        <div style={{ background:"#E6F7EB", border:"1px solid #A7E2BB", borderRadius:8, padding:"10px 14px", fontSize:13, color:"#007A29", fontWeight:600 }}>
+          ✅ 발송 완료 — 총 {tot}건 중 성공 {ok}건 / 실패 {fail}건
+          {fail > 0 && <div style={{ fontSize:11, color:"#A86500", marginTop:4, fontWeight:500 }}>※ 실패 토큰은 자동 정리됩니다(만료 토큰 등)</div>}
+        </div>
+      );
+    }
+    if (s === "no_tokens") {
+      return (
+        <div style={{ background:"#FFF7E0", border:"1px solid #F6E0A0", borderRadius:8, padding:"10px 14px", fontSize:13, color:"#8A6500", fontWeight:600 }}>
+          ⚠ 발송 대상 토큰이 없습니다 — 직원이 EmployeeApp 에서 알림 권한을 허용해야 합니다
+        </div>
+      );
+    }
+    if (s === "error") {
+      return (
+        <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", borderRadius:8, padding:"10px 14px", fontSize:13, color:"#A81818", fontWeight:600 }}>
+          ❌ 발송 오류: {queueDoc.error || "알 수 없는 오류"}
+        </div>
+      );
+    }
+    return null;
+  };
+
   return (
     <div style={S.panel}>
       <div style={S.panelHeader}>
         <span style={{ fontSize:16, fontWeight:700 }}>📢 공지 발송</span>
-        <span style={{ fontSize:12, color:"var(--color-label-mute)" }}>인앱 배너 + FCM 푸시</span>
+        <span style={{ fontSize:12, color:"var(--color-label-mute)" }}>인앱 배너 + FCM 푸시 (협력사 단위)</span>
       </div>
 
-      <div style={{ padding:"16px 20px", display:"flex", flexDirection:"column", gap:12 }}>
+      <div style={{ padding:"16px 20px", display:"flex", flexDirection:"column", gap:12, overflowY:"auto" }}>
+        {/* ── 진단 패널 — 알림 수신 가능 분포 ─────────────── */}
+        <div style={{ background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:10, padding:"12px 14px", boxShadow:"var(--shadow-emphasize)" }}>
+          <div style={{ fontSize:12, fontWeight:700, color:"var(--color-label-mute)", marginBottom:8 }}>📊 알림 수신 가능 직원 분포 (fcmTokens)</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8, alignItems:"center" }}>
+            <span style={{ background:"var(--color-primary-soft)", color:"var(--color-primary-deep)", borderRadius:8, padding:"4px 10px", fontSize:12, fontWeight:700 }}>
+              전체 {tokens.length}건
+            </span>
+            {partners.filter(p => p.active !== false).map(p => {
+              const code = p.code || p.id;
+              const n = tokensByPartner.map.get(code) || 0;
+              const danger = n === 0;
+              return (
+                <span key={p.id} style={{ background: danger ? "#FCE5E5" : "var(--color-bg-soft)", color: danger ? "#A81818" : "var(--color-label-mute)", border: `1px solid ${danger ? "#F6C9C9" : "var(--color-line)"}`, borderRadius:8, padding:"4px 10px", fontSize:11, fontWeight:600 }}>
+                  {danger && "● "}{p.partnerName}: {n}건{danger && " (수신자 없음)"}
+                </span>
+              );
+            })}
+            {tokensByPartner.nullCount > 0 && (
+              <span style={{ background:"var(--color-bg-soft)", color:"var(--color-label-alt)", border:"1px solid var(--color-line)", borderRadius:8, padding:"4px 10px", fontSize:11, fontWeight:600 }}>
+                협력사 미지정: {tokensByPartner.nullCount}건
+              </span>
+            )}
+          </div>
+          {tokens.length === 0 && (
+            <div style={{ marginTop:8, fontSize:11, color:"#A86500", lineHeight:1.5 }}>
+              ※ 등록된 FCM 토큰이 0건입니다. 직원이 EmployeeApp 에서 알림 권한을 허용해야 합니다.
+            </div>
+          )}
+        </div>
+
         {/* 공지 유형 */}
         <div style={{ display:"flex", gap:8 }}>
           {[["normal","📋 일반 공지","var(--color-primary-soft)","var(--color-primary-deep)","var(--color-primary)"],["emergency","🚨 긴급 공지","#FCE5E5","#A81818","var(--color-destructive)"]].map(([v,label,softBg,deepFg,line])=>(
@@ -2532,6 +2749,27 @@ function NoticeTab({ companyId }) {
             🚨 긴급 공지는 홈 화면 최상단에 빨간 배너로 표시되며, FCM 푸시 알림이 즉시 발송됩니다
           </div>
         )}
+
+        {/* 협력사 선택 */}
+        <div>
+          <label style={S.label}>발송 대상 협력사</label>
+          <PartnerFilter
+            companyId={companyId}
+            value={partnerCode}
+            onChange={setPartnerCode}
+            allLabel="전체 협력사 (회사 전체)"
+            compact={false}
+          />
+          <div style={{ marginTop:6, fontSize:12, color: targetCount === 0 ? "#A81818" : "var(--color-primary-deep)", fontWeight:600 }}>
+            📡 이 발송으로 알림을 받을 직원: <span style={{ fontSize:14, fontWeight:800 }}>{targetCount}명</span>
+            {partnerCode !== "전체" && <span style={{ color:"var(--color-label-mute)", fontWeight:500 }}> ({partnerNameOf(partnerCode)})</span>}
+          </div>
+          {targetCount === 0 && (
+            <div style={{ marginTop:6, background:"#FFF7E0", border:"1px solid #F6E0A0", borderRadius:8, padding:"8px 12px", fontSize:11, color:"#8A6500", fontWeight:600 }}>
+              ⚠ 발송할 토큰이 없습니다 — 해당 협력사 직원이 EmployeeApp 에서 알림 권한을 허용해야 합니다
+            </div>
+          )}
+        </div>
 
         {/* 제목 */}
         <div>
@@ -2555,6 +2793,9 @@ function NoticeTab({ companyId }) {
           </div>
         )}
 
+        {/* 발송 결과 카드 (fcmQueue 실시간 구독) */}
+        {renderQueueResult()}
+
         <button style={{ ...S.addBtn, padding:"13px", fontSize:15, opacity:loading?0.6:1, width:"100%" }}
           onClick={handleSend} disabled={loading}>
           {loading ? "발송 중..." : "📢 공지 발송"}
@@ -2569,12 +2810,22 @@ function NoticeTab({ companyId }) {
             <div key={n.id} style={{ background:"var(--color-bg)", borderRadius:10, padding:"12px 14px", marginBottom:8, border:`1px solid ${n.type==="emergency"?"#F6C9C9":"var(--color-line)"}`, boxShadow:"var(--shadow-emphasize)", opacity: n.active?1:0.5 }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
                 <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4, flexWrap:"wrap" }}>
                     <span style={{ fontSize:10, padding:"2px 8px", borderRadius:8, fontWeight:700,
                       background: n.type==="emergency"?"#FCE5E5":"var(--color-primary-soft)",
                       color: n.type==="emergency"?"#A81818":"var(--color-primary-deep)" }}>
                       {n.type==="emergency"?"🚨 긴급":"📋 일반"}
                     </span>
+                    {n.partnerCode && (
+                      <span style={{ fontSize:10, padding:"2px 8px", borderRadius:8, fontWeight:700, background:"var(--color-bg-soft)", color:"var(--color-label-mute)", border:"1px solid var(--color-line)" }}>
+                        🤝 {partnerNameOf(n.partnerCode)}
+                      </span>
+                    )}
+                    {!n.partnerCode && (
+                      <span style={{ fontSize:10, padding:"2px 8px", borderRadius:8, fontWeight:600, background:"transparent", color:"var(--color-label-alt)" }}>
+                        전체
+                      </span>
+                    )}
                     {!n.active && <span style={{ fontSize:10, color:"var(--color-label-alt)" }}>비활성</span>}
                     <span style={{ fontSize:11, color:"var(--color-label-alt)", marginLeft:"auto" }}>{fmt(n.createdAt)}</span>
                   </div>

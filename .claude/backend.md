@@ -11,7 +11,8 @@
 - `drivers/{driverId}`, `vehicles/{vehicleId}`
 - `passengers/{empNo}` (PIN 해시·노선 배정)
 - `boardings/{date}/list/{boardingId}`
-- `fcmTokens/{empNo}`, `notices/{noticeId}`
+- `fcmTokens/{empNo}` — `token/empNo/companyId/partnerCode/updatedAt` (partnerCode: 2026-05-21 추가, EmployeeApp 로그인 시 passengers.partnerCode 자동 sync, 없으면 null. CF 협력사 발송 시 where 필터)
+- `notices/{noticeId}` — `title/body/type/companyId/partnerCode/active/createdAt` (partnerCode 2026-05-21 추가, null=전체)
 
 최상위:
 - `users/{uid}` — **권한 게이트**(`role`+`companyId`). App.js·규칙·Functions가 함께 읽음.
@@ -19,7 +20,7 @@
 - `gpsHistory/{companyId}/{vehicleId}/{date}/points/{pointId}`
 - `boardingTokens/{tokenId}` — 5분 만료·1회 소각(`used` 플래그)
 - `partnerCodes/{code}` — 협력사 코드(1년 유효)
-- `fcmQueue/{queueId}` — CF 트리거 큐(클라 write, CF read)
+- `fcmQueue/{queueId}` — CF 트리거 큐. `companyId/noticeId/title/body/type/partnerCode/status/totalTokens/successCount/failureCount/error`. status: pending→sent/no_tokens/error. admin은 자기회사 큐 read 가능(2026-05-21, 발송 결과 onSnapshot 구독용)
 
 ## 보안 규칙
 배포 정본은 **루트 `firestore.rules`**(`firebase.json`이 지목). 헬퍼: `isAuth`/`isAdmin(companyId)`/`isSuperAdmin`/`isDriverOf(companyId)`.
@@ -28,7 +29,7 @@
 - `drivers`: 기사 본인은 `status/uid/startedAt/endedAt`만 update.
 - `dispatches/{date}/list/{id}`: admin 전체 write. **기사 본인 dispatch 의 `stopArrivals` 필드만 update 가능**(`drivers/{dispatch.driverId}.uid == request.auth.uid` 검증·affectedKeys hasOnly `[stopArrivals]`. 운행 중 정류장 100m 진입 시 클라가 update). 멱등은 클라가 첫도착만 write로 가드(서버 룰은 필드 범위만 강제).
 - `boardingTokens`/`partnerCodes`: read 공개(`true`), 소각/생성은 인증 사용자.
-- `fcmQueue`: create만 인증, read/update는 `false`(CF 전용).
+- `fcmQueue`: create만 인증, read는 admin(자기 회사 companyId 일치), update는 `false`(CF 전용). admin read 필요 이유=NoticeTab이 발송 결과(status/successCount/totalTokens) 실시간 onSnapshot 구독.
 - ⚠️ `src/firestore.rules`는 **오래된 사본** — @.claude/issues.md.
 
 ## 인덱스

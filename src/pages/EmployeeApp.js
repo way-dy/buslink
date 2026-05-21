@@ -127,16 +127,20 @@ export default function EmployeeApp() {
   }, [session?.companyId]);
 
   // ── FCM 초기화 ───────────────────────────────────────
+  // partnerCode 도 deps 에 포함 → 협력사 변경 시 fcmTokens 자동 재upsert (idempotent).
   useEffect(() => {
     if (!session?.empNo || !session?.companyId) return;
-    initNotifications({ companyId: session.companyId, empNo: session.empNo })
-      .catch(() => {});
+    initNotifications({
+      companyId: session.companyId,
+      empNo: session.empNo,
+      partnerCode: session.partnerCode || null,
+    }).catch(() => {});
     let unsubFn = () => {};
     listenForegroundMessages(msg => {
       setActiveNotice({ title: msg.title, body: msg.body, type: msg.type, id: Date.now() });
     }).then(fn => { unsubFn = fn || (() => {}); }).catch(() => {});
     return () => unsubFn();
-  }, [session?.empNo]);
+  }, [session?.empNo, session?.companyId, session?.partnerCode]);
 
   if (!ready) return (
     <div style={S.fullCenter}>
@@ -219,7 +223,7 @@ function LoginScreen({ companyId, onLogin }) {
       if (!p.active) throw new Error("비활성화된 계정입니다");
       const hashed = await hashPin(pin);
       if (p.pinHash !== hashed) throw new Error("PIN이 올바르지 않습니다");
-      onLogin({ empNo: p.empNo, name: p.name, dept: p.dept, routeId: p.routeId, pinHash: hashed, pinInitial: p.pinInitial, favorites: p.favorites || [] });
+      onLogin({ empNo: p.empNo, name: p.name, dept: p.dept, routeId: p.routeId, partnerCode: p.partnerCode || null, partnerName: p.partnerName || null, pinHash: hashed, pinInitial: p.pinInitial, favorites: p.favorites || [] });
     } catch (e) {
       setError(e.message);
     }

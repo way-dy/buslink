@@ -140,7 +140,15 @@ service cloud.firestore {
     // ─── FCM 발송 큐 (Cloud Function 트리거용) ───────────
     match /fcmQueue/{queueId} {
       allow create: if isAuth(); // 어드민이 공지 발송 시 생성
-      allow read, update: if false; // Cloud Function만 처리
+      // admin 은 발송 결과(status/successCount/failureCount/totalTokens) 구독을 위해 read 허용.
+      // 자기 회사 큐만 — companyId 매칭으로 제한.
+      allow read: if isAuth() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+          in ["admin", "superadmin"] &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId
+          == resource.data.companyId;
+      // update 는 Cloud Function 만 (Admin SDK 는 룰 우회).
+      allow update: if false;
     }
   }
 }

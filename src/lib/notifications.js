@@ -1,9 +1,11 @@
 import { db, getMessagingInstance } from "../firebase";
-import { doc, setDoc, addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc, addDoc, collection, serverTimestamp } from "firebase/firestore";
 
 const VAPID_KEY = process.env.REACT_APP_VAPID_KEY || "";
 
-export async function initNotifications({ companyId, empNo }) {
+// partnerCode 인자: 호출부(EmployeeApp)에서 session.partnerCode 전달. 미제공 시 passengers/{empNo}.partnerCode 자동 조회.
+// 둘 다 없으면 null → 공지 발송 시 "전체 협력사" 대상에만 포함.
+export async function initNotifications({ companyId, empNo, partnerCode }) {
   if (!("Notification" in window) || !("serviceWorker" in navigator)) {
     return { supported: false };
   }
@@ -54,12 +56,22 @@ export async function initNotifications({ companyId, empNo }) {
     console.log("[FCM] 토큰:", token ? token.substring(0, 20) + "..." : "없음");
 
     if (token) {
+      // partnerCode 결정: 인자 우선 → passengers/{empNo} 조회 폴백 → null
+      let resolvedPartnerCode = (partnerCode !== undefined) ? (partnerCode || null) : null;
+      if (resolvedPartnerCode === null && partnerCode === undefined) {
+        try {
+          const psnap = await getDoc(doc(db, "companies", companyId, "passengers", empNo));
+          if (psnap.exists()) resolvedPartnerCode = psnap.data().partnerCode || null;
+        } catch (e) {
+          console.warn("[FCM] passengers partnerCode 조회 실패(무시):", e.message);
+        }
+      }
       await setDoc(
         doc(db, "companies", companyId, "fcmTokens", empNo),
-        { token, empNo, companyId, updatedAt: serverTimestamp() },
+        { token, empNo, companyId, partnerCode: resolvedPartnerCode, updatedAt: serverTimestamp() },
         { merge: true }
       );
-      console.log("[FCM] Firestore 저장 완료 ✅");
+      console.log("[FCM] Firestore 저장 완료 ✅ partnerCode:", resolvedPartnerCode);
     }
     return { granted: true, token };
   } catch (e) {
@@ -83,15 +95,19 @@ export async function listenForegroundMessages(callback) {
   });
 }
 
-export async function sendNotice({ companyId, title, body, type }) {
+// partnerCode: 협력사 코드 또는 "전체"/null → 전체 회사 발송.
+// 반환: { noticeId, queueId } — 호출부에서 queueId 로 fcmQueue 결과 onSnapshot 구독 가능.
+export async function sendNotice({ companyId, title, body, type, partnerCode }) {
+  const code = (partnerCode && partnerCode !== "전체") ? partnerCode : null;
   const noticeRef = await addDoc(
     collection(db, "companies", companyId, "notices"),
-    { title: title.trim(), body: body.trim(), type, companyId, active: true, createdAt: serverTimestamp() }
+    { title: title.trim(), body: body.trim(), type, companyId, partnerCode: code, active: true, createdAt: serverTimestamp() }
   );
-  await addDoc(collection(db, "fcmQueue"), {
+  const queueRef = await addDoc(collection(db, "fcmQueue"), {
     companyId, noticeId: noticeRef.id,
     title: title.trim(), body: body.trim(), type,
+    partnerCode: code,
     status: "pending", createdAt: serverTimestamp(),
   });
-  return noticeRef.id;
+  return { noticeId: noticeRef.id, queueId: queueRef.id };
 }
