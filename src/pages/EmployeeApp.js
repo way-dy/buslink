@@ -13,6 +13,7 @@ import { calcETA } from "../lib/gps";
 import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom } from "../lib/routeProgress";
 import { computeStopEstimates, formatDelayLabel, formatPassengerEta, describeEtaSource } from "../lib/stopSchedule";
 import { useSmoothedEta } from "../lib/useSmoothedEta";
+import { useWakeTick } from "../lib/useWakeTick";
 
 import { validateAndBoard } from "../lib/boarding";
 import { hashPin } from "../lib/partner";
@@ -278,6 +279,10 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
   const favorites = session.favorites || [];
   const lastBusProgressRef = useRef(null); // 경로 이탈 시 직전 유효 진행거리 유지
 
+  // 백그라운드 → foreground 복귀 시 onSnapshot 재구독(stale 리스너 신선화).
+  // EmployeeApp(/p) 통근버스 사용자는 등하교 전후 장시간 백그라운드 상태가 흔함.
+  const wakeTick = useWakeTick();
+
   useEffect(() => {
     const t = setInterval(() => setTick(x => x + 1), 1000);
     return () => clearInterval(t);
@@ -332,7 +337,7 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
     });
   }, [activeRouteId, companyId]);
 
-  // 실시간 GPS
+  // 실시간 GPS — wakeTick 으로 백그라운드 복귀 시 재구독
   useEffect(() => {
     if (!companyId) return;
     const q = query(collection(db, 'gps'), where('companyId', '==', companyId));
@@ -342,7 +347,7 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
       setRawBuses(list);
       setLastUpdate(new Date());
     });
-  }, [companyId, activeRouteId]);
+  }, [companyId, activeRouteId, wakeTick]);
 
   // ── 오늘 노선 dispatch 구독(stopArrivals 실 도착시각 수신) ────────
   // 활성 노선의 오늘 dispatch 1건(여러개면 첫 건) — driver 측이 도착 감지 시
@@ -370,7 +375,7 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
       });
       setTodayDispatch({ stopArrivals: merged });
     }, () => setTodayDispatch(null));
-  }, [companyId, activeRouteId]);
+  }, [companyId, activeRouteId, wakeTick]);
 
   const mainBus   = buses[0] || null;
   const myStop    = myStopIdx !== null ? stops[myStopIdx] : null;
@@ -1016,6 +1021,10 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
   const [photoView, setPhotoView] = useState(null); // 정류장 사진 라이트박스
   const favorites = session.favorites || [];
 
+  // 백그라운드 복귀 시 onSnapshot 재구독 — 같은 routeId 모달을 열어둔 채 다른 탭/앱 다녀와도
+  // 새 GPS·도착시각이 즉시 신선화되도록.
+  const wakeTick = useWakeTick();
+
   useEffect(() => {
     if (!companyId) return;
     getDocs(collection(db, "companies", companyId, "routes")).then(snap => {
@@ -1031,7 +1040,7 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
       });
       setGpsData(map);
     });
-  }, [companyId]);
+  }, [companyId, wakeTick]);
 
   // 정류장 모달 열릴 때 로드
   useEffect(() => {
@@ -1060,7 +1069,7 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
       if (list.length > 0 && list[0].lat && list[0].lng)
         setModalCenter({ lat: list[0].lat, lng: list[0].lng });
     });
-  }, [stopModal, companyId]);
+  }, [stopModal, companyId, wakeTick]);
 
   // 선택 노선 오늘 dispatch stopArrivals 구독 — 모달 정류장 목록 계획·예상 시간 표시용.
   const [modalDispatch, setModalDispatch] = useState(null);
@@ -1084,7 +1093,7 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
       });
       setModalDispatch({ stopArrivals: merged });
     }, () => setModalDispatch(null));
-  }, [stopModal, companyId]);
+  }, [stopModal, companyId, wakeTick]);
 
   // 모달 정류장 estimates(계획 + 누적지연). 모달엔 routePath/속도 모르므로 GPS 가중은 생략.
   const modalEstimates = (stopModal && modalStops.length > 0)

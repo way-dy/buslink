@@ -8,6 +8,7 @@ import { calcETA } from "../lib/gps";
 import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom } from "../lib/routeProgress";
 import { computeStopEstimates, formatDelayLabel, formatPassengerEta, describeEtaSource } from "../lib/stopSchedule";
 import { useSmoothedEta } from "../lib/useSmoothedEta";
+import { useWakeTick } from "../lib/useWakeTick";
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 
 // ── 경로 진행 판정 임계값 (작업2, 2026-05-18 — EmployeeApp과 동일 정책) ──
@@ -70,6 +71,11 @@ export default function PassengerApp() {
   const [routeQuery, setRouteQuery] = useState("");    // 노선 검색어
   const lastBusProgressRef = useRef(null); // 경로 이탈 시 직전 유효 진행거리 유지
 
+  // 백그라운드(전날부터 등)에서 깨어났을 때 onSnapshot 강제 재구독 — 모바일/PWA에서
+  // 탭 frozen 후 stale 리스너 살아나는 듯하나 새 doc 변경 못 받음. wakeTick deps로
+  // unsub→재구독 → Firestore가 현재 docs 즉시 fire → state 신선화.
+  const wakeTick = useWakeTick();
+
   // 노선 선택 확정 — active 노선 설정 + localStorage 저장(다음 방문 자동) + 재바인딩
   const chooseRoute = (rid) => {
     setSelectedRouteId(rid);
@@ -123,7 +129,7 @@ export default function PassengerApp() {
     });
   }, [companyId, routeId, ready]);
 
-  // 실시간 버스 위치 구독
+  // 실시간 버스 위치 구독 — wakeTick 으로 백그라운드 복귀 시 재구독.
   useEffect(() => {
     if (!ready) return;
     const q = query(collection(db, "gps"), where("companyId", "==", companyId));
@@ -136,7 +142,7 @@ export default function PassengerApp() {
       if (list.length > 0 && list[0].lat && list[0].lng && !routeId)
         setCenter({ lat: list[0].lat, lng: list[0].lng });
     });
-  }, [companyId, routeId, ready]);
+  }, [companyId, routeId, ready, wakeTick]);
 
   // 오늘 dispatch stopArrivals 구독(routeId 한정) — 정류장 리스트 계획·예상 시간 표시용.
   const [todayDispatch, setTodayDispatch] = useState(null);
@@ -160,7 +166,7 @@ export default function PassengerApp() {
       });
       setTodayDispatch({ stopArrivals: merged });
     }, () => setTodayDispatch(null));
-  }, [companyId, routeId, ready]);
+  }, [companyId, routeId, ready, wakeTick]);
 
   const timeSince = (date) => {
     if (!date) return "";

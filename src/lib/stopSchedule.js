@@ -295,15 +295,19 @@ export function describeEtaSource(source) {
   }
 }
 
-// 지연(초) → 한국어 짧은 라벨. 정시 임계 ±2분, 지연 ≥3분, 조기 ≤-3분.
-//   ≥3분 지연  → { tone: 'danger',  label: '지연 N분' }
-//   ≤-3분 조기 → { tone: 'warn',    label: '조기 N분' }
-//   그 외       → { tone: 'ok',      label: '정시' }
+// 지연(초) → 한국어 짧은 라벨. 정시 임계 ±1분(2026-05-21 좁힘),
+// 지연 ≥2분, 조기 ≤-2분 — 어르신 가독성 위해 2~3분 지연도 가시화.
+//   ≥2분 지연  → { tone: 'danger',  label: '지연 N분' }
+//   ≤-2분 조기 → { tone: 'warn',    label: '조기 N분' }
+//   그 외(±1분)→ { tone: 'ok',      label: '정시' }
 //   null        → { tone: 'mute',    label: '' }
+// 정류장 미설정(offsetMin null) 케이스는 computeStopEstimates 가 delaySec=null 반환 →
+// 여기서 mute('')로 빠짐 → 페이지 게이트(driving·plannedAt 등)와 무관하게 라벨 미표시
+// (정류장 진입시각 미설정시 지연 안내 자체가 불가능 — AdminApp 정류장 폼 입력 안내).
 export function formatDelayLabel(delaySec) {
   if (delaySec == null || !isFinite(delaySec)) return { tone: "mute", label: "" };
   const m = Math.round(delaySec / 60);
-  if (m >= 3)  return { tone: "danger", label: `지연 ${m}분` };
-  if (m <= -3) return { tone: "warn",   label: `조기 ${-m}분` };
+  if (m >= 2)  return { tone: "danger", label: `지연 ${m}분` };
+  if (m <= -2) return { tone: "warn",   label: `조기 ${-m}분` };
   return { tone: "ok", label: "정시" };
 }

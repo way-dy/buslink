@@ -561,7 +561,16 @@ export default function DriverApp({ companyId: propCompanyId }) {
               <span style={S.listTitle}>오늘 운행 정류장</span>
               <span style={S.listCount}>{stops.length}개소</span>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 8 }}>
+            {/* 정류장 리스트 — 자체 스크롤 컨테이너로 가둬야 `scrollIntoView({block:'center'})`
+                가 페이지 전체가 아닌 리스트 내부에서 카지노 릴처럼 동작.
+                stops 5개 이하: maxHeight 의미 거의 없음(자연 높이 < 60vh).
+                stops 6개+: 스크롤 활성 + 현재 정류장 중앙 정렬.
+                스크롤바 시각 정리는 `data-stop-list` + index.css(인라인 불가). */}
+            <div data-stop-list style={{
+              display: "flex", flexDirection: "column", gap: 2, marginTop: 8,
+              maxHeight: "60vh", overflowY: "auto",
+              WebkitOverflowScrolling: "touch", // iOS 부드러운 관성 스크롤
+            }}>
               {stops.map((stop, i) => {
                 const isDone = i < currentStopIdx;
                 const isCurrent = i === currentStopIdx;

@@ -56,3 +56,9 @@ code {
    모바일에서 스크롤바 노출 시각 노이즈 방지(2026-05-20 승객앱 UI 강화). */
 [data-route-strip] { scrollbar-width: none; }
 [data-route-strip]::-webkit-scrollbar { display: none; }
+
+/* DriverApp 정류장 리스트 — `scrollIntoView({block:'center'})`가 페이지 전체가 아닌
+   리스트 내부에서 카지노 릴처럼 동작하도록 자체 스크롤 컨테이너. 스크롤바는 시각
+   노이즈 방지 위해 숨김(자연스러운 모바일 UX, 2026-05-21 Issue #1). */
+[data-stop-list] { scrollbar-width: none; }
+[data-stop-list]::-webkit-scrollbar { display: none; }

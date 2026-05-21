@@ -2613,8 +2613,13 @@ function NoticeTab({ companyId }) {
     : tokens.filter(t => t.partnerCode === partnerCode).length;
 
   // 협력사별 토큰 분포(진단)
+  // ⚠ 카카오 SDK `Map` 컴포넌트 import(파일 상단)가 native `Map` 클래스를 shadow함.
+  //    `new Map()` → minified `new ee()`(ee=forwardRef 객체, 비-생성자) → TypeError
+  //    → NoticeTab render throw → ErrorBoundary 격리(진단 패널 사망).
+  //    `window.Map` 으로 native 클래스 명시 참조 — 카카오 import 시그니처 보존.
+  //    (globalThis는 CRA ESLint env에서 no-undef → 빌드 차단. window가 호환성·검증 안전.)
   const tokensByPartner = (() => {
-    const map = new Map();
+    const map = new window.Map();
     let nullCount = 0;
     for (const t of tokens) {
       const c = t.partnerCode || null;
