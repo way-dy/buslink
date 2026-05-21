@@ -23,7 +23,11 @@ self.addEventListener("fetch", () => {});
 
 // 백그라운드 메시지 처리 (data-only 메시지 대응)
 messaging.onBackgroundMessage(payload => {
-  // ★ data-only: data에서 먼저 추출, fallback으로 notification
+  // ★ notification payload가 있으면 Firebase SDK 자동 알림에 위임 — 중복(이중 토스트) 방지
+  // CF가 notification+data 둘 다 보내므로 이 가드 없으면 모바일에서 SDK 자동 + SW showNotification = 2회 표시 가능.
+  // callcenter sw.js L23 검증 패턴 (callcenter-3ea4c prod 검증 완료).
+  if (payload.notification) return;
+  // 아래는 data-only 메시지(notification 페이로드 부재)일 때만 동작.
   const title = payload.data?.title || payload.notification?.title || "BusLink 공지";
   const body  = payload.data?.body  || payload.notification?.body  || "";
   const type  = payload.data?.type  || "normal";
