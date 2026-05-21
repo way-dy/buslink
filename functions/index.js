@@ -85,6 +85,12 @@ exports.sendNoticeToCompany = onDocumentCreated("fcmQueue/{queueId}", async (eve
 
         webpush: {
           headers: { Urgency: "high" },
+          // ★ 브랜드 아이콘 (Chrome 탭/PWA standalone 둘 다 적용): 알림 본문 옆 컬러 로고 + 상태바 배지.
+          // 작은 OS 분류 아이콘은 Chrome 탭=Chrome / PWA standalone=BusLink (OS 정책). icon=본문 옆 표시용.
+          notification: {
+            icon: "https://buslink-prod.web.app/logo192.png",
+            badge: "https://buslink-prod.web.app/logo192.png",
+          },
           fcmOptions: { link: "/p?c=" + companyId },
         },
       };
