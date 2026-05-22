@@ -6,9 +6,14 @@
 // 동작 요약
 //  - 이미 설치(standalone)면 렌더 안 함.
 //  - Android/Chrome: beforeinstallprompt 가로채 stash → 하단 배너 → [설치] 시 네이티브 프롬프트.
-//  - iOS Safari: beforeinstallprompt 미지원이므로 "공유 → 홈 화면에 추가" 안내 팝업.
+//  - Android(BIP 미발화): "Chrome 메뉴 → 홈 화면에 추가" 수동 안내(android-manual).
+//  - iOS Safari: beforeinstallprompt 미지원이므로 단계 번호 일러스트 바텀시트로 안내.
 //  - 닫기/나중에: localStorage buslink_pwa_prompt 에 기록 → 3일 후 재노출.
 //  - appinstalled 또는 standalone 이면 영구 비표시.
+//
+// export
+//  - default InstallPrompt   : 자동 노출 바텀시트(스누즈·standalone 가드 포함)
+//  - named  InstallGuide     : 설치 단계 안내 UI 단독(설정 탭 인라인 재사용 — 가드 없음)
 // ---------------------------------------------------------------------------
 import React, { useEffect, useState } from "react";
 import { Btn } from "./ui";
@@ -29,13 +34,20 @@ function isStandalone() {
   }
 }
 
+// iOS(iPhone/iPad) 인가
+function isIos() {
+  const ua = window.navigator.userAgent || "";
+  return (
+    /iPad|iPhone|iPod/.test(ua) ||
+    // iPadOS 13+ 는 Mac 으로 위장하나 터치 포인트로 구분
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+}
+
 // iOS(iPhone/iPad) Safari 인가 — Chrome/Firefox iOS 등 in-app 브라우저는 제외(과도 노출 방지)
 function isIosSafari() {
+  if (!isIos()) return false;
   const ua = window.navigator.userAgent || "";
-  const iOS = /iPad|iPhone|iPod/.test(ua) ||
-    // iPadOS 13+ 는 Mac 으로 위장하나 터치 포인트로 구분
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  if (!iOS) return false;
   // Safari 만: CriOS(Chrome)·FxiOS(Firefox)·EdgiOS(Edge)·OPiOS(Opera) 등 배제
   const isSafari = /Safari/.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS|GSA|Line|FBAN|FBAV|Instagram|KAKAOTALK/.test(ua);
   return isSafari;
@@ -89,20 +101,166 @@ function writeInstalled() {
   }
 }
 
-// iOS 공유 아이콘(네모+위 화살표) 묘사 — 텍스트 안내 보조
-function ShareGlyph() {
+// iOS 공유 아이콘(네모+위 화살표) 묘사 — 단계 일러스트·인라인 보조 공용.
+function ShareGlyph({ size = 18, color = "#0066FF" }) {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"
-      style={{ verticalAlign: "-3px", margin: "0 2px" }}>
-      <path d="M12 3v11" stroke="#0066FF" strokeWidth="2" strokeLinecap="round" />
-      <path d="M8.5 6.5 12 3l3.5 3.5" stroke="#0066FF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M6 11v8a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-8" stroke="#0066FF" strokeWidth="2" strokeLinecap="round" />
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true"
+      style={{ display: "block" }}>
+      <path d="M12 3v11" stroke={color} strokeWidth="2" strokeLinecap="round" />
+      <path d="M8.5 6.5 12 3l3.5 3.5" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6 11v8a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-8" stroke={color} strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }
 
+// '홈 화면에 추가' 메뉴 항목 묘사(네모+ 안의 +) — 단계 ② 일러스트.
+function AddToHomeGlyph({ size = 18, color = "#0066FF" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true"
+      style={{ display: "block" }}>
+      <rect x="3.5" y="3.5" width="17" height="17" rx="4" stroke={color} strokeWidth="2" />
+      <path d="M12 8v8M8 12h8" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// iPhone Safari 하단 툴바 모형 — 공유 버튼 위치를 화살표로 가리킴(단계 ① 시각 표시).
+function SafariToolbarHint() {
+  return (
+    <div style={{ position: "relative", paddingTop: 26 }}>
+      {/* 공유 버튼을 가리키는 화살표 + 안내 */}
+      <div style={{
+        position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)",
+        display: "flex", flexDirection: "column", alignItems: "center",
+      }}>
+        <span style={{ fontSize: 11, fontWeight: 800, color: "#0066FF", whiteSpace: "nowrap" }}>여기를 탭</span>
+        <svg width="14" height="12" viewBox="0 0 14 12" fill="none" aria-hidden="true">
+          <path d="M7 12 1 3h12L7 12Z" fill="#0066FF" />
+        </svg>
+      </div>
+      {/* 툴바 모형 */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-around",
+        background: "#f2f2f3", border: "1px solid rgba(112,115,124,0.18)",
+        borderRadius: 12, padding: "9px 8px",
+      }}>
+        {/* 좌우 더미 아이콘 */}
+        <span style={{ width: 16, height: 16, borderRadius: 3, border: "2px solid #b9bcc4" }} />
+        <span style={{ width: 16, height: 16, borderRadius: 3, border: "2px solid #b9bcc4" }} />
+        {/* 공유 버튼(강조) */}
+        <span style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          width: 30, height: 30, borderRadius: 8, background: "#fff",
+          boxShadow: "0 0 0 2px #0066FF",
+        }}>
+          <ShareGlyph size={17} />
+        </span>
+        <span style={{ width: 16, height: 16, borderRadius: 3, border: "2px solid #b9bcc4" }} />
+        <span style={{ width: 16, height: 16, borderRadius: 3, border: "2px solid #b9bcc4" }} />
+      </div>
+    </div>
+  );
+}
+
+// 단계 행 — 번호 원 + 일러스트 + 텍스트.
+function StepRow({ n, glyph, children }) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+      <span style={{
+        flexShrink: 0, width: 24, height: 24, borderRadius: "50%",
+        background: "#0066FF", color: "#fff", fontSize: 13, fontWeight: 800,
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        {n}
+      </span>
+      <div style={{ flex: 1, minWidth: 0, fontSize: 13, lineHeight: 1.55, paddingTop: 2,
+        color: "var(--color-label, #171719)" }}>
+        {children}
+      </div>
+      {glyph && (
+        <span style={{
+          flexShrink: 0, width: 34, height: 34, borderRadius: 8,
+          background: "var(--color-primary-soft, #EAF1FF)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          {glyph}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ─── InstallGuide — 설치 단계 안내 UI(가드 없음, 단독 재사용 가능) ─────────
+// platform: "ios" | "android-manual" | "android"(=android-manual 와 동일 텍스트) | "auto"
+//   - "auto": 현재 기기를 감지해 적절한 안내 표시(설정 탭 인라인용).
+// onInstall: android 네이티브 프롬프트 핸들러(있을 때만 "설치" 버튼 노출).
+export function InstallGuide({ platform = "auto", onInstall, inline = false }) {
+  // auto → 실제 기기 감지
+  let mode = platform;
+  if (mode === "auto") {
+    if (isIos()) mode = "ios";
+    else mode = "android-manual";
+  }
+
+  const wrapStyle = inline
+    ? { padding: "10px 18px 16px" }
+    : { padding: 0 };
+
+  if (mode === "ios") {
+    return (
+      <div style={wrapStyle}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <StepRow n={1} glyph={<ShareGlyph size={18} />}>
+            Safari 화면 하단의 <b>공유 버튼</b>을 탭하세요.
+          </StepRow>
+          <SafariToolbarHint />
+          <StepRow n={2} glyph={<AddToHomeGlyph size={18} />}>
+            메뉴를 위로 올려 <b>'홈 화면에 추가'</b>를 선택하세요.
+          </StepRow>
+          <StepRow n={3}>
+            오른쪽 위 <b>'추가'</b>를 누르면 홈 화면에 BusLink 아이콘이 생깁니다.
+          </StepRow>
+        </div>
+        <div style={{
+          marginTop: 12, fontSize: 11, lineHeight: 1.5,
+          color: "var(--color-label-alt, rgba(55,53,47,0.45))",
+        }}>
+          ※ Chrome 등 다른 브라우저에서는 설치 메뉴가 보이지 않을 수 있어요. <b>Safari</b>로 열어 주세요.
+        </div>
+      </div>
+    );
+  }
+
+  // android / android-manual — 텍스트 단계 안내(+ 네이티브 프롬프트 가능 시 버튼)
+  return (
+    <div style={wrapStyle}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <StepRow n={1}>
+          Chrome 우측 상단의 <b style={{ color: "var(--color-label, #171719)" }}>⋮</b> 메뉴를 탭하세요.
+        </StepRow>
+        <StepRow n={2} glyph={<AddToHomeGlyph size={18} />}>
+          <b>'홈 화면에 추가'</b> 또는 <b>'앱 설치'</b>를 선택하세요.
+        </StepRow>
+        <StepRow n={3}>
+          <b>'설치'</b>를 누르면 홈 화면에 BusLink 아이콘이 생깁니다.
+        </StepRow>
+      </div>
+      {onInstall && (
+        <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end" }}>
+          <Btn variant="primary" size="md" onClick={onInstall}>
+            지금 설치
+          </Btn>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
+// InstallPrompt — 자동 노출 바텀시트(standalone·스누즈 가드 포함)
+// ════════════════════════════════════════════════════════
 export default function InstallPrompt() {
-  // mode: null(미표시) | "android"(네이티브 프롬프트 가능) | "ios"(수동 안내)
+  // mode: null(미표시) | "android"(네이티브 프롬프트 가능) | "android-manual" | "ios"
   const [mode, setMode] = useState(null);
   const [deferred, setDeferred] = useState(null);
 
@@ -199,6 +357,9 @@ export default function InstallPrompt() {
 
   if (!mode) return null;
 
+  // iOS 는 단계 일러스트 바텀시트 — 한 줄 안내보다 시각적으로 명확.
+  const isIosMode = mode === "ios";
+
   return (
     <div
       role="dialog"
@@ -247,43 +408,19 @@ export default function InstallPrompt() {
             >
               앱으로 설치하면 더 빠르게 이용할 수 있어요
             </div>
-            {mode === "android" && (
-              <div
-                style={{
-                  fontSize: 13,
-                  lineHeight: 1.5,
-                  color: "var(--color-label-mute, rgba(46,47,51,0.62))",
-                }}
-              >
-                홈 화면에 BusLink 를 추가하면 앱처럼 바로 실행돼요.
-              </div>
-            )}
-            {mode === "android-manual" && (
-              <div
-                style={{
-                  fontSize: 13,
-                  lineHeight: 1.6,
-                  color: "var(--color-label-mute, rgba(46,47,51,0.62))",
-                }}
-              >
-                Chrome 우상단 메뉴 <b style={{ color: "var(--color-label, #171719)" }}>⋮</b> 를 눌러<br />
-                <b style={{ color: "var(--color-label, #171719)" }}>'홈 화면에 추가'</b> 또는 <b style={{ color: "var(--color-label, #171719)" }}>'앱 설치'</b> 를 선택하세요.
-              </div>
-            )}
-            {mode === "ios" && (
-              <div
-                style={{
-                  fontSize: 13,
-                  lineHeight: 1.6,
-                  color: "var(--color-label-mute, rgba(46,47,51,0.62))",
-                }}
-              >
-                Safari 하단의 공유 버튼
-                <ShareGlyph />
-                을 누른 뒤<br />
-                <b style={{ color: "var(--color-label, #171719)" }}>'홈 화면에 추가'</b> 를 선택하세요.
-              </div>
-            )}
+            <div
+              style={{
+                fontSize: 13,
+                lineHeight: 1.5,
+                color: "var(--color-label-mute, rgba(46,47,51,0.62))",
+              }}
+            >
+              {isIosMode
+                ? "아래 순서대로 홈 화면에 BusLink 를 추가하세요."
+                : mode === "android-manual"
+                  ? "아래 순서대로 홈 화면에 BusLink 를 추가하세요."
+                  : "홈 화면에 BusLink 를 추가하면 앱처럼 바로 실행돼요."}
+            </div>
           </div>
           <button
             onClick={close}
@@ -305,6 +442,13 @@ export default function InstallPrompt() {
             ✕
           </button>
         </div>
+
+        {/* iOS · android-manual: 단계 일러스트 안내. android: 네이티브 프롬프트만. */}
+        {(isIosMode || mode === "android-manual") && (
+          <div style={{ marginTop: 14 }}>
+            <InstallGuide platform={mode} />
+          </div>
+        )}
 
         <div
           style={{

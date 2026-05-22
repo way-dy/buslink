@@ -18,7 +18,7 @@ import { useWakeTick } from "../lib/useWakeTick";
 import { validateAndBoard } from "../lib/boarding";
 import { hashPin } from "../lib/partner";
 import { BusLinkLogo, StatusDot } from "../components/ui";
-import InstallPrompt from "../components/InstallPrompt";
+import InstallPrompt, { InstallGuide } from "../components/InstallPrompt";
 import { applyAppManifest } from "../lib/pwaManifest";
 import PermissionGate from "../components/PermissionGate";
 
@@ -50,10 +50,49 @@ function clearSession() {
   localStorage.removeItem(LS_KEY);
 }
 
+// ─── 공지함 읽음 시각 헬퍼 (작업A, 2026-05-22) ──────────
+// 마지막으로 공지함을 연 시각(ms)을 사번별 키에 저장. 이보다 나중 createdAt 공지 = 안 읽음.
+// 키는 buslink_ 접두사 + empNo 포함(기존 buslink_employee 세션 키 컨벤션 일관, 직원별 분리).
+function noticeReadKey(empNo) {
+  return `buslink_notice_read_${empNo || "_"}`;
+}
+function loadNoticeReadAt(empNo) {
+  try {
+    const v = localStorage.getItem(noticeReadKey(empNo));
+    return v ? parseInt(v, 10) || 0 : 0;
+  } catch { return 0; }
+}
+function saveNoticeReadAt(empNo, ms) {
+  try { localStorage.setItem(noticeReadKey(empNo), String(ms)); } catch { /* 무해 처리 */ }
+}
+
+// notices 문서의 createdAt(serverTimestamp 또는 number)을 ms 로 정규화.
+function noticeCreatedMs(n) {
+  const c = n?.createdAt;
+  if (!c) return 0;
+  if (typeof c?.toMillis === "function") return c.toMillis();
+  if (typeof c === "number") return c;
+  return 0;
+}
+
+// ─── 기기 감지 헬퍼 (작업B, 2026-05-22) ────────────────
+// 배터리 절전 안내 카드용. PWA는 시스템 설정 화면을 못 여므로 텍스트 안내만.
+//  - 'samsung' : 삼성 갤럭시(딥슬립 절전이 특히 공격적) → 갤럭시용 단계 안내
+//  - 'android' : 그 외 안드로이드 → 일반 안드로이드 단계 안내
+//  - null      : iOS·데스크톱 등 → 안내 미노출(iOS는 배터리 최적화 개념 없음)
+function detectBatteryGuidePlatform() {
+  const ua = (typeof navigator !== "undefined" && navigator.userAgent) || "";
+  if (!/Android/.test(ua)) return null; // 안드로이드만 노출
+  // 삼성 갤럭시: 모델 코드(SM-)·SamsungBrowser·Samsung 문자열로 감지
+  if (/SM-[A-Z0-9]+|SamsungBrowser|Samsung/.test(ua)) return "samsung";
+  return "android";
+}
+
 // ─── 탭 정의 ──────────────────────────────────────────
 const TABS = [
   { id: "home",     icon: "🏠", label: "홈" },
   { id: "routes",   icon: "🗺", label: "노선" },
+  { id: "notices",  icon: "📢", label: "공지" },
   { id: "scan",     icon: "📷", label: "탑승" },
   { id: "settings", icon: "⚙️", label: "설정" },
 ];
@@ -65,6 +104,12 @@ export default function EmployeeApp() {
   const [session, setSession] = useState(null);   // { empNo, name, dept, routeId, pinHash }
   const [tab, setTab] = useState("home");
   const [activeNotice, setActiveNotice] = useState(null); // 공지 배너
+  const [notices, setNotices] = useState([]);             // 공지함 목록(필터 후, 최신순)
+  const [noticeReadAt, setNoticeReadAt] = useState(0);    // 마지막 공지함 진입 시각(ms)
+
+  // 백그라운드 → foreground 복귀 시 공지 onSnapshot 재구독(stale 리스너 신선화).
+  // 통근버스 사용자는 등하교 전후 장시간 백그라운드 상태가 흔함(issues.md useWakeTick 패턴).
+  const wakeTick = useWakeTick();
 
   // 익명 인증
   useEffect(() => {
@@ -110,9 +155,19 @@ export default function EmployeeApp() {
     setTab("home");
   };
 
+  // 저장된 공지함 읽음 시각 복원
+  useEffect(() => {
+    if (session?.empNo) setNoticeReadAt(loadNoticeReadAt(session.empNo));
+  }, [session?.empNo]);
+
   // ── 공지 실시간 구독 ─────────────────────────────────
+  // 기존 공지배너(최신 1건) + 공지함 목록(전체)을 한 구독으로 처리.
+  // partnerCode 필터: notices.partnerCode==null(전체) 또는 세션 partnerCode 일치만 노출.
+  // 인덱스는 기존 notices(active+createdAt) 그대로 — partnerCode 는 클라이언트 필터(신규 인덱스 회피).
+  // wakeTick: 백그라운드 복귀 시 재구독해 stale 리스너 신선화.
   useEffect(() => {
     if (!session?.companyId) return;
+    const myPartner = session.partnerCode || null;
     return onSnapshot(
       query(
         collection(db, "companies", session.companyId, "notices"),
@@ -120,12 +175,30 @@ export default function EmployeeApp() {
         orderBy("createdAt", "desc")
       ),
       snap => {
-        if (!snap.empty) setActiveNotice({ id: snap.docs[0].id, ...snap.docs[0].data() });
-        else setActiveNotice(null);
+        const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        // partnerCode 규칙(공지배너와 동일): null=전체, 그 외엔 세션 partnerCode 일치만.
+        const visible = all.filter(n => {
+          const p = n.partnerCode || null;
+          return p === null || p === myPartner;
+        });
+        setNotices(visible);
+        setActiveNotice(visible.length > 0 ? visible[0] : null);
       },
       err => console.warn("[공지 구독 오류]", err.message)
     );
-  }, [session?.companyId]);
+  }, [session?.companyId, session?.partnerCode, wakeTick]);
+
+  // 공지함 진입 시 읽음 시각 갱신(가장 최신 공지보다 나중으로 — 안 읽음 0건 처리).
+  const markNoticesRead = useCallback(() => {
+    if (!session?.empNo) return;
+    const latest = notices.reduce((m, n) => Math.max(m, noticeCreatedMs(n)), 0);
+    const now = Math.max(Date.now(), latest + 1);
+    saveNoticeReadAt(session.empNo, now);
+    setNoticeReadAt(now);
+  }, [session?.empNo, notices]);
+
+  // 안 읽음 공지 수 — 마지막 읽은 시각보다 나중 createdAt 공지 개수.
+  const unreadCount = notices.filter(n => noticeCreatedMs(n) > noticeReadAt).length;
 
   // ── FCM 초기화 ───────────────────────────────────────
   // partnerCode 도 deps 에 포함 → 협력사 변경 시 fcmTokens 자동 재upsert (idempotent).
@@ -154,7 +227,7 @@ export default function EmployeeApp() {
   return (
     <div style={S.appWrap}>
       <InstallPrompt />
-      {/* ── 공지 배너 ── */}
+      {/* ── 공지 배너 — 본문 영역 탭 시 공지함으로 이동(읽음 처리) ── */}
       {activeNotice && (
         <div style={{
           position: "fixed", top: 0, left: 0, right: 0, zIndex: 999,
@@ -163,12 +236,16 @@ export default function EmployeeApp() {
           display: "flex", alignItems: "flex-start", gap: 10,
           boxShadow: "var(--shadow-strong)",
         }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div onClick={() => { setTab("notices"); markNoticesRead(); }}
+            style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
             <div style={{ fontSize: 12, fontWeight: 800, color: "#fff", marginBottom: 2 }}>
               {activeNotice.type === "emergency" ? "🚨 긴급 공지" : "📢 공지"} · {activeNotice.title}
             </div>
             <div style={{ fontSize: 11, color: "rgba(255,255,255,.88)", lineHeight: 1.4 }}>
               {activeNotice.body}
+            </div>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,.7)", marginTop: 3, fontWeight: 600 }}>
+              탭하면 전체 공지 보기 →
             </div>
           </div>
           <button onClick={() => setActiveNotice(null)}
@@ -187,14 +264,30 @@ export default function EmployeeApp() {
           </>
         )}
         {tab === "routes"   && <RoutesTab companyId={companyId} session={session} onSessionUpdate={(s) => { saveSession({...session,...s}); setSession(p=>({...p,...s})); }} />}
+        {tab === "notices"  && <NoticesTab notices={notices} unreadCount={unreadCount} />}
         {tab === "scan"     && <ScanTab companyId={companyId} session={session} />}
         {tab === "settings" && <SettingsTab companyId={companyId} session={session} onLogout={handleLogout} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />}
       </div>
 
       <div style={S.tabBar}>
         {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{ ...S.tabBtn, color: tab === t.id ? "var(--color-primary)" : "var(--color-label-mute)" }}>
-            <span style={{ fontSize: 20 }}>{t.icon}</span>
+          <button key={t.id}
+            onClick={() => { setTab(t.id); if (t.id === "notices") markNoticesRead(); }}
+            style={{ ...S.tabBtn, color: tab === t.id ? "var(--color-primary)" : "var(--color-label-mute)" }}>
+            <span style={{ position: "relative", fontSize: 20, display: "inline-flex" }}>
+              {t.icon}
+              {/* 안 읽음 공지 배지 — 공지 탭에만, 안 읽음 1건 이상일 때 */}
+              {t.id === "notices" && unreadCount > 0 && (
+                <span style={{
+                  position: "absolute", top: -4, right: -8, minWidth: 16, height: 16,
+                  padding: "0 4px", borderRadius: 8, background: "var(--color-destructive)",
+                  color: "#fff", fontSize: 10, fontWeight: 800, lineHeight: "16px",
+                  textAlign: "center", boxShadow: "0 0 0 2px var(--color-bg)"
+                }}>
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              )}
+            </span>
             <span style={{ fontSize: 10, fontWeight: tab === t.id ? 700 : 500 }}>{t.label}</span>
           </button>
         ))}
@@ -1400,6 +1493,77 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
 }
 
 // ════════════════════════════════════════════════════════
+// 공지 탭 — 인앱 공지함 (작업A, 2026-05-22)
+// ════════════════════════════════════════════════════════
+// 푸시(OEM 절전으로 누락 가능)의 pull 폴백 — 도달 보장 통로.
+// notices 구독·partnerCode 필터·안 읽음 계산은 부모(EmployeeApp)에서 수행, 여기선 표시만.
+function NoticesTab({ notices, unreadCount }) {
+  const fmtDate = (n) => {
+    const ms = noticeCreatedMs(n);
+    if (!ms) return "";
+    const d = new Date(ms);
+    return d.toLocaleString("ko-KR", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", background: "var(--color-bg-alt)" }}>
+      <div style={{ background: "var(--color-bg)", padding: "14px 16px", borderBottom: "1px solid var(--color-line)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "var(--color-label)", letterSpacing: "-0.02em" }}>공지사항</div>
+          {unreadCount > 0 && (
+            <span style={{ background: "var(--color-destructive)", color: "#fff", fontSize: 11, fontWeight: 800, borderRadius: "var(--radius-pill)", padding: "2px 9px" }}>
+              새 공지 {unreadCount}
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--color-label-mute)", marginTop: 2 }}>
+          버스 운행 관련 안내를 확인하세요
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
+        {notices.length === 0 ? (
+          <div style={{ textAlign: "center", padding: 48, color: "var(--color-label-alt)", fontSize: 13, lineHeight: 1.7 }}>
+            <div style={{ fontSize: 36, marginBottom: 8 }}>📭</div>
+            등록된 공지사항이 없습니다
+          </div>
+        ) : notices.map(n => {
+          const emergency = n.type === "emergency";
+          return (
+            <div key={n.id} style={{
+              background: "var(--color-bg)",
+              border: `1px solid ${emergency ? "#F6C9C9" : "var(--color-line)"}`,
+              borderLeft: `4px solid ${emergency ? "var(--color-destructive)" : "var(--color-primary)"}`,
+              borderRadius: "var(--radius-12)", padding: "14px 16px", marginBottom: 10,
+              boxShadow: "var(--shadow-emphasize)"
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+                <span style={{
+                  fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: "var(--radius-pill)",
+                  background: emergency ? "var(--color-atomic-red-90)" : "var(--color-primary-soft)",
+                  color: emergency ? "#A81818" : "var(--color-primary-deep)"
+                }}>
+                  {emergency ? "🚨 긴급" : "📢 공지"}
+                </span>
+                <span style={{ fontSize: 11, color: "var(--color-label-alt)", fontWeight: 600 }}>
+                  {fmtDate(n)}
+                </span>
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: "var(--color-label)", marginBottom: 5, lineHeight: 1.4, wordBreak: "keep-all" }}>
+                {n.title}
+              </div>
+              <div style={{ fontSize: 13, color: "var(--color-label-mute)", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "keep-all" }}>
+                {n.body}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
 // 탑승 탭 — QR 스캔
 // ════════════════════════════════════════════════════════
 function ScanTab({ companyId, session }) {
@@ -1632,6 +1796,11 @@ function SettingsTab({ companyId, session, onLogout, onSessionUpdate }) {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState(session.pinInitial ? { type:"warn", text:"초기 PIN(000000)을 사용 중입니다. 변경해주세요." } : null);
 
+  // 배터리 절전 안내 카드(작업B) — 안드로이드만, 삼성/일반 분기. iOS·데스크톱은 null.
+  const batteryPlatform = detectBatteryGuidePlatform();
+  // 앱 설치 가이드 재노출(작업C) — 설정에서 언제든 설치 진입 가능(3일 스누즈 무관).
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
+
   // ── 🔔 알림 진단 카드 (2026-05-21) ──
   // 운영 진단·복구 인프라 — "공지가 안 와요" 호소 시 사용자가 본인 권한·토큰 자가 점검·재발급.
   // 토큰 invalid → 자동 삭제 → fcmTokens 0건 자연흐름의 사용자측 회복 통로.
@@ -1775,6 +1944,55 @@ function SettingsTab({ companyId, session, onLogout, onSessionUpdate }) {
             ※ 공지 푸시가 안 오면 위 버튼을 누르세요. 권한이 "거부됨"이면 브라우저 주소창의<br/>
             자물쇠 아이콘 → 알림 → <b>허용</b>으로 변경 후 다시 시도해주세요.
           </div>
+        </div>
+
+        {/* 🔋 배터리 절전 예외 안내 카드 (작업B, 2026-05-22) — 안드로이드만 노출 */}
+        {/* OEM 절전(특히 삼성 딥슬립)이 SW를 잠재워 공지 푸시를 누락시킬 수 있음. */}
+        {/* PWA는 시스템 설정을 못 열므로 텍스트 안내만. One UI 버전차 감안해 너무 구체적이지 않게. */}
+        {batteryPlatform && (
+          <div style={{ background: "var(--color-bg)", borderRadius: "var(--radius-16)", padding: "16px 18px", border: "1px solid var(--color-line)", boxShadow: "var(--shadow-emphasize)" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-label)", marginBottom: 6 }}>
+              🔋 공지 푸시가 자꾸 안 온다면
+            </div>
+            <div style={{ fontSize: 12, color: "var(--color-label-mute)", lineHeight: 1.6, marginBottom: 10 }}>
+              휴대폰 절전 기능이 BusLink를 잠재우면 공지 알림이 늦거나 누락될 수 있습니다.
+              아래처럼 <b style={{ color: "var(--color-label)" }}>BusLink를 절전 예외</b>로 설정해 주세요.
+            </div>
+            <div style={{ background: "var(--color-bg-soft)", borderRadius: "var(--radius-8)", padding: "12px 14px" }}>
+              {batteryPlatform === "samsung" ? (
+                <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: "var(--color-label)", lineHeight: 1.7 }}>
+                  <li><b>설정</b> → <b>배터리</b> (또는 배터리 및 디바이스 케어 → 배터리)</li>
+                  <li><b>백그라운드 사용 제한</b> → <b>사용 안 함 앱</b> 목록에서 BusLink 제거</li>
+                  <li>앱별 설정에서 BusLink를 <b>제한 없음</b>으로 변경</li>
+                </ol>
+              ) : (
+                <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: "var(--color-label)", lineHeight: 1.7 }}>
+                  <li><b>설정</b> → <b>배터리</b> → 앱 절전 관리 / 배터리 사용량</li>
+                  <li>BusLink를 찾아 <b>제한 없음</b> 또는 <b>최적화 안 함</b>으로 변경</li>
+                </ol>
+              )}
+            </div>
+            <div style={{ marginTop: 8, fontSize: 11, color: "var(--color-label-alt)", lineHeight: 1.5 }}>
+              ※ 휴대폰 기종·소프트웨어 버전에 따라 메뉴 이름이 조금씩 다를 수 있습니다.
+            </div>
+          </div>
+        )}
+
+        {/* 📲 앱 설치하기 (작업C, 2026-05-22) — 3일 스누즈와 무관한 상시 설치 진입점 */}
+        <div style={{ background: "var(--color-bg)", borderRadius: "var(--radius-16)", overflow: "hidden", border: "1px solid var(--color-line)", boxShadow: "var(--shadow-emphasize)" }}>
+          <button onClick={() => setShowInstallGuide(p => !p)}
+            style={{ width: "100%", padding: "14px 18px", background: "transparent", border: "none", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", fontFamily: "inherit", color: "var(--color-label)" }}>
+            <span style={{ fontSize: 14, fontWeight: 700 }}>📲 앱 설치하기</span>
+            <span style={{ fontSize: 12, color: "var(--color-label-mute)" }}>{showInstallGuide ? "▲" : "▼"}</span>
+          </button>
+          {showInstallGuide && (
+            <div style={{ borderTop: "1px solid var(--color-line)" }}>
+              <div style={{ padding: "12px 18px 4px", fontSize: 12, color: "var(--color-label-mute)", lineHeight: 1.6 }}>
+                홈 화면에 BusLink를 추가하면 앱처럼 빠르게 실행되고 공지 푸시도 더 잘 도착합니다.
+              </div>
+              <InstallGuide inline />
+            </div>
+          )}
         </div>
 
         <div style={{ background: "var(--color-bg)", borderRadius: "var(--radius-16)", overflow: "hidden", border: "1px solid var(--color-line)", boxShadow: "var(--shadow-emphasize)" }}>
