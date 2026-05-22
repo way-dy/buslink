@@ -6,6 +6,7 @@
 | 함수 | 트리거 | 역할 |
 |---|---|---|
 | `sendNoticeToCompany` | Firestore `onDocumentCreated("fcmQueue/{queueId}")` | 회사 `fcmTokens` 멀티캐스트(2026-05-21: `partnerCode` 있으면 `.where("partnerCode","==",X)` 협력사 한정, 없으면 전체). 500개 청크, 만료 토큰 자동 삭제. 결과 `fcmQueue.status`(`sent`/`no_tokens`/`error`) + `totalTokens`/`successCount`/`failureCount` 기록 → AdminApp이 onSnapshot으로 실시간 표시 |
+| `notifyPreArrival` | Firestore `onDocumentUpdated("companies/{companyId}/dispatches/{date}/list/{dispatchId}")` | 도착 임박 푸시(2026-05-22). before/after `stopArrivals` diff로 새 도착 정류장 검출 → route stops를 `order` 오름차순 정렬한 배열로 구성, 도착 정류장 중 정렬 배열의 최전방 위치(index)=K → 정렬 배열에서 한 칸 뒤(K+1, 1정거장 전)·두 칸 뒤(K+2, 2정거장 전) 정류장의 직원에 FCM(raw order 산술 아님 — `order` 결번 안전, `computeStopEstimates`와 동일 위치 개념). `fcmTokens` where `routeId`+`stopId` 매칭(직원이 `/p`에서 선택한 내 정류장 denormalize). 멱등=`dispatch.preArrivalNotified[]` 마커(`{stopId}:pre1`/`pre2`) — 재발화·백필 다중기록에도 중복 0. 무효 토큰 자동 삭제. v1=routeId+stopId만 타겟(shift 미구분 — 후속 과제) |
 | `createDriver` | `onCall` | Auth 계정 + `users/{uid}` + `companies/.../drivers` 동시 생성 |
 | `deleteDriver` | `onCall` | Auth/users/drivers 정합 삭제 |
 | `updateDriverPassword` | `onCall` | 기사 비밀번호 변경(≥6자) |

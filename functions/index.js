@@ -1,5 +1,5 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
-const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 const { HOLIDAY_SET } = require("./holidays");
@@ -132,6 +132,189 @@ exports.sendNoticeToCompany = onDocumentCreated("fcmQueue/{queueId}", async (eve
     await event.data.ref.update({ status: "error", error: e.message });
   }
 });
+
+// ════════════════════════════════════════════════════════
+// 도착 임박 푸시 — dispatches 의 stopArrivals 갱신 시 트리거 (v2)
+// 기사앱이 정류장 도착을 감지하면 stopArrivals.{stopId} 가 추가됨.
+// 그 신호로 "내 정류장 2/1 정거장 전" 직원에게 FCM 발송.
+//
+// v1 단순화(후속 과제): routeId+stopId 로만 타겟 → 같은 routeId 의 다른
+// 배차(shift)에도 발송될 수 있음. shift 별 정밀 타겟은 후속 과제.
+// ════════════════════════════════════════════════════════
+
+// 발송할 푸시 메시지(공지 발송과 동일한 high-priority 구조 재사용).
+function buildPreArrivalMessage(tokens, { companyId, threshold, stopName }) {
+  const title = "버스 도착 알림";
+  const body = threshold === "pre2"
+    ? "버스가 곧 도착해요 — 2 정거장 전입니다"
+    : "버스가 한 정거장 앞이에요. 정류장으로 이동하세요";
+  return {
+    tokens,
+    notification: { title, body },
+    data: {
+      type: "pre_arrival",
+      companyId,
+      threshold,            // "pre1" | "pre2"
+      stopName: stopName || "",
+      title,
+      body,
+    },
+    android: {
+      priority: "high",
+      notification: {
+        channelId: "default",
+        sound: "default",
+        defaultVibrateTimings: true,
+        priority: "high",
+      },
+    },
+    apns: {
+      headers: { "apns-priority": "10", "apns-push-type": "alert" },
+      payload: {
+        aps: {
+          "content-available": 1,
+          sound: "default",
+          alert: { title, body },
+        },
+      },
+    },
+    webpush: {
+      headers: { Urgency: "high" },
+      notification: {
+        icon: "https://buslink-prod.web.app/logo192.png",
+        badge: "https://buslink-prod.web.app/logo192.png",
+      },
+      fcmOptions: { link: "/p?c=" + companyId },
+    },
+  };
+}
+
+exports.notifyPreArrival = onDocumentUpdated(
+  {
+    document: "companies/{companyId}/dispatches/{date}/list/{dispatchId}",
+    region: "us-central1",
+  },
+  async (event) => {
+    const { companyId } = event.params;
+    const before = event.data.before.data() || {};
+    const after = event.data.after.data() || {};
+
+    const routeId = after.routeId;
+    if (!routeId) return;
+
+    // ── 1. before vs after stopArrivals diff → 새로 추가된 도착 stopId ──
+    const beforeArr = before.stopArrivals || {};
+    const afterArr = after.stopArrivals || {};
+    const newlyArrived = Object.keys(afterArr).filter(sid => !(sid in beforeArr));
+    if (newlyArrived.length === 0) return;
+
+    const db = admin.firestore();
+
+    // ── 2. route stops 를 order 오름차순 정렬한 배열로 구성 ──
+    // raw order 값 산술(K+1)은 order 가 0,1,2,… 연속 정수라는 가정에 의존 →
+    // 정류장 삭제·재정렬로 결번(예 0,1,2,4,5)이 생기면 대상 정류장을 놓침.
+    // src/lib/stopSchedule.js computeStopEstimates 와 동일하게
+    // "order 로 정렬한 배열에서 인덱스(position)로 순회" 한다.
+    const stopsSnap = await db
+      .collection("companies").doc(companyId)
+      .collection("routes").doc(routeId)
+      .collection("stops").get();
+    if (stopsSnap.empty) return;
+
+    const nameByStopId = {};    // stopId → name (메시지용)
+    const sortedStops = stopsSnap.docs
+      .map(d => {
+        const v = d.data();
+        nameByStopId[d.id] = v.name || "";
+        return { id: d.id, order: typeof v.order === "number" ? v.order : null };
+      })
+      .filter(s => s.order !== null)   // 기존처럼 order 가 number 인 것만
+      .sort((a, b) => a.order - b.order);
+    if (sortedStops.length === 0) return;
+
+    // stopId → 정렬 배열에서의 위치(index)
+    const posByStopId = {};
+    sortedStops.forEach((s, idx) => { posByStopId[s.id] = idx; });
+
+    // 도착한 모든 정류장 중 가장 큰 배열 위치 = K (버스 실제 최전방).
+    // GPS 복구 백필이 한 번에 여러 정류장을 기록할 수 있어 max 로 산출.
+    let K = -Infinity;
+    Object.keys(afterArr).forEach(sid => {
+      const pos = posByStopId[sid];
+      if (typeof pos === "number" && pos > K) K = pos;
+    });
+    if (K === -Infinity) return;
+
+    // ── 3. 정렬 배열에서 한 칸 뒤 = "1 정거장 전", 두 칸 뒤 = "2 정거장 전" ──
+    const targets = [
+      { threshold: "pre1", stopId: (sortedStops[K + 1] || {}).id },
+      { threshold: "pre2", stopId: (sortedStops[K + 2] || {}).id },
+    ].filter(t => t.stopId);   // 노선 끝이라 배열 범위 밖이면 skip
+    if (targets.length === 0) return;
+
+    // ── 멱등 마커: 같은 (stopId, 임계) 조합은 배차당 1회만 ──
+    // diff 기반 + 마커 2중 가드 → onDocumentUpdated 재발화·백필 다중기록에도 중복 0.
+    const alreadyNotified = Array.isArray(after.preArrivalNotified)
+      ? after.preArrivalNotified : [];
+    const pending = targets.filter(
+      t => !alreadyNotified.includes(`${t.stopId}:${t.threshold}`)
+    );
+    if (pending.length === 0) return;
+
+    const newMarkers = [];
+    for (const t of pending) {
+      // ── 4. fcmTokens 중 routeId·stopId 매칭 + token 존재 → 멀티캐스트 ──
+      const tokSnap = await db
+        .collection("companies").doc(companyId)
+        .collection("fcmTokens")
+        .where("routeId", "==", routeId)
+        .where("stopId", "==", t.stopId)
+        .get();
+      const tokens = tokSnap.docs.map(d => d.data().token).filter(Boolean);
+
+      // 발송 대상이 없어도 마커는 기록 — 이후 재발화 시 재평가 비용 차단(멱등).
+      newMarkers.push(`${t.stopId}:${t.threshold}`);
+      if (tokens.length === 0) {
+        console.log(`[도착임박] ${t.threshold} stop=${t.stopId} 대상 0명 — skip`);
+        continue;
+      }
+
+      const message = buildPreArrivalMessage(tokens, {
+        companyId,
+        threshold: t.threshold,
+        stopName: nameByStopId[t.stopId],
+      });
+      const resp = await admin.messaging().sendEachForMulticast(message);
+      console.log(`[도착임박] ${t.threshold} stop=${t.stopId} 발송 — 성공:${resp.successCount} 실패:${resp.failureCount}`);
+
+      // 무효 토큰 자동 삭제(sendNoticeToCompany 와 동일 처리).
+      const deletePromises = [];
+      resp.responses.forEach((r, idx) => {
+        if (!r.success) {
+          const code = r.error && r.error.code;
+          if (code === "messaging/invalid-registration-token" ||
+              code === "messaging/registration-token-not-registered") {
+            const badToken = tokens[idx];
+            deletePromises.push(
+              db.collection("companies").doc(companyId)
+                .collection("fcmTokens")
+                .where("token", "==", badToken).get()
+                .then(s => s.docs.forEach(d => d.ref.delete()))
+            );
+          }
+        }
+      });
+      await Promise.all(deletePromises);
+    }
+
+    // ── 5. 발송 마커를 dispatch 문서에 기록(멱등 가드 영속) ──
+    if (newMarkers.length > 0) {
+      await event.data.after.ref.update({
+        preArrivalNotified: admin.firestore.FieldValue.arrayUnion(...newMarkers),
+      });
+    }
+  }
+);
 
 // ════════════════════════════════════════════════════════
 // 호출자 권한 검증 — users/{uid}.role 이 admin/superadmin 인지 확인

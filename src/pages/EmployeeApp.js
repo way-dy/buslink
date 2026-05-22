@@ -6,7 +6,7 @@ import { db, auth } from "../firebase";
 import { signInAnonymously } from "firebase/auth";
 import {
   doc, getDoc, getDocs, collection, onSnapshot,
-  query, where, orderBy, updateDoc
+  query, where, orderBy, updateDoc, setDoc, serverTimestamp
 } from "firebase/firestore";
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { calcETA } from "../lib/gps";
@@ -73,6 +73,32 @@ function noticeCreatedMs(n) {
   if (typeof c?.toMillis === "function") return c.toMillis();
   if (typeof c === "number") return c;
   return 0;
+}
+
+// ─── 내 정류장 영속화 헬퍼 (도착 임박 푸시, 2026-05-22) ──
+// 직원이 고른 '내 정류장'을 fcmTokens/{empNo} 문서에 routeId+stopId 로 denormalize.
+// 도착 임박 푸시 CF(notifyPreArrival)가 fcmTokens 한 컬렉션만 보고 대상을 찾도록 함.
+//  - 선택  : routeId·stopId 저장
+//  - 해제  : 두 필드 null
+// merge:true 라 lib/notifications.js initNotifications 의 토큰 upsert 와 충돌 없음.
+// 문서가 없어도(알림 미허용) merge 로 생성 — token 없으면 CF 가 skip(정상).
+async function persistMyStop(companyId, empNo, routeId, stopId) {
+  if (!companyId || !empNo) return;
+  try {
+    await setDoc(
+      doc(db, "companies", companyId, "fcmTokens", empNo),
+      {
+        empNo, companyId,
+        routeId: routeId || null,
+        stopId: stopId || null,
+        myStopUpdatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  } catch (e) {
+    // 영속화 실패는 비치명적 — 새로고침 복원·푸시만 영향(현 세션 동작은 유지).
+    console.warn("[내 정류장 저장 실패]", e.message);
+  }
 }
 
 // ─── 기기 감지 헬퍼 (작업B, 2026-05-22) ────────────────
@@ -403,10 +429,20 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
     onSessionUpdate({ routeId: rid });   // saveSession으로 localStorage 자동 영속
     setActiveRouteId(rid);
     setMyStopIdx(null);
+    // 노선이 바뀌면 이전 노선의 내 정류장 영속값도 해제 — 옛 노선 도착 푸시 차단.
+    if (rid !== activeRouteId) persistMyStop(companyId, session?.empNo, null, null);
     setStops([]);
     setStopInfo(null);
     setRoutePicker(false);
     setRouteQuery("");
+  };
+
+  // 내 정류장 선택/해제 — myStopIdx state 갱신 + fcmTokens 영속화(도착 임박 푸시 타겟).
+  // idx=null 이면 해제(routeId/stopId null). 같은 정류장을 다시 누르면 토글 해제.
+  const selectMyStop = (idx) => {
+    setMyStopIdx(idx);
+    const stopId = (idx !== null && stops[idx]) ? stops[idx].id : null;
+    persistMyStop(companyId, session?.empNo, stopId ? activeRouteId : null, stopId);
   };
 
   // 노선 변경 모달 검색 필터 (노선명·구분·코드·거래처)
@@ -416,19 +452,42 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
     return [r.name, r.type, r.code, r.partnerName].some(v => (v || "").toString().toLowerCase().includes(q));
   });
 
-  // 정류장 로드
+  // 정류장 로드 + 저장된 '내 정류장' 복원(도착 임박 푸시, 2026-05-22)
+  // fcmTokens/{empNo} 에 저장된 routeId/stopId 가 현재 노선과 일치하면 myStopIdx 복원 →
+  // 새로고침해도 내 정류장 유지(현 불편 동시 해결).
   useEffect(() => {
     if (!activeRouteId || !companyId) return;
+    let cancelled = false;
     setStops([]);
     getDocs(query(
       collection(db, 'companies', companyId, 'routes', activeRouteId, 'stops'),
       orderBy('order', 'asc')
-    )).then(snap => {
+    )).then(async snap => {
+      if (cancelled) return;
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setStops(list);
       if (list.length > 0) setCenter({ lat: list[0].lat, lng: list[0].lng });
+      // 저장된 내 정류장 복원 — 저장 routeId 가 현재 노선과 같을 때만.
+      if (session?.empNo) {
+        try {
+          const tsnap = await getDoc(doc(db, 'companies', companyId, 'fcmTokens', session.empNo));
+          if (cancelled) return;
+          const tdata = tsnap.exists() ? tsnap.data() : null;
+          if (tdata && tdata.routeId === activeRouteId && tdata.stopId) {
+            const idx = list.findIndex(s => s.id === tdata.stopId);
+            if (idx >= 0) {
+              setMyStopIdx(idx);
+              setCenter({ lat: list[idx].lat, lng: list[idx].lng });
+            }
+          }
+        } catch (e) {
+          // 복원 실패는 비치명적 — 사용자가 다시 정류장을 고르면 됨.
+          console.warn('[내 정류장 복원 실패]', e.message);
+        }
+      }
     });
-  }, [activeRouteId, companyId]);
+    return () => { cancelled = true; };
+  }, [activeRouteId, companyId, session?.empNo]);
 
   // 실시간 GPS — wakeTick 으로 백그라운드 복귀 시 재구독
   useEffect(() => {
@@ -847,7 +906,11 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
                   <div key={s.id} style={{ display: 'flex', alignItems: 'center' }}>
                     {/* 정류장 노드 — 폰트/점 크기 키움(모바일 시인성) */}
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 78 }}
-                      onClick={() => { setMyStopIdx(i); setCenter({ lat: s.lat, lng: s.lng }); }}>
+                      onClick={() => {
+                        // 같은 정류장을 다시 누르면 해제(토글), 아니면 선택. 둘 다 fcmTokens 영속.
+                        if (isMyStop) { selectMyStop(null); }
+                        else { selectMyStop(i); setCenter({ lat: s.lat, lng: s.lng }); }
+                      }}>
                       {/* 버스 아이콘 (이 정류장 근처) — 펄스 ring + 키운 크기 */}
                       <div style={{ height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 2 }}>
                         {isBusHere && (
@@ -1088,7 +1151,7 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
               {!stopInfo.photo && !stopInfo.description && !stopInfo.address && (
                 <div style={{ fontSize: 12, color: 'var(--color-label-alt)' }}>추가 정보가 없습니다</div>
               )}
-              <button onClick={() => { setMyStopIdx(stopInfo.idx); setCenter({ lat: stopInfo.lat, lng: stopInfo.lng }); setStopInfo(null); }}
+              <button onClick={() => { selectMyStop(stopInfo.idx); setCenter({ lat: stopInfo.lat, lng: stopInfo.lng }); setStopInfo(null); }}
                 style={{ ...S.btn, marginTop: 4 }}>
                 📍 이 정류장을 내 정류장으로 설정
               </button>
