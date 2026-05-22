@@ -21,12 +21,12 @@
 - 공통 UI 라이브러리: `src/components/ui/`(ESM 프리미티브 + `tokens.js` JS 미러 + 배럴). 순수 프레젠테이션, Firebase/로직 import 금지. 기존 페이지 인라인 S 객체와 점진 공존(화면별 단계에서 채택).
 
 ## 데이터 흐름 — GPS 파이프라인
-`lib/gps.js startGPS` = `watchPosition` + 5m/5초 스로틀 + 100m 정류장 도착 감지 → `gps/{companyId}_{vehicleId}`(덮어쓰기) + `gpsHistory`(누적). PassengerApp/EmployeeApp/AdminApp이 `onSnapshot` 구독 → `lib/useAnimatedPositions.js`(rAF lerp)로 마커 보간. AdminApp 시뮬레이터 탭은 `sendGPS` 직접 호출. **콜드스타트**: 진입 시 `getCurrentPosition` 1회 선발행(출발 직후 공백 방지) + `onGpsError` 콜백(권한/TIMEOUT 상위 전파, DriverApp 안내).
+`lib/gps.js startGPS` = `watchPosition` + 5m/5초 스로틀 + 100m 정류장 도착 감지(routePath 주입 시 진행률 기반 통과 누락 백필 — GPS 끊김 회복, 2026-05-22) → `gps/{companyId}_{vehicleId}`(덮어쓰기) + `gpsHistory`(누적). PassengerApp/EmployeeApp/AdminApp이 `onSnapshot` 구독 → `lib/useAnimatedPositions.js`(rAF lerp)로 마커 보간. AdminApp 시뮬레이터 탭은 `sendGPS` 직접 호출. **콜드스타트**: 진입 시 `getCurrentPosition` 1회 선발행(출발 직후 공백 방지) + `onGpsError` 콜백(권한/TIMEOUT 상위 전파, DriverApp 안내).
 
 ## 경로 / 권한·설치 (2026-05-18)
 - `lib/routeProgress.js` — 폴리라인 누적거리·점 투영. `routes/{id}.routePath`(수동 그린 경로) 기반 승객앱(`/p`·`/bus`) 진행 시각화·정밀 도착판정. **미설정 시 stops 직선 폴백**(하위호환). 상세 @.claude/issues.md.
-- 권한·PWA설치: `lib/usePermissions.js` + `components/PermissionGate.js` + `components/InstallPrompt.js`(순수 브라우저 API, Firebase import 금지). `src/index.js`가 ①`firebase-messaging-sw.js` 1회 선등록(idempotent) ②`beforeinstallprompt` 글로벌 stash(`window.__buslinkDeferredBIP`, render 전 — 늦게 마운트되는 라우트에서도 이벤트 보존).
-- 앱별 PWA 아이콘: `manifest.json`(관제·기본) + `manifest-employee.json`(scope `/p`) + `manifest-driver.json` 3종 + `public/icons/`(승객/기사/관제 svg+1024png). `lib/pwaManifest.js applyAppManifest`를 EmployeeApp/DriverApp 마운트 시 1회 호출해 `<link rel=manifest>`/`apple-touch-icon`/`apple-mobile-web-app-title` 동적 교체. 상세 @.claude/issues.md.
+- 권한·PWA설치: `lib/usePermissions.js` + `components/PermissionGate.js` + `components/InstallPrompt.js`(순수 브라우저 API, Firebase import 금지). `src/index.js`가 ①`firebase-messaging-sw.js` 1회 선등록(idempotent) ②`beforeinstallprompt` 글로벌 stash(`window.__buslinkDeferredBIP`, render 전) ③pathname `/p`·`/driver` 시 manifest `<link>` 조기 교체(마운트 useEffect 교체는 BIP 평가보다 늦을 수 있음).
+- 앱별 PWA(3종, 단일 origin 다중 PWA — 각 고유 `id`+`scope` 필수): `manifest.json`(관제, id/start_url `/?app=admin`·scope `/`) + `manifest-driver.json`(기사, 전부 `/driver`) + `manifest-employee.json`(직원, 전부 `/p`). scope는 path 기반이라 경로 분리 필수(id만으론 Chrome scope dedupe 회피 불가 — 상세 @.claude/issues.md). `lib/pwaManifest.js applyAppManifest`를 EmployeeApp/DriverApp 마운트 시 호출(조기 교체의 마운트-시점 재확인). `firebase.json` `headers`로 html·manifest·sw `no-cache`.
 
 ## 데이터 흐름 — 공지/FCM
 AdminApp → `lib/notifications.js sendNotice` → `notices` + `fcmQueue` 문서 생성 → CF `sendNoticeToCompany`가 멀티캐스트 발송. 상세 @.claude/functions.md.

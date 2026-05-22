@@ -2,6 +2,17 @@
 
 > tasks.md의 최근 7일을 제외한 누적 로그. 상세는 issues.md 패턴·redesign-log.md·git log.
 
+- [x] **2026-05-21** ErrorBoundary 11탭 도입 — 흰 화면 차단 hotfix (`54bcdab`/`main.25ea7440.js`). NoticeTab render throw → AdminApp까지 unmount(전체 흰 화면) → 각 탭을 ErrorBoundary로 격리.
+- [x] **2026-05-21** 공지 발송 결함 진단·복구 + 협력사 단위 운영 통일 (`main.6431ecf5.js` + functions + rules). fcmTokens.partnerCode 필드·NoticeTab 진단 패널·PartnerFilter 공통 컴포넌트.
+- [x] **2026-05-21** 승객앱 ETA 안정화 + 정밀 표현 (`main.dbeedce7.js`). GPS 가중 50:50→70:30·useSmoothedEta(EMA)·formatPassengerEta 버킷 라벨·describeEtaSource.
+- [x] **2026-05-21** 기사앱 현재 정류장 자동 스크롤 + 강조 (`main.d1013e16.js`). `currentStopRowRef` + scrollIntoView.
+- [x] **2026-05-21** 기사앱 어르신 가독성 강화 (`main.ec085ae6.js`). 정류장·시각·지연 글씨 키움·지연 칩화·도착 정류장 강조.
+- [x] **2026-05-20** 기사앱 설치 카드/팝업 미표시 fix + 운행 전 지연 라벨 게이팅 (`eb1c2e7`/`main.ff93d91f.js`).
+- [x] **2026-05-20** 승객앱(/p·/bus) UI 강화 3건 (`main.728aa7e6.js`) — 지도 정류장 시각·노선도 폰트·버스 마커 펄스.
+- [x] **2026-05-20** 배차 일정 자동 펼침 시스템 (`main.4d4a3650.js` + functions/rules) — dispatchSchedules + expandDispatchSchedules cron.
+- [x] **2026-05-20** 정류장 진입시각 음수 자정 보정 버그 fix (`main.bc5eccda.js`) — offsetMinFromPlanTime 자정 보정 폐기.
+- [x] **2026-05-20** 정류장 진입시각 입력 UX — 오프셋(분)→시각(HH:MM) 직접 입력 (`main.0a94e306.js`).
+- [x] **2026-05-20** 정류장 계획·예상시각 시스템 (`b122941`/`main.1cef341f.js` + rules) — stops offsetMin·stopArrivals·stopSchedule.js.
 - [x] **2026-05-20** 설치팝업 스누즈 14→3일 + DIAG-INSTALL 제거 (`da24224`/`main.f0dd8be3.js`).
 - [x] **2026-05-20** 기사앱 배차 선택 칩→모달 + DIAG-INSTALL (`e690b41`/`main.cb747e1c.js`).
 - [x] **2026-05-20** 기사앱 설치 BIP 글로벌 stash + 다중 배차 LS 영속 (`ac6fbf3`/`main.6c626f25.js`).
