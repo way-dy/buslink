@@ -29,4 +29,5 @@
 - 앱별 PWA(3종, 단일 origin 다중 PWA — 각 고유 `id`+`scope` 필수): `manifest.json`(관제, id/start_url `/?app=admin`·scope `/`) + `manifest-driver.json`(기사, 전부 `/driver`) + `manifest-employee.json`(직원, 전부 `/p`). scope는 path 기반이라 경로 분리 필수(id만으론 Chrome scope dedupe 회피 불가 — 상세 @.claude/issues.md). `lib/pwaManifest.js applyAppManifest`를 EmployeeApp/DriverApp 마운트 시 호출(조기 교체의 마운트-시점 재확인). `firebase.json` `headers`로 html·manifest·sw `no-cache`.
 
 ## 데이터 흐름 — 공지/FCM
-AdminApp → `lib/notifications.js sendNotice` → `notices` + `fcmQueue` 문서 생성 → CF `sendNoticeToCompany`가 멀티캐스트 발송. 상세 @.claude/functions.md.
+- **공지**: AdminApp → `lib/notifications.js sendNotice` → `notices` + `fcmQueue` 생성 → CF `sendNoticeToCompany` 멀티캐스트. 직원앱 `/p` 공지 탭이 `notices`를 직접 구독(푸시 누락 대비 pull 폴백).
+- **도착 임박**: 기사앱 도착 감지 → `dispatches/.../stopArrivals` 갱신 → CF `notifyPreArrival`이 내 정류장(`fcmTokens`에 routeId+stopId denormalize) 2/1정거장 전 직원에 FCM. 상세 @.claude/functions.md.

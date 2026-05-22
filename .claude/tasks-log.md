@@ -2,6 +2,9 @@
 
 > tasks.md의 최근 7일을 제외한 누적 로그. 상세는 issues.md 패턴·redesign-log.md·git log.
 
+- [x] **2026-05-21~22** 모바일 공지 푸시 정상화 5건 배포 — VAPID 키 1글자 오타 fix·SW 이중알림 가드·InstallPrompt 자동회복+안드로이드 폴백·FCM webpush 아이콘. 상세 issues.md.
+- [x] **2026-05-21** 공지 발송 진단·복구 인프라 강화 배포(`main.903dd602.js`) — NoticeTab 결과 가시화·snapshotError·EmployeeApp 🔔 알림 진단 카드. CF 정상·근인=토큰 invalid 자동삭제.
+- [x] **2026-05-21** 4건 묶음 hotfix 배포(`main.47396703.js`) — `new window.Map()`(카카오 SDK shadow)·DriverApp 리스트 내부 스크롤·`useWakeTick`(백그라운드 stale)·formatDelayLabel ±2분.
 - [x] **2026-05-21** ErrorBoundary 11탭 도입 — 흰 화면 차단 hotfix (`54bcdab`/`main.25ea7440.js`). NoticeTab render throw → AdminApp까지 unmount(전체 흰 화면) → 각 탭을 ErrorBoundary로 격리.
 - [x] **2026-05-21** 공지 발송 결함 진단·복구 + 협력사 단위 운영 통일 (`main.6431ecf5.js` + functions + rules). fcmTokens.partnerCode 필드·NoticeTab 진단 패널·PartnerFilter 공통 컴포넌트.
 - [x] **2026-05-21** 승객앱 ETA 안정화 + 정밀 표현 (`main.dbeedce7.js`). GPS 가중 50:50→70:30·useSmoothedEta(EMA)·formatPassengerEta 버킷 라벨·describeEtaSource.
