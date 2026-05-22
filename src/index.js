@@ -19,11 +19,14 @@ import reportWebVitals from './reportWebVitals';
 // 3 manifest 는 각각 고유 id(/?app=admin · /?app=driver · /p)로 별개 PWA 보장.
 if (typeof document !== "undefined") {
   const path = window.location.pathname;
+  const link = document.querySelector('link[rel="manifest"]');
+  const apple = document.querySelector('link[rel="apple-touch-icon"]');
   if (path.startsWith("/p") && !path.startsWith("/partner")) {
-    const link = document.querySelector('link[rel="manifest"]');
     if (link) link.setAttribute("href", "/manifest-employee.json");
-    const apple = document.querySelector('link[rel="apple-touch-icon"]');
     if (apple) apple.setAttribute("href", "/icons/passenger-1024.png");
+  } else if (path.startsWith("/driver")) {
+    if (link) link.setAttribute("href", "/manifest-driver.json");
+    if (apple) apple.setAttribute("href", "/icons/driver-1024.png");
   }
 }
 

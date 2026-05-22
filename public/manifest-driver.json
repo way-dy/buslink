@@ -15,9 +15,9 @@
       "purpose": "any"
     }
   ],
-  "id": "/?app=driver",
-  "start_url": "/?app=driver",
-  "scope": "/",
+  "id": "/driver",
+  "start_url": "/driver",
+  "scope": "/driver",
   "display": "standalone",
   "theme_color": "#0066FF",
   "background_color": "#FFFFFF",

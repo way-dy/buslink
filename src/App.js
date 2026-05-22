@@ -15,6 +15,10 @@ const isPassengerRoute = path.startsWith("/bus");
 const isBoardingRoute  = path.startsWith("/board");
 const isPartnerRoute   = path.startsWith("/partner");
 const isEmployeeRoute  = path.startsWith("/p") && !path.startsWith("/partner");
+// 기사앱 전용 경로 — PWA scope 를 /driver 로 분리(직원앱 /p 와 scope 중첩·설치 충돌 방지).
+// /driver 는 isPassenger/Boarding/Partner/Employee 전부 false → 기존 "그 외(/)" 분기에
+// 자연 포함되어 Auth·loading·kakao 로직이 그대로 적용됨.
+const isDriverRoute    = path.startsWith("/driver");
 
 function App() {
   const [user, setUser]       = useState(null);
@@ -96,9 +100,18 @@ function App() {
   );
 
   if (!user) return <LoginApp />;
+  // /driver 경로 = 기사앱 직결(역할 무관 — 경로가 의도. 데이터 없으면 DriverApp이 안내).
+  if (isDriverRoute) return <DriverApp companyId={companyId} />;
   if (role === "admin" || role === "superadmin")
     return <AdminApp user={user} companyId={companyId} />;
-  return <DriverApp companyId={companyId} />;
+  // / 진입 + 기사 역할 → /driver 로 이동(PWA scope 분리 — 직원앱 /p 와 설치 충돌 방지).
+  // 기존 / 북마크·로그인 흐름은 이 리다이렉트로 자연 흡수.
+  if (typeof window !== "undefined") window.location.replace("/driver");
+  return (
+    <div style={{ minHeight:"100vh", background:"#0B1A2E", display:"flex", alignItems:"center", justifyContent:"center", color:"#00C2FF", fontSize:18 }}>
+      이동 중...
+    </div>
+  );
 }
 
 export default App;
