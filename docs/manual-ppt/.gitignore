@@ -1,0 +1,7 @@
+node_modules/
+out/
+# 실 운영 화면 캡처는 직원 실명·차량번호 노출 가능성 — 별도 관리
+assets/admin/*.png
+assets/driver/*.png
+assets/employee/*.png
+!assets/**/.gitkeep

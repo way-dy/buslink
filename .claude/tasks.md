@@ -2,9 +2,9 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
-## 현재 상태 (2026-05-26 세션 종료)
+## 현재 상태 (2026-05-27 세션 종료)
 > 이 저장소가 작업 정본. **어느 PC든** `git pull` + `.env.local`(↓부트스트랩)이면 빌드·배포 가능.
-> prod 라이브 = `main.3c4d91c8.js`. 2026-05-26 변천: 협력사 삭제·PartnerApp 라이트 리스킨·도착예정 4건 결함·실시간관제 노선도뷰+일자별·운행이력 노선별 그룹+배차별 GPS 시간범위·탑승 통계 2종+GPS 정류장 매핑·BoardingApp 익명 인증 hotfix.
+> prod 라이브 = `main.3c4d91c8.js` (코드 변경 없음). 2026-05-27 변천: 신규 별건 도구 `docs/manual-ppt/`(PPT 매뉴얼 3종, prod 캡처 일부 반영). prod 콘솔 권한 오류 1건 발견(EmployeeApp 내 정류장 복원, issues.md `[미해결]`).
 
 ### git 원격
 - `origin/master` = 작업 정본. 3월 폐갈래는 `origin/archive/remote-march-2026`(`f63321c`) 영구 백업.
@@ -20,6 +20,8 @@
 4. 회귀 시 가설-재배포 금지 → 콘솔 Hosting 롤백 먼저, 재현은 localhost.
 
 ## 다음 할 일
+- [ ] **EmployeeApp 내 정류장 복원 권한 오류 진단**(prod 콘솔 발견 2026-05-27) — fcmTokens/{empNo} 또는 routes/{id}/stops 읽기 권한 확인. 비치명적이나 사용자 정류장 자동 복원 실패. issues.md `[미해결]` 참조.
+- [ ] (선택) PPT 매뉴얼 06-notices·기사 03/04·승객 02/03 본인 폰 캡처해 `docs/manual-ppt/assets/<role>/`로 두고 `npm run all` 1회 — 매뉴얼 캡처 완전성.
 - [ ] (선택) 운영 노선에 `routePath` 실제 그리기 — 안 그린 노선은 stops 직선 폴백(정상).
 - [ ] (선택) gpsHistory TTL 정책 검토 — Firebase 콘솔에서 ts 필드 기준 90일 자동 삭제(저장 비용 작아도 운영 정리 측면).
 
@@ -45,6 +47,7 @@
 - [ ] **협력사 삭제·기사 삭제 팝업**: 비활성만 삭제 허용·직원수 confirm·성공 alert
 
 ## 완료 (최근·시간역순. 옛 누적은 @.claude/tasks-log.md)
+- [x] **2026-05-27** PPT 매뉴얼 3종 신설(`docs/manual-ppt/`) — callcenter 정본 복제, 관리자(15장)·기사(12장)·승객(14장). 관리자 10장 자동 캡처 성공, 모바일 2종은 일부 placeholder. 캡처 자동화 4단 트랩(텍스트→viewport→span→locator) 후 06-notices만 실패 → placeholder + 본인 폰 폴백. 자동화 교훈은 `.claude/agents/refs/manual-playbook.md` §PPT 보강. prod 코드/규칙 무변경. **별건 발견**: prod EmployeeApp `[내 정류장 복원 실패] Missing or insufficient permissions`(issues.md `[미해결]`).
 - [x] **2026-05-26** BoardingApp 익명 인증 hotfix(`main.3c4d91c8.js`) — QR 탑승이 통계 안 잡힌 결함. `signInAnonymously` 마운트 호출 추가(EmployeeApp 패턴 일관). 이전 QR 탑승은 복구 불가(토큰 만료). issues.md `[해결]`.
 - [x] **2026-05-26** 탑승 통계 — GPS 기반 정류장별 정밀 집계(`main.75f79871.js`) — 신규 `lib/stopMapping.js`(haversine 매핑·반경 300m), boarding.js 차량 GPS 캡처, AdminApp/PartnerApp 정류장별 패널.
 - [x] **2026-05-26** QR 탑승 통계 — AdminApp 신규 탭 + PartnerApp 일자별 누적(`main.44de1aa0.js`) — boarding.js partnerCode denormalize·BoardingStatsTab(탭 9)·BoardingStatsMode(메인탭3)·PartnerApp 익명 인증·rules boardings read = isAuth().

@@ -1,0 +1,19 @@
+{
+  "name": "buslink-manual-ppt",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Buslink(통근버스 관제) 사용자 매뉴얼 PPT 생성기 — 관리자/기사/승객 3종",
+  "scripts": {
+    "admin": "node build-admin.js",
+    "driver": "node build-driver.js",
+    "employee": "node build-employee.js",
+    "all": "node build-admin.js && node build-driver.js && node build-employee.js",
+    "capture:admin": "node capture-admin.js",
+    "capture:driver": "node capture-driver.js",
+    "capture:employee": "node capture-employee.js"
+  },
+  "dependencies": {
+    "playwright": "^1.60.0",
+    "pptxgenjs": "^3.12.0"
+  }
+}

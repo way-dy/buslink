@@ -4,6 +4,8 @@
 
 ## 미해결 / 함정
 
+- `[미해결]` **EmployeeApp 내 정류장 복원 권한 오류(2026-05-26)**: prod 콘솔 `[내 정류장 복원 실패] Missing or insufficient permissions` (EmployeeApp.js:485, useEffect deps `[activeRouteId, companyId, session?.empNo]`). `fcmTokens/{empNo}` 또는 `routes/{id}/stops` 읽기 거부. 비치명적(try/catch 폴백 — 사용자가 정류장 재선택). 익명 인증 직후 onSnapshot 타이밍 또는 fcmTokens 미발급 직원 한정 가능성. 매뉴얼 캡처 세션에서 발견, 별건 진단 필요.
+- `[패턴]` **PPT 매뉴얼 도구 신설(2026-05-26~27, `docs/manual-ppt/`)**: callcenter 정본 복제 → 3 PPT(관리자·기사·승객). 관리자 10장 자동 캡처. 기사 03/04(운행 중 한정)·승객 02/03(설치 안내)·06(공지 탭, 자동화 실패)은 placeholder — 본인 폰 캡처해 `assets/<role>/NN.png`로 두면 다음 빌드 자동 반영. 자세한 자동화 트랩은 `.claude/agents/refs/manual-playbook.md` §PPT.
 - `[미해결]` **firestore.rules 이중화**: 배포 정본은 루트 `firestore.rules`(`firebase.json` 지목, fcmTokens/notices/fcmQueue 포함). `src/firestore.rules`는 오래된 사본 — 수정해도 효과 없음. 규칙 변경은 반드시 루트 파일에.
 - `[해결]` 런타임 정렬: `firebase.json` `nodejs22` → `nodejs20`(`package.json` `engines.node:"20"`, 2026-05-16). 데드라인 2026-10-30 전 22 재상향 필요(tasks.md 백로그).
 - `[미해결]` `public/firebase-messaging-sw.js` Firebase 설정 **하드코딩**(env 아님). 프로젝트 변경 시 수동 동기화. `notificationclick`에 `buslink-prod.web.app`·fallback `dy001` 하드코딩.
