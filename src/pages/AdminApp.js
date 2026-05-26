@@ -12,7 +12,8 @@ import { sendGPS } from "../lib/gps";
 import { createPartnerCode, getBoardingUrl } from "../lib/partner";
 import { sendNotice } from "../lib/notifications";
 import { compressImageFile } from "../lib/image";
-import { planTimeForStop, offsetMinFromPlanTime } from "../lib/stopSchedule";
+import { planTimeForStop, offsetMinFromPlanTime, computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
+import { aggregateBoardingsByStop } from "../lib/stopMapping";
 // 리디자인 3단계 — 실시간 관제(MapTab) 라이트 리스킨 전용. 타 탭 미사용.
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 // 협력사 필터 공통 컴포넌트 — 다수 탭에서 재사용
@@ -20,8 +21,8 @@ import { PartnerFilter } from "../components/PartnerFilter";
 // 탭 단위 에러 경계 — 자식 throw 시 흰 화면 방지 + 에러 메시지 가시화
 import { ErrorBoundary } from "../components/ErrorBoundary";
 
-const TABS = ["대시보드", "실시간 관제", "배차 관리", "배차 일정", "노선 관리", "기사 관리", "차량 관리", "시뮬레이터", "운행 이력", "협력사 관리", "공지 발송"];
-const TAB_ICONS = ["grid", "pin", "flag", "calendar", "route", "user", "bus", "play", "clock", "globe", "bell"];
+const TABS = ["대시보드", "실시간 관제", "배차 관리", "배차 일정", "노선 관리", "기사 관리", "차량 관리", "시뮬레이터", "운행 이력", "탑승 통계", "협력사 관리", "공지 발송"];
+const TAB_ICONS = ["grid", "pin", "flag", "calendar", "route", "user", "bus", "play", "clock", "chart", "globe", "bell"];
 const functions = getFunctions(undefined, "us-central1");
 const getToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 
@@ -147,8 +148,9 @@ export default function AdminApp({ user, companyId }) {
         {tab === 6 && <ErrorBoundary label="차량 관리"><VehicleTab companyId={companyId} vehicles={vehicles} /></ErrorBoundary>}
         {tab === 7 && <ErrorBoundary label="시뮬레이터"><SimulatorTab companyId={companyId} vehicles={vehicles} drivers={drivers} /></ErrorBoundary>}
         {tab === 8 && <ErrorBoundary label="운행 이력"><HistoryTab companyId={companyId} vehicles={vehicles} /></ErrorBoundary>}
-        {tab === 9 && <ErrorBoundary label="협력사 관리"><PartnerTab companyId={companyId} /></ErrorBoundary>}
-        {tab === 10 && <ErrorBoundary label="공지 발송"><NoticeTab companyId={companyId} /></ErrorBoundary>}
+        {tab === 9 && <ErrorBoundary label="탑승 통계"><BoardingStatsTab companyId={companyId} /></ErrorBoundary>}
+        {tab === 10 && <ErrorBoundary label="협력사 관리"><PartnerTab companyId={companyId} /></ErrorBoundary>}
+        {tab === 11 && <ErrorBoundary label="공지 발송"><NoticeTab companyId={companyId} /></ErrorBoundary>}
       </div>
     </div>
   );
@@ -325,6 +327,17 @@ function MapTab({ companyId }) {
   const [tick, setTick] = useState(0);
   const vehicles = useAnimatedPositions(rawVehicles);
 
+  // 노선도 뷰 (2026-05-26 추가): 지도/노선도 토글 + 일자별 배차 타임라인
+  const [viewMode, setViewMode] = useState("map"); // "map" | "route"
+  const [routes, setRoutes] = useState([]);
+  const [routeStops, setRouteStops] = useState({}); // {routeId: [stops]}
+  const [todayDispatches, setTodayDispatches] = useState([]);
+  const today = getToday();
+  // 일자별 조회 (2026-05-26): 노선도 뷰는 과거 날짜도 조회 가능. dispatches 컬렉션엔 stopArrivals 보존됨.
+  // 지도 뷰는 라이브 GPS 전용 → 과거 날짜 선택 시 자동으로 노선도 뷰로 전환·배너 안내.
+  const [selectedDate, setSelectedDate] = useState(today);
+  const isPastDate = selectedDate !== today;
+
   useEffect(() => { const t = setInterval(() => setTick(x => x+1), 1000); return () => clearInterval(t); }, []);
 
   useEffect(() => {
@@ -338,30 +351,86 @@ function MapTab({ companyId }) {
     });
   }, [companyId]);
 
+  // 노선도 뷰용 — 노선/오늘 배차 구독(항상 로드, 토글 시 즉시 표시).
+  useEffect(() => {
+    if (!companyId) return;
+    return onSnapshot(collection(db, "companies", companyId, "routes"),
+      snap => setRoutes(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+  }, [companyId]);
+
+  useEffect(() => {
+    if (!companyId || !selectedDate) return;
+    return onSnapshot(collection(db, "companies", companyId, "dispatches", selectedDate, "list"),
+      snap => setTodayDispatches(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+  }, [companyId, selectedDate]);
+
+  // 과거 날짜 선택 시 자동으로 노선도 뷰로 전환(지도 뷰는 실시간 GPS 전용).
+  useEffect(() => {
+    if (isPastDate && viewMode === "map") setViewMode("route");
+  }, [isPastDate, viewMode]);
+
+  // 노선도 뷰 활성 시: 오늘 배차된 노선의 stops 만 lazy 구독(N+1이지만 노선 수 ~10대로 OK).
+  useEffect(() => {
+    if (viewMode !== "route" || !companyId) return;
+    const routeIds = Array.from(new Set(todayDispatches.map(d => d.routeId).filter(Boolean)));
+    if (routeIds.length === 0) return;
+    const unsubs = routeIds.map(rid => onSnapshot(
+      query(collection(db, "companies", companyId, "routes", rid, "stops"), orderBy("order", "asc")),
+      snap => setRouteStops(prev => ({ ...prev, [rid]: snap.docs.map(d => ({ id: d.id, ...d.data() })) }))
+    ));
+    return () => unsubs.forEach(u => u());
+  }, [viewMode, companyId, todayDispatches]);
+
   // 운행중(좌표 유효) 차량만 카운트 — 실데이터 기반(가짜 KPI 미도입)
   const liveCount = vehicles.filter(v => v.lat && v.lng).length;
 
   return (
     <div style={MS.wrap}>
-      {/* 맵 퍼스트 — 카카오맵 구조/마커 불변(목업 MapMock 도입 금지) */}
-      <Map center={center} style={MS.map} level={7}>
-        {vehicles.map(v => v.lat && v.lng && (
-          <MapMarker key={v.id} position={{ lat:v.lat, lng:v.lng }} onClick={() => setSelected(v)} />
-        ))}
-      </Map>
+      {/* 지도 뷰 — 노선도 모드에선 숨김(컴포넌트 마운트 유지로 카카오 SDK 재로딩 회피) */}
+      <div style={{ position:"absolute", inset:0, visibility: viewMode === "map" ? "visible" : "hidden" }}>
+        <Map center={center} style={MS.map} level={7}>
+          {vehicles.map(v => v.lat && v.lng && (
+            <MapMarker key={v.id} position={{ lat:v.lat, lng:v.lng }} onClick={() => setSelected(v)} />
+          ))}
+        </Map>
+      </div>
 
-      {/* 부유 글래스 탑바 — 로고+회사(실제 companyId). 검색/벨/아바타는 로직 부재로 제외 */}
+      {/* 부유 글래스 탑바 — 로고+회사+ 지도/노선도 토글 */}
       <div style={MS.topbar}>
         <BusLinkLogo size={20} />
         <div style={MS.topDivider} />
         <span style={MS.topCo}>동영관광 <span style={{ color:"var(--color-label-alt)" }}>· {companyId}</span></span>
         <span style={MS.topTab}><Icon name="pin" size={15}/> 실시간 관제</span>
-        <span style={MS.topNow}>
-          <StatusDot tone="positive" size={6} pulse /> 실시간 GPS 수신
-        </span>
+        {/* 뷰 토글 */}
+        <div style={MS.viewToggle}>
+          <button onClick={() => !isPastDate && setViewMode("map")}
+            disabled={isPastDate}
+            title={isPastDate ? "지도 뷰는 실시간(오늘) 전용" : ""}
+            style={{ ...MS.viewBtn, ...(viewMode === "map" ? MS.viewBtnOn : {}),
+              opacity: isPastDate ? 0.4 : 1, cursor: isPastDate ? "not-allowed" : "pointer" }}>
+            🗺 지도
+          </button>
+          <button onClick={() => setViewMode("route")}
+            style={{ ...MS.viewBtn, ...(viewMode === "route" ? MS.viewBtnOn : {}) }}>
+            📊 노선도
+          </button>
+        </div>
+        {/* 날짜 픽커 — 노선도 뷰에서 과거 날짜 조회 가능 */}
+        <input type="date" value={selectedDate} max={today}
+          onChange={e => { if (e.target.value) setSelectedDate(e.target.value); }}
+          style={MS.dateInput}
+          title="조회 날짜 (과거 데이터는 노선도 뷰만 가능)"/>
+        {isPastDate ? (
+          <span style={MS.pastBadge}>📅 과거 데이터</span>
+        ) : (
+          <span style={MS.topNow}>
+            <StatusDot tone="positive" size={6} pulse /> 실시간 GPS 수신
+          </span>
+        )}
       </div>
 
-      {/* 좌 레일 — 운행 차량 목록(실 onSnapshot 데이터만) */}
+      {/* 좌 레일 — 운행 차량 목록(실 onSnapshot 데이터만) — 지도 모드만 */}
+      {viewMode === "map" && (
       <div style={MS.leftRail}>
         <div style={MS.railHead}>
           <span style={MS.railTitle}>운행 중인 차량</span>
@@ -396,9 +465,24 @@ function MapTab({ companyId }) {
           })}
         </div>
       </div>
+      )}
+
+      {/* 노선도 뷰 — 오늘 배차된 각 노선의 정류장 타임라인 + 지연/조기 라벨 */}
+      {viewMode === "route" && (
+        <RouteTimelineView
+          companyId={companyId}
+          routes={routes}
+          routeStops={routeStops}
+          dispatches={todayDispatches}
+          vehicles={isPastDate ? [] : vehicles}
+          tick={tick}
+          selectedDate={selectedDate}
+          isPastDate={isPastDate}
+        />
+      )}
 
       {/* 우 상세 — 선택 차량(실데이터 stats·기사). 가짜 ETA/탑승인원/정류장 타임라인 제외 */}
-      {selected && (
+      {viewMode === "map" && selected && (
         <div style={MS.detail}>
           <div style={MS.detailHead}>
             <div style={{ flex:1, minWidth:0 }}>
@@ -446,6 +530,219 @@ function MapTab({ companyId }) {
   );
 }
 
+// ─── 노선도 뷰 (실시간 관제 보조 뷰, 2026-05-26) ──────────────────────
+// 오늘 배차된 각 노선의 정류장 타임라인 + 계획·실측/예상·지연/조기 표시.
+// computeStopEstimates 재사용(승객앱/기사앱과 동일 알고리즘) — 같은 분/지연 정합.
+// 데이터 결합: dispatch + 해당 routeId의 stops + dispatch.vehicleId의 라이브 GPS.
+function RouteTimelineView({ companyId, routes, routeStops, dispatches, vehicles, tick, selectedDate, isPastDate }) {
+  if (dispatches.length === 0) {
+    return (
+      <div style={MS.routeWrap}>
+        <div style={MS.routeEmpty}>
+          {isPastDate ? `${selectedDate} 배차 내역이 없습니다.` : "오늘 배차된 노선이 없습니다."}<br/>
+          <span style={{ fontSize:12, color:"var(--color-label-alt)" }}>
+            {isPastDate ? "다른 날짜를 선택하거나 배차 관리에서 확인하세요." : "배차 관리 탭에서 오늘 배차를 등록하세요."}
+          </span>
+        </div>
+      </div>
+    );
+  }
+  // departTime 오름차순(이른 시간 먼저). 같은 시간이면 routeName.
+  const sorted = [...dispatches].sort((a, b) => {
+    const ta = a.departTime || "99:99", tb = b.departTime || "99:99";
+    return ta.localeCompare(tb) || (a.routeName || "").localeCompare(b.routeName || "");
+  });
+  return (
+    <div style={MS.routeWrap}>
+      <div style={MS.routeGrid}>
+        {sorted.map(d => (
+          <RouteTimelineCard key={d.id}
+            companyId={companyId}
+            dispatch={d}
+            route={routes.find(r => r.id === d.routeId)}
+            stops={routeStops[d.routeId] || []}
+            vehicle={vehicles.find(v => v.vehicleId === d.vehicleId)}
+            tick={tick}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RouteTimelineCard({ dispatch, route, stops, vehicle }) {
+  // stops가 아직 로딩 중이면 스켈레톤 노출.
+  const loading = stops.length === 0;
+  // 계획·실측/예상 산출. dispatch.stopArrivals = { [stopId]: { actualAt: serverTimestamp, ... } } → millis.
+  const actualArrivals = {};
+  const sa = dispatch.stopArrivals || {};
+  for (const k in sa) {
+    const a = sa[k];
+    const ms = a?.actualAt?.toMillis ? a.actualAt.toMillis()
+      : (typeof a?.actualAt === "number" ? a.actualAt : null);
+    if (ms != null) actualArrivals[k] = ms;
+  }
+  const estimates = computeStopEstimates({
+    stops,
+    departTime: dispatch.departTime || route?.departTime || "",
+    actualArrivals,
+    vehiclePos: vehicle && typeof vehicle.lat === "number" ? { lat: vehicle.lat, lng: vehicle.lng } : null,
+    speed: vehicle?.speed,
+    routePath: Array.isArray(route?.routePath) ? route.routePath : null,
+    now: Date.now(),
+  });
+  const estByStopId = Object.fromEntries(estimates.map(e => [e.stopId, e]));
+
+  // 운행 상태: arrived 1개라도 있고 모두 arrived 아니면 운행중 / 모두 arrived면 완료 / 그 외 대기
+  const arrivedCount = estimates.filter(e => e.status === "arrived").length;
+  const totalPlanned = estimates.filter(e => e.plannedAt).length;
+  const allArrived = arrivedCount === stops.length && stops.length > 0;
+  const running = arrivedCount > 0 && !allArrived;
+  const statusTone = allArrived ? "positive" : running ? "primary" : "neutral";
+  const statusLabel = allArrived ? "운행 완료" : running ? "운행 중" : "대기 중";
+
+  // 가장 최근 도착 정류장 idx — 버스 위치 표시 기준.
+  let lastArrivedIdx = -1;
+  stops.forEach((s, i) => { if (actualArrivals[s.id] != null) lastArrivedIdx = i; });
+
+  return (
+    <div style={MS.routeCard}>
+      {/* 카드 헤더 */}
+      <div style={MS.routeCardHead}>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+            <span style={MS.routeName}>{dispatch.routeName || route?.name || "노선 미지정"}</span>
+            <Pill tone={statusTone} dot>{statusLabel}</Pill>
+          </div>
+          <div style={MS.routeMeta}>
+            <span>출발 <b style={{ color:"var(--color-label)" }}>{dispatch.departTime || "–"}</b></span>
+            <span style={MS.dot}>·</span>
+            <span>{dispatch.driverName || "기사 미지정"}</span>
+            <span style={MS.dot}>·</span>
+            <span>{dispatch.vehicleNo || "차량 미지정"}</span>
+            {vehicle && typeof vehicle.speed === "number" && (
+              <>
+                <span style={MS.dot}>·</span>
+                <span style={{ fontFamily:"var(--font-mono)", fontWeight:700, color:"var(--color-primary)" }}>
+                  {Math.round(vehicle.speed)} km/h
+                </span>
+              </>
+            )}
+          </div>
+          {totalPlanned > 0 && stops.length > 0 && (
+            <div style={MS.routeProgress}>
+              <span style={{ color:"var(--color-label-mute)" }}>진행</span>
+              <span style={{ fontWeight:700, color:"var(--color-label)" }}>
+                {arrivedCount} / {stops.length}
+              </span>
+              <div style={MS.progressBar}>
+                <div style={{ ...MS.progressFill,
+                  width: `${stops.length > 0 ? (arrivedCount / stops.length) * 100 : 0}%` }} />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 정류장 타임라인 */}
+      <div style={MS.timelineWrap}>
+        {loading ? (
+          <div style={MS.routeEmpty}>정류장 로딩 중...</div>
+        ) : stops.length === 0 ? (
+          <div style={MS.routeEmpty}>등록된 정류장이 없습니다</div>
+        ) : (
+          <div style={{ position:"relative" }}>
+            {/* 세로 연결선 */}
+            <div style={MS.timelineSpine} />
+            {stops.map((s, i) => {
+              const e = estByStopId[s.id];
+              const arrived = e?.status === "arrived";
+              const isNext = e?.status === "next";
+              const lab = e ? formatDelayLabel(e.delaySec) : { tone:"mute", label:"" };
+              const labColor = lab.tone === "danger" ? "var(--color-destructive)"
+                : lab.tone === "warn" ? "var(--color-cautionary)"
+                : "var(--color-positive)";
+              const labBg = lab.tone === "danger" ? "#FCE5E5"
+                : lab.tone === "warn" ? "#FFF1E0"
+                : "#E6F7EB";
+              // 버스 마커 — 가장 최근 도착 정류장 직후에 표시(다음 정류장 위가 아닌 사이).
+              const showBus = i === lastArrivedIdx && lastArrivedIdx >= 0 && !allArrived;
+              return (
+                <div key={s.id}>
+                  <div style={MS.timelineRow}>
+                    <div style={{
+                      ...MS.timelineDot,
+                      background: arrived ? "var(--color-positive)"
+                        : isNext ? "var(--color-primary)"
+                        : "#fff",
+                      borderColor: arrived ? "var(--color-positive)"
+                        : isNext ? "var(--color-primary)"
+                        : "var(--color-atomic-coolNeutral-85)",
+                    }}>
+                      {arrived && <span style={{ color:"#fff", fontSize:10, fontWeight:800 }}>✓</span>}
+                    </div>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={MS.stopName}>{i+1}. {s.name}</div>
+                      {(e?.plannedAt || e?.estimatedAt) && (
+                        <div style={MS.stopTimeRow}>
+                          {e.plannedAt && (
+                            <>
+                              <span style={MS.stopTimeLbl}>계획</span>
+                              <span style={MS.stopTimeVal}>{e.plannedAt}</span>
+                            </>
+                          )}
+                          {e.estimatedAt && e.estimatedAt !== e.plannedAt && (
+                            <>
+                              {e.plannedAt && <span style={MS.dotSm}>·</span>}
+                              <span style={MS.stopTimeLbl}>
+                                {arrived ? "도착" : "예상"}
+                              </span>
+                              <span style={{
+                                ...MS.stopTimeVal,
+                                color: arrived ? "var(--color-positive)" : "var(--color-primary-deep)",
+                              }}>{e.estimatedAt}</span>
+                            </>
+                          )}
+                          {lab.label && lab.tone !== "mute" && (
+                            <span style={{
+                              fontSize:11, fontWeight:800,
+                              padding:"2px 9px", borderRadius:999,
+                              background: labBg, color: labColor,
+                              border: `1px solid ${labColor}`,
+                            }}>{lab.label}</span>
+                          )}
+                        </div>
+                      )}
+                      {!e?.plannedAt && !e?.estimatedAt && (
+                        <div style={{ fontSize:11, color:"var(--color-label-alt)", marginTop:3 }}>
+                          {s.address || "정류장 진입시각 미설정"}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {/* 버스 위치 마커 — 도착한 마지막 정류장 직후에 표시 */}
+                  {showBus && (
+                    <div style={MS.busRow}>
+                      <div style={MS.busDot}>🚌</div>
+                      <div style={{ fontSize:11, color:"var(--color-primary)", fontWeight:700 }}>
+                        현재 위치 {vehicle && typeof vehicle.speed === "number" && (
+                          <span style={{ color:"var(--color-label-mute)", fontWeight:500, marginLeft:4 }}>
+                            ({Math.round(vehicle.speed)} km/h)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // MapTab 전용 라이트 스타일(리디자인 3단계). 공유 S 객체 무손상 → 타 9탭 격리.
 const MS = {
   wrap:{ position:"relative", height:"100%", minHeight:0, overflow:"hidden", background:"var(--color-bg-soft)", fontFamily:"var(--font-base)" },
@@ -489,6 +786,34 @@ const MS = {
   coordItem:{ display:"flex", alignItems:"center", justifyContent:"space-between" },
   coordLbl:{ fontSize:12, color:"var(--color-label-mute)", fontWeight:600 },
   coordVal:{ fontSize:13, color:"var(--color-label)", fontFamily:"var(--font-mono)" },
+  // ─── 노선도 뷰 (2026-05-26) ─────────────────────────────
+  viewToggle:{ marginLeft:12, display:"flex", gap:2, padding:3, background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:8 },
+  viewBtn:{ padding:"5px 11px", fontSize:12, fontWeight:700, fontFamily:"inherit", border:"none", background:"transparent", color:"var(--color-label-mute)", borderRadius:6, cursor:"pointer", transition:"all .12s" },
+  viewBtnOn:{ background:"var(--color-bg)", color:"var(--color-primary)", boxShadow:"0 1px 3px rgba(0,0,0,.08)" },
+  dateInput:{ marginLeft:8, padding:"5px 9px", fontSize:12, fontWeight:600, fontFamily:"inherit", color:"var(--color-label)", background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:8, outline:"none", cursor:"pointer" },
+  pastBadge:{ marginLeft:"auto", display:"inline-flex", alignItems:"center", gap:6, fontSize:12, fontWeight:700, color:"var(--color-cautionary)", background:"#FFF1E0", border:"1px solid #FFE0C2", padding:"5px 11px", borderRadius:999 },
+  routeWrap:{ position:"absolute", top:76, left:12, right:12, bottom:12, overflowY:"auto", zIndex:5, padding:"4px 4px 12px", background:"var(--color-bg-soft)", borderRadius:14 },
+  routeGrid:{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(360px, 1fr))", gap:14 },
+  routeEmpty:{ textAlign:"center", padding:"48px 16px", color:"var(--color-label-mute)", fontSize:14, lineHeight:1.6 },
+  routeCard:{ background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:14, boxShadow:"var(--shadow-soft)", display:"flex", flexDirection:"column", overflow:"hidden" },
+  routeCardHead:{ padding:"14px 16px 12px", borderBottom:"1px solid var(--color-bg-soft)", background:"var(--color-bg)" },
+  routeName:{ fontSize:15, fontWeight:800, fontFamily:"var(--font-brand)", letterSpacing:"-0.01em", color:"var(--color-label)" },
+  routeMeta:{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", fontSize:12, color:"var(--color-label-mute)", marginTop:6 },
+  dot:{ color:"var(--color-line)" },
+  dotSm:{ color:"var(--color-line)", fontSize:11 },
+  routeProgress:{ display:"flex", alignItems:"center", gap:8, marginTop:8, fontSize:12 },
+  progressBar:{ flex:1, height:6, borderRadius:3, background:"var(--color-bg-soft)", overflow:"hidden" },
+  progressFill:{ height:"100%", background:"linear-gradient(90deg, var(--color-primary) 0%, var(--color-positive) 100%)", borderRadius:3, transition:"width .3s ease" },
+  timelineWrap:{ padding:"12px 16px 16px", maxHeight:"60vh", overflowY:"auto" },
+  timelineSpine:{ position:"absolute", left:9, top:8, bottom:8, width:2, background:"var(--color-line)", borderRadius:2 },
+  timelineRow:{ display:"flex", alignItems:"flex-start", gap:12, padding:"7px 0", position:"relative", zIndex:1 },
+  timelineDot:{ width:20, height:20, borderRadius:"50%", border:"2.5px solid", flexShrink:0, marginTop:2, display:"flex", alignItems:"center", justifyContent:"center", background:"#fff" },
+  stopName:{ fontSize:13, fontWeight:700, color:"var(--color-label)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
+  stopTimeRow:{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap", marginTop:4, fontSize:12 },
+  stopTimeLbl:{ color:"var(--color-label-mute)", fontWeight:600 },
+  stopTimeVal:{ fontWeight:800, color:"var(--color-label)", fontFamily:"var(--font-brand)" },
+  busRow:{ display:"flex", alignItems:"center", gap:12, padding:"4px 0 4px 2px", position:"relative", zIndex:2 },
+  busDot:{ width:20, height:20, borderRadius:"50%", background:"var(--color-primary)", border:"2.5px solid #fff", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, boxShadow:"0 2px 8px rgba(0,102,255,.35)" },
 };
 
 // ═══════════════════════════════════════════════════════
@@ -1972,7 +2297,11 @@ function DriverTab({ companyId, vehicles }) {
     if (!window.confirm(`${driver.name} 기사를 삭제하시겠습니까?`)) return;
     try {
       try { await (httpsCallable(functions,"deleteDriver"))({companyId,driverId:driver.id,uid:driver.uid}); }
-      catch { await deleteDoc(doc(db,"companies",companyId,"drivers",driver.id)); }
+      catch (cfErr) {
+        console.warn("deleteDriver CF 실패, 직접 삭제 폴백:", cfErr?.message);
+        await deleteDoc(doc(db,"companies",companyId,"drivers",driver.id));
+      }
+      alert(`${driver.name} 기사가 삭제되었습니다.`);
     } catch (e) { alert("삭제 중 오류: "+e.message); }
   };
 
@@ -2241,6 +2570,10 @@ function HistoryTab({ companyId, vehicles }) {
   // 차량 → 협력사 매핑(routes + dispatchSchedules 의 vehicleId 기반)
   const [routes, setRoutes] = useState([]);
   const [schedules, setSchedules] = useState([]);
+  // 노선별 배차 그룹 뷰 (2026-05-26 추가):
+  // 기존 차량 단일 선택 → 오늘 배차를 노선별로 그룹화한 리스트에서 선택 → 해당 배차의 GPS 이력 자동 로드.
+  const [dispatches, setDispatches] = useState([]);
+  const [selectedDispatchId, setSelectedDispatchId] = useState(null);
   const vehicle = vehicles.find(v=>v.id===vehicleId);
 
   useEffect(() => {
@@ -2253,6 +2586,11 @@ function HistoryTab({ companyId, vehicles }) {
     return onSnapshot(collection(db, "companies", companyId, "dispatchSchedules"),
       snap => setSchedules(snap.docs.map(d => ({ id:d.id, ...d.data() }))));
   }, [companyId]);
+  useEffect(() => {
+    if (!companyId || !date) return;
+    return onSnapshot(collection(db, "companies", companyId, "dispatches", date, "list"),
+      snap => setDispatches(snap.docs.map(d => ({ id:d.id, ...d.data() }))));
+  }, [companyId, date]);
 
   // vehicleId → partnerCode 추정: 그 차량에 등록된 schedule 의 routeId → routes.partnerCode
   // (schedule 없으면 routes 의 vehicleId 매칭은 routes 에 vehicleId 필드 없음 — schedule 기반으로 한정)
@@ -2265,6 +2603,116 @@ function HistoryTab({ companyId, vehicles }) {
     if (partnerCode === "전체") return true;
     return vehiclePartnerOf(v.id) === partnerCode;
   });
+
+  // 협력사 필터 적용된 배차 → 노선별 그룹
+  const filteredDispatches = dispatches.filter(d => {
+    if (partnerCode === "전체") return true;
+    return routes.find(r => r.id === d.routeId)?.partnerCode === partnerCode;
+  });
+  // ⚠ 카카오 SDK `Map` import가 native Map 클래스를 shadow → `new Map()` 빌드 시 forwardRef 객체로 변환되어 비-생성자 TypeError.
+  //   `window.Map` 으로 native 명시(memory: `Map` shadow 패턴, NoticeTab L3098과 동일 가드).
+  const dispatchGroups = (() => {
+    const map = new window.Map();
+    filteredDispatches.forEach(d => {
+      const key = d.routeId || "_unassigned";
+      if (!map.has(key)) {
+        const r = routes.find(x => x.id === d.routeId);
+        map.set(key, {
+          routeId: d.routeId, routeName: d.routeName || r?.name || "노선 미지정", items: [],
+        });
+      }
+      map.get(key).items.push(d);
+    });
+    // 그룹별 내부 시간순, 그룹은 가장 이른 출발시간 순으로 정렬
+    const groups = [...map.values()];
+    groups.forEach(g => g.items.sort((a, b) => (a.departTime || "99:99").localeCompare(b.departTime || "99:99")));
+    groups.sort((a, b) => {
+      const ta = a.items[0]?.departTime || "99:99", tb = b.items[0]?.departTime || "99:99";
+      return ta.localeCompare(tb);
+    });
+    return groups;
+  })();
+
+  // 배차의 시간 범위(start/end millis) 산출 — gpsHistory는 vehicleId/date 단위로 누적되므로
+  // 한 차량이 하루에 여러 배차 운행 시 모든 배차가 동일 포인트로 보이는 결함 차단용.
+  // start = departTime 5분 전(차량 워밍업 여유), end = (a)도착기록 있으면 마지막 actualAt+10분 (b)없으면
+  // 같은 차량의 다음 배차 출발 5분 전 (c)그것도 없으면 start+3시간(보수적 기본).
+  const dispatchTimeRange = (d, allDispatches) => {
+    const baseDate = new Date(date + "T00:00:00");
+    const baseMs = baseDate.getTime();
+    const parseHM = (hhmm) => {
+      const m = (hhmm || "").match(/^(\d{1,2}):(\d{2})$/);
+      if (!m) return null;
+      return (+m[1]) * 60 * 60 * 1000 + (+m[2]) * 60 * 1000;
+    };
+    const departOff = parseHM(d.departTime);
+    if (departOff == null) return null;
+    const start = baseMs + departOff - 5 * 60 * 1000;
+    // 도착 기록 있으면 마지막 actualAt 기준
+    const sa = d.stopArrivals || {};
+    let lastActualMs = null;
+    Object.values(sa).forEach(a => {
+      const ms = a?.actualAt?.toMillis ? a.actualAt.toMillis()
+        : (typeof a?.actualAt === "number" ? a.actualAt : null);
+      if (ms != null && (lastActualMs == null || ms > lastActualMs)) lastActualMs = ms;
+    });
+    if (lastActualMs != null) {
+      return { start, end: lastActualMs + 10 * 60 * 1000 };
+    }
+    // 같은 차량의 다음 배차 찾기(현 배차 이후 출발 시간 중 최저)
+    const sameVehicleLater = allDispatches
+      .filter(x => x.vehicleId === d.vehicleId && x.id !== d.id)
+      .map(x => parseHM(x.departTime))
+      .filter(off => off != null && off > departOff)
+      .sort((a, b) => a - b);
+    if (sameVehicleLater.length > 0) {
+      return { start, end: baseMs + sameVehicleLater[0] - 5 * 60 * 1000 };
+    }
+    return { start, end: start + 3 * 60 * 60 * 1000 };
+  };
+
+  // 배차 클릭 시: vehicleId 자동 설정 + 이력 자동 로드 + 배차 시간 범위로 필터.
+  const handleSelectDispatch = (d) => {
+    setSelectedDispatchId(d.id);
+    if (d.vehicleId) {
+      setVehicleId(d.vehicleId);
+      const range = dispatchTimeRange(d, dispatches);
+      loadHistory(d.vehicleId, range);
+    }
+  };
+  const loadHistory = async (vid, range) => {
+    if (!vid) return;
+    setLoading(true); setPoints([]); setSelected(null);
+    try {
+      const ref = collection(db,"gpsHistory",companyId,vid,date,"points");
+      const snap = await getDocs(query(ref,orderBy("ts","asc")));
+      let list = snap.docs.map((d)=>({id:d.id,...d.data(),ts:d.data().ts}));
+      // 배차 시간 범위가 주어지면 필터(차량 단위 GPS를 배차 단위로 좁힘).
+      if (range) {
+        list = list.filter(p => {
+          const ms = p.ts?.toMillis ? p.ts.toMillis()
+            : (typeof p.ts === "number" ? p.ts : (p.ts ? new Date(p.ts).getTime() : null));
+          return ms != null && ms >= range.start && ms <= range.end;
+        });
+      }
+      list = list.map((p, i) => ({ ...p, idx: i + 1 }));
+      setPoints(list);
+      if (list.length>0) setCenter({lat:list[0].lat,lng:list[0].lng});
+    } catch (e) { alert("조회 오류: "+e.message); }
+    setLoading(false);
+  };
+
+  // 배차 요약 정보 — 도착 완료 정류장 수 / 총 누적 지연(분).
+  const dispatchSummary = (d) => {
+    const sa = d.stopArrivals || {};
+    const arrivedCount = Object.keys(sa).length;
+    // 마지막 도착 정류장의 delaySec를 누적지연 대표값으로 사용.
+    let lastDelaySec = null;
+    Object.values(sa).forEach(a => {
+      if (a && typeof a.delaySec === "number") lastDelaySec = a.delaySec;
+    });
+    return { arrivedCount, delayMin: lastDelaySec != null ? Math.round(lastDelaySec / 60) : null };
+  };
 
   const handleLoad = async () => {
     if (!vehicleId) return alert("차량을 선택해주세요");
@@ -2289,35 +2737,114 @@ function HistoryTab({ companyId, vehicles }) {
           <span style={{fontWeight:700}}>📅 운행 이력</span>
           {points.length>0&&<span style={{fontSize:12,fontWeight:600,color:"var(--color-positive)"}}>{points.length}개 포인트</span>}
         </div>
-        <div style={{padding:16,display:"flex",flexDirection:"column",gap:10}}>
-          <div><label style={S.label}>날짜</label><input type="date" style={S.dateInput} value={date} onChange={e=>{ if(e.target.value) setDate(e.target.value); }}/></div>
+        <div style={{padding:"14px 16px 10px",display:"flex",flexDirection:"column",gap:10,borderBottom:"1px solid var(--color-line-soft)"}}>
+          <div><label style={S.label}>날짜</label><input type="date" style={S.dateInput} value={date} onChange={e=>{ if(e.target.value) { setDate(e.target.value); setSelectedDispatchId(null); setPoints([]); }}}/></div>
           <div><label style={S.label}>거래처</label>
             <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} compact={false} />
           </div>
-          <div><label style={S.label}>차량 {partnerCode!=="전체" && <span style={{color:"var(--color-label-alt)",fontSize:11}}>({filteredVehicles.length}대)</span>}</label>
-            <select style={S.input} value={vehicleId} onChange={e=>setVehicleId(e.target.value)}>
-              <option value="">차량 선택</option>
-              {filteredVehicles.map(v=><option key={v.id} value={v.id}>{v.plateNo}</option>)}
-            </select>
-          </div>
-          <button style={{...S.addBtn,padding:"10px"}} onClick={handleLoad} disabled={loading}>{loading?"조회 중...":"🔍 이력 조회"}</button>
+          {/* 직접 차량 선택 (보조 — 노선별 배차가 없는 날·이전 데이터 조회용) */}
+          <details style={{ background:"var(--color-bg-alt)", borderRadius:8, padding:"8px 10px" }}>
+            <summary style={{ cursor:"pointer", fontSize:11, fontWeight:700, color:"var(--color-label-mute)" }}>차량 직접 선택 (보조)</summary>
+            <div style={{ marginTop:8, display:"flex", gap:6 }}>
+              <select style={{...S.input,flex:1,fontSize:12,padding:"7px 9px"}} value={vehicleId} onChange={e=>setVehicleId(e.target.value)}>
+                <option value="">차량 선택</option>
+                {filteredVehicles.map(v=><option key={v.id} value={v.id}>{v.plateNo}</option>)}
+              </select>
+              <button style={{...S.addBtn,padding:"6px 10px",fontSize:12}} onClick={handleLoad} disabled={loading||!vehicleId}>{loading?"…":"조회"}</button>
+            </div>
+          </details>
         </div>
-        {points.length>0&&(
-          <div style={{flex:1,overflowY:"auto",padding:"0 12px"}}>
-            <div style={{fontSize:12,color:"var(--color-label-mute)",padding:"4px 4px 8px",borderBottom:"1px solid var(--color-line)",marginBottom:8}}>{vehicle?.plateNo} · {date}</div>
-            {points.map(p=>(
-              <div key={p.id} onClick={()=>{setSelected(p);setCenter({lat:p.lat,lng:p.lng});}}
-                style={{padding:"8px 10px",borderRadius:8,marginBottom:4,cursor:"pointer",background:selected?.id===p.id?"var(--color-primary-soft)":"var(--color-bg-alt)",border:`1px solid ${selected?.id===p.id?"var(--color-primary)":"var(--color-line)"}`}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{fontSize:11,fontWeight:700,color:"var(--color-primary)"}}>#{p.idx}</span>
-                  <span style={{fontSize:11,color:"var(--color-label-mute)"}}>{formatTs(p.ts)}</span>
-                </div>
-                <div style={{fontSize:11,color:"var(--color-label-mute)",marginTop:2}}>{p.speed??0} km/h</div>
-              </div>
-            ))}
+        {/* 노선별 배차 그룹 */}
+        <div style={{flex:1,overflowY:"auto",padding:"10px 12px"}}>
+          <div style={{ fontSize:11, fontWeight:700, color:"var(--color-label-mute)", padding:"4px 2px 10px", textTransform:"uppercase", letterSpacing:0.04 }}>
+            노선별 배차 · {filteredDispatches.length}건
           </div>
-        )}
-        {!loading&&points.length===0&&vehicleId&&<div style={S.empty}>이력이 없습니다</div>}
+          {dispatchGroups.length === 0 ? (
+            <div style={{ ...S.empty, padding:"24px 12px" }}>해당 날짜에 배차된 노선이 없습니다</div>
+          ) : dispatchGroups.map(group => (
+            <div key={group.routeId || "_unassigned"} style={{ marginBottom:14 }}>
+              <div style={{ fontSize:13, fontWeight:800, color:"var(--color-label)", marginBottom:6, display:"flex", alignItems:"center", gap:6 }}>
+                <span style={{ width:3, height:14, background:"var(--color-primary)", borderRadius:2 }}/>
+                {group.routeName}
+                <span style={{ fontSize:11, fontWeight:600, color:"var(--color-label-mute)", marginLeft:"auto" }}>{group.items.length}건</span>
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
+                {group.items.map(d => {
+                  const summ = dispatchSummary(d);
+                  const isSelected = selectedDispatchId === d.id;
+                  const delayTone = summ.delayMin == null ? null
+                    : summ.delayMin >= 2 ? "danger" : summ.delayMin <= -2 ? "warn" : "ok";
+                  const delayColor = delayTone === "danger" ? "var(--color-destructive)"
+                    : delayTone === "warn" ? "var(--color-cautionary)" : "var(--color-positive)";
+                  return (
+                    <div key={d.id} onClick={() => handleSelectDispatch(d)}
+                      style={{
+                        padding:"9px 11px", borderRadius:8, cursor:"pointer",
+                        background: isSelected ? "var(--color-primary-soft)" : "var(--color-bg-alt)",
+                        border: `1px solid ${isSelected ? "var(--color-primary)" : "var(--color-line)"}`,
+                        transition:"all .12s",
+                      }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:8 }}>
+                        <span style={{ fontSize:13, fontWeight:800, color: isSelected ? "var(--color-primary-deep)" : "var(--color-label)", fontFamily:"var(--font-mono)" }}>
+                          {d.departTime || "––:––"}
+                        </span>
+                        <span style={{ fontSize:11, color:"var(--color-label-mute)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                          {d.driverName || "기사 미지정"}
+                        </span>
+                      </div>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:4, fontSize:11 }}>
+                        <span style={{ color:"var(--color-label-mute)" }}>
+                          {d.vehicleNo || "차량 미지정"}
+                          {summ.arrivedCount > 0 && (
+                            <span style={{ marginLeft:8, color:"var(--color-positive)", fontWeight:700 }}>● {summ.arrivedCount}정류장</span>
+                          )}
+                        </span>
+                        {summ.delayMin != null && (
+                          <span style={{ color: delayColor, fontWeight:700, fontSize:11 }}>
+                            {summ.delayMin >= 2 ? `+${summ.delayMin}분` : summ.delayMin <= -2 ? `${summ.delayMin}분` : "정시"}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          {/* GPS 포인트 리스트 — 배차 선택 후 로드된 경우 */}
+          {points.length>0 && (
+            <div style={{ marginTop:14, paddingTop:10, borderTop:"1px solid var(--color-line)" }}>
+              <div style={{fontSize:11,color:"var(--color-label-mute)",padding:"0 2px 4px",fontWeight:700,textTransform:"uppercase",letterSpacing:0.04}}>
+                📍 GPS 포인트 · {points.length}개 ({vehicle?.plateNo || "–"})
+              </div>
+              {selectedDispatchId && (() => {
+                const d = dispatches.find(x => x.id === selectedDispatchId);
+                if (!d) return null;
+                const r = dispatchTimeRange(d, dispatches);
+                if (!r) return null;
+                const fmt = (ms) => { const dt = new Date(ms); return `${String(dt.getHours()).padStart(2,"0")}:${String(dt.getMinutes()).padStart(2,"0")}`; };
+                return (
+                  <div style={{ fontSize:10, color:"var(--color-label-alt)", padding:"0 2px 8px" }}>
+                    배차 시간대 {fmt(r.start)}~{fmt(r.end)} 범위 필터 적용
+                  </div>
+                );
+              })()}
+              {points.map(p=>(
+                <div key={p.id} onClick={()=>{setSelected(p);setCenter({lat:p.lat,lng:p.lng});}}
+                  style={{padding:"7px 10px",borderRadius:8,marginBottom:4,cursor:"pointer",background:selected?.id===p.id?"var(--color-primary-soft)":"var(--color-bg-alt)",border:`1px solid ${selected?.id===p.id?"var(--color-primary)":"var(--color-line)"}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:11,fontWeight:700,color:"var(--color-primary)"}}>#{p.idx}</span>
+                    <span style={{fontSize:11,color:"var(--color-label-mute)"}}>{formatTs(p.ts)}</span>
+                  </div>
+                  <div style={{fontSize:11,color:"var(--color-label-mute)",marginTop:2}}>{p.speed??0} km/h</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {!loading && points.length===0 && selectedDispatchId && (
+            <div style={{ ...S.empty, padding:"16px 12px", marginTop:10 }}>선택한 배차에 GPS 이력이 없습니다</div>
+          )}
+        </div>
       </div>
       <div style={{flex:1,position:"relative"}}>
         <Map center={center} style={{width:"100%",height:"100%"}} level={7}>
@@ -2337,8 +2864,8 @@ function HistoryTab({ companyId, vehicles }) {
           </div>
         )}
         {points.length===0&&!loading&&(
-          <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",background:"rgba(255,255,255,0.92)",backdropFilter:"blur(8px)",WebkitBackdropFilter:"blur(8px)",border:"1px solid var(--color-line)",borderRadius:12,padding:"20px 32px",textAlign:"center",color:"var(--color-label-mute)",fontSize:14,boxShadow:"var(--shadow-float)"}}>
-            차량과 날짜를 선택 후<br/>이력 조회를 눌러주세요
+          <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",background:"rgba(255,255,255,0.92)",backdropFilter:"blur(8px)",WebkitBackdropFilter:"blur(8px)",border:"1px solid var(--color-line)",borderRadius:12,padding:"20px 32px",textAlign:"center",color:"var(--color-label-mute)",fontSize:14,boxShadow:"var(--shadow-float)",lineHeight:1.6}}>
+            왼쪽 사이드바에서<br/>노선·배차를 선택하면<br/>GPS 이력이 표시됩니다
           </div>
         )}
       </div>
@@ -2347,7 +2874,336 @@ function HistoryTab({ companyId, vehicles }) {
 }
 
 // ═══════════════════════════════════════════════════════
-// 탭8: 협력사 관리
+// 탭9: 탑승 통계 (QR 탑승 누적, 2026-05-26)
+// ═══════════════════════════════════════════════════════
+// boardings/{date}/list/{boardingId} 컬렉션 = QR 탑승 1건. partnerCode 필드는 신규 boarding부터
+// 자동 채움(lib/boarding.js 2026-05-26). 기존 데이터는 partnerCode=undefined → "미지정" 표시.
+function BoardingStatsTab({ companyId }) {
+  const [date, setDate] = useState(getToday());
+  const [partnerCode, setPartnerCode] = useState("전체");
+  const [boardings, setBoardings] = useState([]);
+  const [partners, setPartners] = useState([]); // partnerCode → partnerName 매핑용
+  const [search, setSearch] = useState("");
+  // 정류장별 GPS 매핑용 — boardings에 등장한 routeId의 stops를 lazy 로드.
+  const [stopsByRoute, setStopsByRoute] = useState({});
+
+  // 선택 날짜 탑승 기록 실시간 구독
+  useEffect(() => {
+    if (!companyId || !date) return;
+    return onSnapshot(
+      query(collection(db, "companies", companyId, "boardings", date, "list"), orderBy("boardedAt", "asc")),
+      snap => setBoardings(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    );
+  }, [companyId, date]);
+
+  // 협력사 메타(이름 매핑)
+  useEffect(() => {
+    if (!companyId) return;
+    return onSnapshot(
+      query(collection(db, "partnerCodes"), where("companyId", "==", companyId)),
+      snap => setPartners(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    );
+  }, [companyId]);
+  const partnerNameOf = (code) => partners.find(p => p.code === code)?.partnerName || code;
+
+  // 정류장 매핑용: boardings에 등장한 routeIds에 대한 stops 로드(아직 캐시 안 됐으면 가져옴).
+  // routes는 변경 빈도 낮아 onSnapshot 대신 getDocs로 1회 fetch만(불필요한 리스너 절약).
+  useEffect(() => {
+    if (!companyId || boardings.length === 0) return;
+    const routeIds = Array.from(new window.Set(boardings.map(b => b.routeId).filter(Boolean)));
+    const toLoad = routeIds.filter(rid => !stopsByRoute[rid]);
+    if (toLoad.length === 0) return;
+    Promise.all(toLoad.map(async rid => {
+      try {
+        const snap = await getDocs(query(
+          collection(db, "companies", companyId, "routes", rid, "stops"),
+          orderBy("order", "asc")
+        ));
+        return [rid, snap.docs.map(d => ({ id: d.id, ...d.data() }))];
+      } catch (_) {
+        return [rid, []];
+      }
+    })).then(pairs => {
+      setStopsByRoute(prev => {
+        const next = { ...prev };
+        pairs.forEach(([rid, stops]) => { next[rid] = stops; });
+        return next;
+      });
+    });
+  }, [companyId, boardings, stopsByRoute]);
+
+  // 협력사 필터 + 검색 적용된 탑승 리스트
+  const filtered = boardings.filter(b => {
+    if (partnerCode !== "전체") {
+      const bp = b.partnerCode || null;
+      if (partnerCode === "_unassigned") {
+        if (bp != null) return false;
+      } else if (bp !== partnerCode) return false;
+    }
+    if (search) {
+      const s = search.toLowerCase();
+      const hay = [b.empNo, b.name, b.routeName, b.vehicleNo, b.stopName, b.driverId].join(" ").toLowerCase();
+      if (!hay.includes(s)) return false;
+    }
+    return true;
+  });
+
+  // 집계: 협력사·노선·차량·정류장·시간대
+  const byPartner = (() => {
+    const m = new window.Map();
+    boardings.forEach(b => {
+      const k = b.partnerCode || "_unassigned";
+      m.set(k, (m.get(k) || 0) + 1);
+    });
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  })();
+  const byRoute = (() => {
+    const m = new window.Map();
+    filtered.forEach(b => {
+      const k = b.routeId || "_unknown";
+      const cur = m.get(k) || { name: b.routeName || "노선 미지정", count: 0 };
+      cur.count++;
+      m.set(k, cur);
+    });
+    return [...m.values()].sort((a, b) => b.count - a.count);
+  })();
+  const byVehicle = (() => {
+    const m = new window.Map();
+    filtered.forEach(b => {
+      const k = b.vehicleId || "_unknown";
+      const cur = m.get(k) || { no: b.vehicleNo || "차량 미지정", count: 0 };
+      cur.count++;
+      m.set(k, cur);
+    });
+    return [...m.values()].sort((a, b) => b.count - a.count);
+  })();
+  const byHour = (() => {
+    const buckets = Array.from({ length: 24 }, () => 0);
+    filtered.forEach(b => {
+      const ms = b.boardedAt?.toMillis ? b.boardedAt.toMillis() : null;
+      if (ms != null) buckets[new Date(ms).getHours()]++;
+    });
+    return buckets;
+  })();
+  const peakHourCount = Math.max(...byHour, 1);
+
+  const fmtTime = (ts) => {
+    if (!ts) return "–";
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  };
+
+  return (
+    <div style={S.panel}>
+      <div style={S.panelHeader}>
+        <span style={{ fontSize: 16, fontWeight: 700 }}>📊 탑승 통계</span>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <input type="date" value={date} max={getToday()} onChange={e => { if (e.target.value) setDate(e.target.value); }}
+            style={S.dateInput} />
+          <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} />
+        </div>
+      </div>
+      <div style={S.tableWrap}>
+        <div style={{ padding: "16px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* 종합 카드 */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+            <div style={statCard}>
+              <div style={statLabel}>총 탑승</div>
+              <div style={{ ...statValue, color: "var(--color-primary)" }}>{filtered.length}<span style={statUnit}>건</span></div>
+              <div style={statSub}>{date}</div>
+            </div>
+            <div style={statCard}>
+              <div style={statLabel}>고유 직원</div>
+              <div style={{ ...statValue, color: "var(--color-positive)" }}>{new window.Set(filtered.map(b => b.empNo)).size}<span style={statUnit}>명</span></div>
+              <div style={statSub}>중복 제외</div>
+            </div>
+            <div style={statCard}>
+              <div style={statLabel}>운행 노선</div>
+              <div style={{ ...statValue, color: "var(--color-cautionary)" }}>{byRoute.length}<span style={statUnit}>개</span></div>
+              <div style={statSub}>탑승 기록 기준</div>
+            </div>
+            <div style={statCard}>
+              <div style={statLabel}>운행 차량</div>
+              <div style={{ ...statValue, color: "var(--color-violet)" }}>{byVehicle.length}<span style={statUnit}>대</span></div>
+              <div style={statSub}>탑승 기록 기준</div>
+            </div>
+          </div>
+
+          {/* 협력사별 분포 */}
+          {byPartner.length > 0 && (
+            <div style={panelBox}>
+              <div style={panelHead}>🤝 협력사별 탑승 분포</div>
+              <div style={{ padding: 14, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {byPartner.map(([code, count]) => (
+                  <div key={code} style={{
+                    display: "flex", alignItems: "center", gap: 8, padding: "6px 12px",
+                    background: code === "_unassigned" ? "var(--color-bg-soft)" : "var(--color-primary-soft)",
+                    border: `1px solid ${code === "_unassigned" ? "var(--color-line)" : "rgba(0,102,255,.18)"}`,
+                    borderRadius: 999, fontSize: 12, fontWeight: 600,
+                  }}>
+                    <span style={{ color: code === "_unassigned" ? "var(--color-label-mute)" : "var(--color-primary-deep)" }}>
+                      {code === "_unassigned" ? "미지정" : partnerNameOf(code)}
+                    </span>
+                    <span style={{ fontWeight: 800, color: "var(--color-label)" }}>{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 정류장별 GPS 매핑 집계 */}
+          <div style={panelBox}>
+            <div style={panelHead}>📍 정류장별 탑승 <span style={{ fontSize: 11, fontWeight: 600, color: "var(--color-label-mute)", marginLeft: 6 }}>(GPS 매핑·반경 300m)</span></div>
+            {(() => {
+              const { mapped, unmapped, noGps } = aggregateBoardingsByStop(filtered, stopsByRoute, 300);
+              if (mapped.length === 0 && unmapped === 0 && noGps === 0) {
+                return <div style={{ ...S.empty, padding: 24 }}>매핑 가능한 데이터 없음</div>;
+              }
+              return (
+                <>
+                  {mapped.length === 0 ? (
+                    <div style={{ ...S.empty, padding: 24 }}>모든 탑승이 정류장 반경 밖이거나 GPS 좌표가 없습니다</div>
+                  ) : (
+                    <table style={S.table}>
+                      <thead>
+                        <tr>{["노선", "정류장", "탑승", "근접 거리"].map(h => (
+                          <th key={h} style={S.th}>{h}</th>
+                        ))}</tr>
+                      </thead>
+                      <tbody>
+                        {mapped.map((m, i) => (
+                          <tr key={i} style={S.tr}>
+                            <td style={{ ...S.td, color: "var(--color-label-mute)" }}>{m.routeName}</td>
+                            <td style={{ ...S.td, fontWeight: 700 }}>{m.stopName}</td>
+                            <td style={{ ...S.td, textAlign: "right", fontWeight: 800, color: "var(--color-primary)" }}>{m.count}건</td>
+                            <td style={{ ...S.td, fontSize: 11, color: "var(--color-label-mute)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
+                              {m.minDist != null ? `${Math.round(m.minDist)}m` : "–"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  {(unmapped > 0 || noGps > 0) && (
+                    <div style={{ padding: "8px 16px", fontSize: 11, color: "var(--color-label-alt)", borderTop: "1px solid var(--color-line-soft)", background: "var(--color-bg-soft)" }}>
+                      ⓘ {noGps > 0 && <span>GPS 좌표 없음 {noGps}건</span>}
+                      {noGps > 0 && unmapped > 0 && <span> · </span>}
+                      {unmapped > 0 && <span>임계 초과(300m 이상) {unmapped}건</span>}
+                      {noGps > 0 && <span style={{ marginLeft: 8 }}> · 기존 데이터(2026-05-26 이전)는 GPS 좌표 미포함</span>}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+
+          {/* 노선별 / 차량별 2단 */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
+            <div style={panelBox}>
+              <div style={panelHead}>🛣 노선별 탑승</div>
+              {byRoute.length === 0 ? <div style={{ ...S.empty, padding: 24 }}>데이터 없음</div> : (
+                <table style={S.table}>
+                  <tbody>
+                    {byRoute.map((r, i) => (
+                      <tr key={i} style={S.tr}>
+                        <td style={{ ...S.td, fontWeight: 600 }}>{r.name}</td>
+                        <td style={{ ...S.td, textAlign: "right", fontWeight: 800, color: "var(--color-primary)" }}>{r.count}건</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div style={panelBox}>
+              <div style={panelHead}>🚌 차량별 탑승</div>
+              {byVehicle.length === 0 ? <div style={{ ...S.empty, padding: 24 }}>데이터 없음</div> : (
+                <table style={S.table}>
+                  <tbody>
+                    {byVehicle.map((v, i) => (
+                      <tr key={i} style={S.tr}>
+                        <td style={{ ...S.td, fontWeight: 600, fontFamily: "var(--font-mono)" }}>{v.no}</td>
+                        <td style={{ ...S.td, textAlign: "right", fontWeight: 800, color: "var(--color-primary)" }}>{v.count}건</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+
+          {/* 시간대별 분포 */}
+          <div style={panelBox}>
+            <div style={panelHead}>⏰ 시간대별 탑승 분포</div>
+            <div style={{ padding: "14px 16px", display: "flex", alignItems: "flex-end", gap: 4, height: 120 }}>
+              {byHour.map((c, h) => (
+                <div key={h} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                  <div style={{ fontSize: 10, color: "var(--color-label-mute)", fontWeight: 600, opacity: c > 0 ? 1 : 0.4 }}>{c || ""}</div>
+                  <div style={{
+                    width: "100%", height: `${(c / peakHourCount) * 80}px`,
+                    background: c > 0 ? "var(--color-primary)" : "var(--color-bg-soft)",
+                    borderRadius: "3px 3px 0 0", minHeight: 2,
+                  }} />
+                  <div style={{ fontSize: 10, color: "var(--color-label-alt)", fontWeight: 600 }}>{h}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 상세 리스트 */}
+          <div style={panelBox}>
+            <div style={{ ...panelHead, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span>📋 상세 탑승 기록 · {filtered.length}건</span>
+              <input style={{ ...S.input, width: 220, padding: "6px 10px", fontSize: 12 }}
+                placeholder="🔍 사번·이름·노선·정류장 검색" value={search} onChange={e => setSearch(e.target.value)} />
+            </div>
+            {filtered.length === 0 ? (
+              <div style={{ ...S.empty, padding: 32 }}>탑승 기록이 없습니다</div>
+            ) : (
+              <div style={{ maxHeight: 480, overflowY: "auto" }}>
+                <table style={S.table}>
+                  <thead>
+                    <tr>
+                      {["시각", "사번", "이름", "협력사", "노선", "차량", "정류장"].map(h => (
+                        <th key={h} style={{ ...S.th, position: "sticky", top: 0 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(b => (
+                      <tr key={b.id} style={S.tr}>
+                        <td style={{ ...S.td, fontFamily: "var(--font-mono)", fontSize: 12 }}>{fmtTime(b.boardedAt)}</td>
+                        <td style={{ ...S.td, fontFamily: "var(--font-mono)", fontSize: 12 }}>{b.empNo}</td>
+                        <td style={{ ...S.td, fontWeight: 700 }}>{b.name || "–"}</td>
+                        <td style={{ ...S.td, color: "var(--color-label-mute)" }}>
+                          {b.partnerCode ? partnerNameOf(b.partnerCode) : <span style={{ color: "var(--color-label-alt)" }}>미지정</span>}
+                        </td>
+                        <td style={{ ...S.td }}>{b.routeName || "–"}</td>
+                        <td style={{ ...S.td, fontFamily: "var(--font-mono)", fontSize: 12 }}>{b.vehicleNo || "–"}</td>
+                        <td style={{ ...S.td, fontSize: 12 }}>{b.stopName || "–"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// BoardingStatsTab 전용 보조 스타일
+const statCard = { background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 12, padding: "14px 16px", boxShadow: "0 1px 2px rgba(0,0,0,.03)" };
+const statLabel = { fontSize: 11, fontWeight: 700, color: "var(--color-label-mute)", textTransform: "uppercase", letterSpacing: 0.04 };
+const statValue = { fontSize: 28, fontWeight: 800, marginTop: 4, fontFamily: "var(--font-brand)", letterSpacing: "-0.02em" };
+const statUnit = { fontSize: 13, fontWeight: 600, color: "var(--color-label-mute)", marginLeft: 4 };
+const statSub = { fontSize: 11, color: "var(--color-label-alt)", marginTop: 2 };
+const panelBox = { background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.03)" };
+const panelHead = { padding: "12px 16px", fontWeight: 700, fontSize: 13, color: "var(--color-label)", borderBottom: "1px solid var(--color-bg-soft)", background: "var(--color-bg-alt)" };
+
+// ═══════════════════════════════════════════════════════
+// 탭10: 협력사 관리
 // ═══════════════════════════════════════════════════════
 function PartnerTab({ companyId }) {
   const [codes, setCodes] = useState([]);
@@ -2403,6 +3259,29 @@ function PartnerTab({ companyId }) {
   const handleActivate = async (code) => {
     if (!window.confirm(`${code.partnerName} 업체코드를 다시 활성화하시겠습니까?`)) return;
     await updateDoc(doc(db, "partnerCodes", code.id), { active: true });
+  };
+
+  const handleDelete = async (code) => {
+    if (code.active) {
+      alert("활성 상태의 협력사는 삭제할 수 없습니다.\n먼저 '비활성화' 후 다시 시도해주세요.");
+      return;
+    }
+    try {
+      const snap = await getDocs(
+        query(collection(db, "companies", companyId, "passengers"), where("partnerCode", "==", code.code))
+      );
+      const total = snap.size;
+      const activeCount = snap.docs.filter(d => d.data().active).length;
+      const warn = total > 0
+        ? `\n\n⚠ 이 협력사 소속 직원 ${total}명(재직 ${activeCount}명)이 등록되어 있습니다.\n협력사 삭제 시 직원 데이터는 남지만 협력사 연결이 끊깁니다.`
+        : "";
+      if (!window.confirm(`${code.partnerName} (${code.code}) 협력사를 영구 삭제하시겠습니까?${warn}\n\n이 작업은 되돌릴 수 없습니다.`)) return;
+      await deleteDoc(doc(db, "partnerCodes", code.id));
+      if (selectedCode === code.id) setSelectedCode(null);
+      alert(`${code.partnerName} 협력사가 삭제되었습니다.`);
+    } catch (e) {
+      alert("삭제 중 오류: " + e.message);
+    }
   };
 
   const copyCode = (code) => {
@@ -2474,7 +3353,10 @@ function PartnerTab({ companyId }) {
                     {c.active ? (
                       <button style={S.delBtn} onClick={() => handleDeactivate(c)}>비활성화</button>
                     ) : (
-                      <button style={S.actBtn} onClick={() => handleActivate(c)}>활성화</button>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button style={S.actBtn} onClick={() => handleActivate(c)}>활성화</button>
+                        <button style={S.delBtn} onClick={() => handleDelete(c)}>삭제</button>
+                      </div>
                     )}
                   </td>
                 </tr>

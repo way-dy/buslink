@@ -10,7 +10,7 @@
 - **`dispatchSchedules/{scheduleId}`** — 반복 배차 패턴 정본(2026-05-20). `name/routeId/routeName/driverId/driverName/vehicleId/vehicleNo/departTime/startDate/endDate(null=무기한)/weekdays:number[](0=일~6=토)/excludeDates:string[]/excludeHolidays:boolean/active:boolean`. CF `expandDispatchSchedules`가 매일 새벽 향후 7일치 dispatches로 펼침(멱등 ID=`${scheduleId}_${day}`)
 - `drivers/{driverId}`, `vehicles/{vehicleId}`
 - `passengers/{empNo}` (PIN 해시·노선 배정)
-- `boardings/{date}/list/{boardingId}`
+- `boardings/{date}/list/{boardingId}` — `empNo/name/tokenId/companyId/routeId/routeName/vehicleId/vehicleNo/driverId/stopId/stopName/boardedAt` + **`partnerCode`**(null 가능, 2026-05-26 신규 — 직원의 passengers.partnerCode 자동 채움) + **`vehicleLat/vehicleLng/vehicleSpeed`**(null 가능, 2026-05-26 신규 — 탑승 시점 차량 GPS 캡처, 사후 정류장별 매핑용. `gps/{companyId}_{vehicleId}` 1회 getDoc). 둘 다 미수신/권한 오류 시 null, 통계에선 "미지정"/"GPS 없음"으로 분리
 - `fcmTokens/{empNo}` — `token/empNo/companyId/partnerCode/updatedAt` + (선택) **`routeId/stopId/myStopUpdatedAt`**(도착 임박 푸시용 '내 정류장' denormalize, 2026-05-22. EmployeeApp `/p`에서 내 정류장 선택 시 `setDoc` merge, 해제·노선변경 시 null. CF `notifyPreArrival`가 where `routeId`+`stopId`로 대상 직원 검색). (partnerCode: 2026-05-21 추가, EmployeeApp 로그인 시 passengers.partnerCode 자동 sync, 없으면 null. CF 협력사 발송 시 where 필터)
 - `notices/{noticeId}` — `title/body/type/companyId/partnerCode/active/createdAt` (partnerCode 2026-05-21 추가, null=전체)
 
@@ -29,6 +29,8 @@
 - `drivers`: 기사 본인은 `status/uid/startedAt/endedAt`만 update.
 - `dispatches/{date}/list/{id}`: admin 전체 write. **기사 본인 dispatch 의 `stopArrivals` 필드만 update 가능**(`drivers/{dispatch.driverId}.uid == request.auth.uid` 검증·affectedKeys hasOnly `[stopArrivals]`. 운행 중 정류장 100m 진입 시 클라가 update). 멱등은 클라가 첫도착만 write로 가드(서버 룰은 필드 범위만 강제).
 - `boardingTokens`/`partnerCodes`: read 공개(`true`), 소각/생성은 인증 사용자.
+- `boardings/{date}/list/{id}`: read·create = `isAuth()`(2026-05-26 완화 — 협력사 포털 통계 view 위해 admin→isAuth), update/delete는 admin. ⚠ BoardingApp·EmployeeApp·PassengerApp·PartnerApp·DriverApp 모든 진입점이 `signInAnonymously` 호출 필요(인증 누락 시 silent create 차단 → 통계 결측, 2026-05-26 BoardingApp 결함 사례 참조).
+- `partnerCodes`: read 공개, create/update = `isAuth()`, delete = `isAdmin(resource.data.companyId)`(2026-05-26 — admin이 자기 회사 협력사 영구 삭제 가능, UI는 비활성 상태에서만 허용).
 - `fcmQueue`: create만 인증, read는 admin(자기 회사 companyId 일치), update는 `false`(CF 전용). admin read 필요 이유=NoticeTab이 발송 결과(status/successCount/totalTokens) 실시간 onSnapshot 구독.
 - ⚠️ `src/firestore.rules`는 **오래된 사본** — @.claude/issues.md.
 

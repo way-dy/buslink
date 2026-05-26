@@ -27,10 +27,17 @@ import { haversine, projectToPolyline, buildCumulativeLengths } from "./routePro
 //      "도착예정시간이 현재시간 이전"으로 표시됨.
 // 해법 = 각 정류장 estMs[i] >= estMs[i-1] + MIN_STOP_GAP_SEC 보장 +
 //        estMs[i] >= T_NOW + MIN_FUTURE_BUFFER_SEC(과거 금지).
-const MIN_STOP_GAP_SEC = 25;       // 정류장 간 최소 시각 간격(초) — 동일값·역전 차단
+// 2026-05-26 보강: MIN_STOP_GAP_SEC을 25→60으로 상향. 이유 = `fmtHHMM`이 초 단위
+// 절삭(Date.getMinutes 분 단위)하기 때문에 25초 간격은 같은 "HH:MM"으로 표시되어
+// "도착지·이전 정류장 동일 시각" 결함이 반복됨. 60초 보장하면 라운딩 후에도 distinct.
+const MIN_STOP_GAP_SEC = 60;       // 정류장 간 최소 시각 간격(초) — HH:MM 라운딩 후에도 distinct
 const MIN_FUTURE_BUFFER_SEC = 30;  // 미통과 정류장 estimate 최소 미래 버퍼(초)
 const DEFAULT_SPEED_KMH = 30;      // routePath/속도 없을 때 구간이동시간 기본 속도
 const MIN_EFFECTIVE_SPEED_KMH = 20; // 정차/저속 노이즈 하한 — 구간이동시간 계산용
+// 정류장당 정차/감속/가속 추가 시간(초). 실제 도착→다음 도착 시간은 단순 주행거리
+// /속도가 아닌, 정차(승하차)+감속+가속 포함이라 segTravelMs에 가산. 근접 정류장
+// (200~500m)의 "지나치게 짧음" 결함을 직접 차단.
+const DWELL_SEC = 30;
 
 // "HH:MM" 문자열을 0~24*60 분으로. 형식 불량(빈값/NaN/범위 초과) 시 null.
 function parseHHMM(s) {
@@ -183,7 +190,8 @@ export function computeStopEstimates({
         ? speed : DEFAULT_SPEED_KMH,
       MIN_EFFECTIVE_SPEED_KMH
     );
-    return (distM / 1000) / effSpeed * 3600 * 1000;
+    // 주행시간 + 정차시간(DWELL_SEC) — 실제 정류장 간 도착시간은 정차/감속/가속 포함.
+    return (distM / 1000) / effSpeed * 3600 * 1000 + DWELL_SEC * 1000;
   };
 
   // 5) 정류장 메타(plannedAt/plannedMs/offset)를 1패스로 산출.
@@ -199,7 +207,12 @@ export function computeStopEstimates({
   // 6) order 순서대로 순회하며 estMs를 단조증가로 누적 산출.
   //    prevEstMs = 직전 정류장의 확정 estMs(arrived는 actualMs, 미통과는 보정된 estMs).
   //    prevEstMs가 null이면(노선 시작 전 기준점 없음) T_NOW를 기준으로 사용.
+  //    prevDelaySec = 직전까지 알려진 가장 최근 지연(초). arrived 누적지연 우선,
+  //    이후 planned 정류장이 자체 산출한 delaySec로도 갱신 → unplanned 정류장
+  //    delay carry-forward에 사용(arrived 기록이 아직 없어도 planned 추정 지연으로
+  //    "지연 라벨" 노출 가능).
   let prevEstMs = null;
+  let prevDelaySec = hasDelayRef ? cumulativeDelaySec : null;
   const out = [];
   for (let i = 0; i < stops.length; i++) {
     const s = stops[i];
@@ -214,6 +227,7 @@ export function computeStopEstimates({
       const delaySec = (plannedMs != null)
         ? Math.round((actualMs - plannedMs) / 1000) : null;
       prevEstMs = actualMs;
+      if (delaySec != null) prevDelaySec = delaySec;
       out.push({
         stopId: s.id, plannedAt, estimatedAt, delaySec,
         status: "arrived", source: "actual",
@@ -221,11 +235,24 @@ export function computeStopEstimates({
       continue;
     }
 
-    // (b) offsetMin 없음 = 계획 자체가 없음 → 폴백(calcETA류) 단위로 표시.
-    //     체인 기준점(prevEstMs)은 갱신하지 않음(계획 시각이 없어 신뢰 불가).
+    // (b) offsetMin 없음 = 계획 자체가 없음.
+    //     2026-05-26 보강: 이전엔 estimatedAt도 null로 반환했으나, 운영 현장에서
+    //     일부 정류장만 offsetMin 설정한 노선이 다수 → 지연/예상시각 영구 숨김 결함.
+    //     해법 = chain 전파(직전 estMs+segTravelMs)로 estimatedAt 산출 + prevDelaySec
+    //     carry-forward(arrived 또는 planned 추정 지연 둘 다 활용) → 지연 라벨도 표시.
+    //     plannedAt은 여전히 null(계획 자체가 없음을 보존), status='unplanned'로 구분.
     if (offset == null) {
+      const chainBase = (prevEstMs != null) ? prevEstMs : T_NOW;
+      let estMs = (i > 0) ? chainBase + segTravelMs(i - 1, i) : chainBase;
+      if (prevEstMs != null) {
+        estMs = Math.max(estMs, prevEstMs + MIN_STOP_GAP_SEC * 1000);
+      }
+      estMs = Math.max(estMs, T_NOW + MIN_FUTURE_BUFFER_SEC * 1000);
+      prevEstMs = estMs;
       out.push({
-        stopId: s.id, plannedAt: null, estimatedAt: null, delaySec: null,
+        stopId: s.id, plannedAt: null, estimatedAt: fmtHHMM(
+          new Date(estMs).getHours() * 60 + new Date(estMs).getMinutes()
+        ), delaySec: prevDelaySec,
         status: "unplanned", source: "fallback",
       });
       continue;
@@ -269,8 +296,12 @@ export function computeStopEstimates({
     let source = "plan+delay";
     if (i === nextIdx) {
       // next: plan+delay와 gps 가중평균.
+      // 2026-05-26 보강: 0.7:0.3 → 0.85:0.15. 이유 = 터널/약전계에서 GPS 위치가
+      // stale 또는 multipath(역행)로 busProgress가 부정확해질 때 ETA가 "갑자기
+      // 늘어남". plan+delay는 통과 정류장 기록 시점에만 갱신되어 안정적 — GPS
+      // 비중을 절반 가까이 축소하면 터널 ETA 점프 표면이 크게 줄어듦.
       if (planCandidate != null && gpsCandidate != null) {
-        estMs = 0.7 * planCandidate + 0.3 * gpsCandidate;
+        estMs = 0.85 * planCandidate + 0.15 * gpsCandidate;
         source = "gps";
       } else if (gpsCandidate != null) {
         estMs = gpsCandidate;
@@ -308,6 +339,8 @@ export function computeStopEstimates({
     const delaySec = (plannedMs != null)
       ? Math.round((estMs - plannedMs) / 1000)
       : (hasDelayRef ? cumulativeDelaySec : null);
+    // 가장 최근 알려진 지연 갱신(unplanned 정류장 carry-forward용).
+    if (delaySec != null) prevDelaySec = delaySec;
 
     out.push({
       stopId: s.id, plannedAt, estimatedAt, delaySec,

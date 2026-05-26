@@ -87,7 +87,10 @@ service cloud.firestore {
       }
 
       match /boardings/{date}/list/{boardingId} {
-        allow read: if isAdmin(companyId);
+        // 협력사 포털 탑승 통계 view용으로 isAuth() 허용 (2026-05-26).
+        // passengers·fcmTokens와 동일 패턴 — companyId 경로 자체가 회사 분리,
+        // 인증된 사용자에 한정. update/delete는 admin만.
+        allow read: if isAuth();
         allow create: if isAuth();
         allow update, delete: if isAdmin(companyId);
       }
@@ -134,7 +137,8 @@ service cloud.firestore {
       allow read:   if true;
       allow create: if isAuth();
       allow update: if isAuth();
-      allow delete: if isSuperAdmin();
+      // admin/superadmin 이 자기 회사 협력사만 삭제 가능 (UI 가드: 비활성 상태에서만 삭제 허용)
+      allow delete: if isAdmin(resource.data.companyId);
     }
 
     // ─── FCM 발송 큐 (Cloud Function 트리거용) ───────────

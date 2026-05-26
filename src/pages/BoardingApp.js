@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { validateAndBoard } from "../lib/boarding";
+import { auth } from "../firebase";
+import { signInAnonymously } from "firebase/auth";
 
 function getParam(key) {
   return new URLSearchParams(window.location.search).get(key);
@@ -14,6 +16,7 @@ export default function BoardingApp() {
   const [name, setName] = useState("");
   const [result, setResult] = useState(null);
   const [errMsg, setErrMsg] = useState("");
+  const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
     if (!tokenId) {
@@ -22,8 +25,24 @@ export default function BoardingApp() {
     }
   }, [tokenId]);
 
+  // 익명 인증 (2026-05-26) — boardings create rule(`isAuth()`) 통과용. 미인증 시 탑승 저장 차단됨.
+  // EmployeeApp·PassengerApp·PartnerApp 패턴 일관. BoardingApp만 누락되어 있어 QR 탑승이 통계에 안 잡히는 결함 보정.
+  useEffect(() => {
+    signInAnonymously(auth)
+      .then(() => setAuthReady(true))
+      .catch(e => {
+        console.warn("[BoardingApp] 익명 인증 실패:", e?.message);
+        setAuthReady(true); // 인증 실패해도 사용자가 시도할 수 있게 함(에러는 boarding 시점에 표면).
+      });
+  }, []);
+
   const handleBoard = async () => {
     if (!empNo.trim()) return;
+    if (!authReady) {
+      setErrMsg("연결 중입니다. 잠시 후 다시 시도해주세요.");
+      setStep(STEPS.ERROR);
+      return;
+    }
     setStep(STEPS.LOADING);
     try {
       const res = await validateAndBoard({ tokenId, empNo, name });

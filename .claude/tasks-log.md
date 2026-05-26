@@ -2,6 +2,10 @@
 
 > tasks.md의 최근 7일을 제외한 누적 로그. 상세는 issues.md 패턴·redesign-log.md·git log.
 
+- [x] **2026-05-22** 기사앱·승객앱 도착시간 정밀화(`main.69bb5377.js`) — computeStopEstimates 단조증가 재설계·gps.js GPS 복구 정류장 백필·DriverApp routePath 주입. 단조증가 강제로 동일값/역전/과거 표시 차단.
+- [x] **2026-05-22** PWA 설치 충돌 해소 — 기사앱 `/driver` 경로 분리(`main.8a33eceb.js`/`968c8f9`). manifest 3종 고유 id + scope 분리(/, /driver, /p) — Chrome scope dedupe 회피.
+- [x] **2026-05-22** 공지 도달 보장 — `/p` 인앱 공지함 탭·삼성 배터리 안내·iOS 설치 가이드 바텀시트(`main.25b9e8df.js`/`2c1164e`). PWA 푸시 OEM 절전 누락 보정.
+- [x] **2026-05-22** 내 정류장 도착 임박 푸시 신규 CF `notifyPreArrival` + `/p` 내 정류장 영속화(`main.08c0818a.js`/`5a9839c`). fcmTokens routeId+stopId denormalize·diff+멱등 마커.
 - [x] **2026-05-21~22** 모바일 공지 푸시 정상화 5건 배포 — VAPID 키 1글자 오타 fix·SW 이중알림 가드·InstallPrompt 자동회복+안드로이드 폴백·FCM webpush 아이콘. 상세 issues.md.
 - [x] **2026-05-21** 공지 발송 진단·복구 인프라 강화 배포(`main.903dd602.js`) — NoticeTab 결과 가시화·snapshotError·EmployeeApp 🔔 알림 진단 카드. CF 정상·근인=토큰 invalid 자동삭제.
 - [x] **2026-05-21** 4건 묶음 hotfix 배포(`main.47396703.js`) — `new window.Map()`(카카오 SDK shadow)·DriverApp 리스트 내부 스크롤·`useWakeTick`(백그라운드 stale)·formatDelayLabel ±2분.

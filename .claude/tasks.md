@@ -2,47 +2,58 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
-## 현재 상태 (2026-05-22 세션 종료)
+## 현재 상태 (2026-05-26 세션 종료)
 > 이 저장소가 작업 정본. **어느 PC든** `git pull` + `.env.local`(↓부트스트랩)이면 빌드·배포 가능.
-> prod 라이브 = `main.08c0818a.js` (내 정류장 도착 임박 푸시 + 공지함·배터리 안내·iOS 설치 가이드 누적). 신규 CF `notifyPreArrival`.
+> prod 라이브 = `main.3c4d91c8.js`. 2026-05-26 변천: 협력사 삭제·PartnerApp 라이트 리스킨·도착예정 4건 결함·실시간관제 노선도뷰+일자별·운행이력 노선별 그룹+배차별 GPS 시간범위·탑승 통계 2종+GPS 정류장 매핑·BoardingApp 익명 인증 hotfix.
 
 ### git 원격
-- `origin/master` = 작업 정본(2026-05-20 main→master 머지 완료). 3월 폐갈래는 `origin/archive/remote-march-2026`(`f63321c`) 영구 백업.
+- `origin/master` = 작업 정본. 3월 폐갈래는 `origin/archive/remote-march-2026`(`f63321c`) 영구 백업.
 
 ### 새 PC 부트스트랩 (이어작업 1회)
 - `git pull` → `npm install` (functions 쓰면 `cd functions && npm install`).
 - `.env.local` 생성: `.env.example` 참고, 값은 사용자 보유분. ⚠ `REACT_APP_KAKAO_MAP_KEY`=운영 공유키 `58bf34…`(`d464b4…`면 prod 지도 사망).
 
 ### 배포 절차
-1. 앵커 grep: `grep -nE '^REACT_APP_KAKAO_MAP_KEY=' .env.local` → `58bf34` 시작 확인(주석 9번 d464b4는 비활성, STOP 아님).
+1. 앵커 grep: `grep -nE '^REACT_APP_KAKAO_MAP_KEY=' .env.local` → `58bf34` 시작 확인.
 2. `CI=false npm run build` → `npm start` → localhost `/p`·`/bus` 지도·노선 그리기 확인.
-3. `firebase deploy --only hosting` → curl 검증(키·manifest·아이콘·번들해시).
+3. `firebase deploy --only hosting` (rules 변경 시 `--only firestore:rules,hosting`) → curl 검증.
 4. 회귀 시 가설-재배포 금지 → 콘솔 Hosting 롤백 먼저, 재현은 localhost.
-- ※ Firebase Auth 승인 도메인은 기본 자동등록 — 조치 불필요(지난 "문제 A" 오진, issues.md).
 
 ## 다음 할 일
 - [ ] (선택) 운영 노선에 `routePath` 실제 그리기 — 안 그린 노선은 stops 직선 폴백(정상).
+- [ ] (선택) gpsHistory TTL 정책 검토 — Firebase 콘솔에서 ts 필드 기준 90일 자동 삭제(저장 비용 작아도 운영 정리 측면).
 
 ## 백로그 / 검토 후보
-- [ ] 📣 **카카오 알림톡/SMS 병행 발송**(공지 푸시 도달 보강) — callcenter(같은 동영관광 프로젝트 `callcenter-3ea4c`)가 이미 Naver Cloud SENS 알림톡 운영 중(`@동영관광` 발신 프로필·`buslinkcall` 템플릿·SMS failover, `functions/index.js sendAlimtalk`). buslink는 같은 SENS 계정·`@동영관광` 채널 재사용 가능 — **공지용 신규 템플릿 심사 + `buslink-prod` Secret Manager에 SENS 시크릿 설정**만 필요(채널 신규 신청 불필요). 사용자 템플릿 등록·심사 통과 후 `sendNoticeToCompany` 확장으로 진행
-- [ ] 🗓 **한국 공휴일 정적 갱신** — `functions/holidays.js` + `src/lib/holidays.js` 2028년 말까지 작성됨. 2028 하반기 전 2029~ 추가 필요(양쪽 동기화, 음력 환산은 한국천문연구원 발표 기준)
-- [ ] `src/firestore.rules` ↔ 루트 일원화(src 사본 삭제 검토)
-- [ ] `passengers` write 제약 — PartnerApp 익명화+규칙 재설계 동반(issues.md `[보류]`)
-- [ ] `firebase-messaging-sw.js` 설정 env 주입(현재 하드코딩)
-- [ ] 🔑 카카오 비즈앱 심사 통과 후 전용키 `d464b4` 복구 + 전용앱 도메인 등록 + 재빌드
-- [ ] ⏳ Node 20→22 (데드라인 2026-10-30 decommission) — `firebase.json`·`functions/package.json`·`firebase-functions@latest`
-- [ ] PassengerApp `ARRIVING_M` 미사용 — 완결성 다듬기
+- [ ] 📣 카카오 알림톡/SMS 병행 발송 — callcenter SENS 계정 재사용. 템플릿 심사 + Secret Manager 후 진행.
+- [ ] 🗓 한국 공휴일 정적 갱신 — `functions/holidays.js` + `src/lib/holidays.js` 2028년 말 전 2029~ 추가.
+- [ ] `src/firestore.rules` ↔ 루트 일원화(src 사본 삭제 검토).
+- [ ] `firebase-messaging-sw.js` 설정 env 주입(현재 하드코딩).
+- [ ] 🔑 카카오 비즈앱 심사 통과 후 전용키 `d464b4` 복구.
+- [ ] ⏳ Node 20→22 (데드라인 2026-10-30 decommission).
+- [ ] PassengerApp `ARRIVING_M` 미사용 — 완결성 다듬기.
 
 ## 기획 갭 (PLANNING.md 2026-05-16, MVP 1단계 전부 동작)
 - [ ] ⭐ #12 고객사 담당자 운영 포털 — 자사 실시간 버스·탑승·공지수신 (SaaS 최우선)
 - [ ] #9 분석 / #8 운행일지 / #11 푸시 타게팅 / #4 노선 보강(요일·엑셀) / #14-C 정류장 엑셀 / #15 PIN 강제변경
 - [ ] (보류·SaaS) #17 슈퍼관리자·빌링 / #16 멀티테넌트(dy001 하드코딩) / #15 SMS. (폐기) #10 예약관리
 
+## 사용자 검증 잔여 (2026-05-26 누적)
+- [ ] **QR 탑승 통계 전체 흐름**: DriverApp QR 발급 → 모바일 스캔 → 사번 → "탑승 완료" → AdminApp 탑승 통계 + 협력사 포털 탑승 통계 양쪽 즉시 반영 → 정류장별 GPS 매핑(근접 거리 100m 이내 정상)
+- [ ] **도착예정 알고리즘 4건**: ① 기사앱 unplanned 정류장도 "예상·지연" 표시 ② 도착지·전 정류장 distinct 시각(60초 이상) ③ 근접 정류장 ETA 1분 이상 차이 ④ 터널 ETA 점프 1/2 축소
+- [ ] **실시간 관제 노선도 뷰**: 토글·정류장 타임라인·버스 위치 마커 / 일자별 picker 정상
+- [ ] **운행 이력 노선별 그룹**: 배차 클릭 시 GPS 자동 로드·시간범위 필터 안내 라인
+- [ ] **협력사 삭제·기사 삭제 팝업**: 비활성만 삭제 허용·직원수 confirm·성공 alert
+
 ## 완료 (최근·시간역순. 옛 누적은 @.claude/tasks-log.md)
-- [x] **2026-05-22** **내 정류장 도착 임박 푸시 — 신규 CF `notifyPreArrival` + 내 정류장 영속화** (prod 배포 완료 2026-05-22, 커밋 `5a9839c`). 직원이 고른 '내 정류장'에 버스가 2/1 정거장 전 도달하면 FCM 푸시. 앱 꺼져 있어도 도달해야 하므로 서버 발송. 대상=EmployeeApp `/p`만. **변경 2파일**: `functions/index.js`(+약 195줄), `src/pages/EmployeeApp.js`(+약 60줄). **작업 A — 내 정류장 영속화**: 직원이 내 정류장 선택/해제 시 `fcmTokens/{empNo}` 문서에 `routeId`+`stopId`+`myStopUpdatedAt` 저장(`setDoc` merge — `initNotifications` 토큰 upsert 와 충돌 0). 해제·노선변경 시 두 필드 null. EmployeeApp 정류장 로드 후 저장 stopId 를 읽어 `myStopIdx` 복원(저장 routeId == activeRouteId 일 때만) → 새로고침해도 내 정류장 유지(현 불편 동시 해결). 정류장 스트립 노드 클릭 = 토글(같은 정류장 재클릭 = 해제), stopInfo 카드 버튼도 동일 경로. denormalize 라 푸시 CF 가 fcmTokens 한 컬렉션만 보면 됨. **작업 B — 신규 CF `notifyPreArrival`**: `onDocumentUpdated` 트리거(`companies/{companyId}/dispatches/{date}/list/{dispatchId}`, v2, region `us-central1`, CommonJS). ①before vs after `stopArrivals` diff → 새 도착 stopId(없으면 종료) ②route stops 를 `order` 오름차순 정렬 → 도착 정류장 중 정렬 배열 최전방 위치(index)=K(GPS 복구 백필 다중기록 대비·order 결번 안전) ③K+1·K+2 위치="1·2 정거장 전" 대상 stopId(노선 끝 부근 없으면 skip) ④`fcmTokens` where `routeId`+`stopId` 매칭+token → `sendEachForMulticast`(공지 발송과 동일 high-priority 구조·무효 토큰 자동 삭제) ⑤멱등=`preArrivalNotified: ["{stopId}:pre1",...]` 마커 `arrayUnion` 기록·발송 전 확인(diff + 마커 2중 가드 → 재발화·백필 다중기록에도 중복 푸시 0). 푸시 문구 한국어, data.type=`pre_arrival`+companyId. **v1 단순화(주석 명시)**: routeId+stopId 로만 타겟 → 같은 routeId 다른 배차(shift)에도 발송 가능, shift 별 정밀 타겟은 후속 과제. **작업 C — rules**: 루트 `firestore.rules` `fcmTokens` write 가 `allow write: if isAuth()` — 필드 제한 없음 → 직원이 `routeId`/`stopId` 추가 가능, **rules 변경 불필요**. CF 는 Admin SDK 라 룰 무관. **인덱스**: `fcmTokens` `routeId`+`stopId` 동등 필터 2개 — 단일 컬렉션 동등 매칭 복합쿼리는 자동 단일필드 인덱스로 동작, **명시적 복합 인덱스 신규 불필요**(`firestore.indexes.json` 무변경). **검증**: `node --check functions/index.js` OK·`onDocumentUpdated` export 확인. 프론트 `CI=false npm run build` 통과(`main.08c0818a.js`, gzip +289B), EmployeeApp.js 신규 ESLint 경고 0(기존 `isFirst`/`tick`/`routeTotal`/`showBusBetween`/L420 exhaustive-deps 만 — untouched). `appkey=58bf34` 운영키·번들 `myStopUpdatedAt` literal 확인. **사용자 검증 잔여**: ① `/p` 진입 → 노선도에서 정류장 클릭 → '내 정류장' 표시 → 새로고침해도 유지(Firestore `fcmTokens/{empNo}` 에 `routeId`/`stopId` 확인) → 같은 정류장 재클릭 시 해제·필드 null ② 노선 변경 시 이전 내 정류장 영속값 해제 ③ AdminApp 시뮬레이터로 차량 주행 → 정류장 도착 감지 시 `stopArrivals` 갱신 → 내 정류장 2/1 정거장 전에서 FCM 푸시 1회씩 도착(중복 0) → `dispatch.preArrivalNotified` 배열에 `{stopId}:pre1`/`{stopId}:pre2` 마커 기록 ④ 알림 미허용 직원은 푸시 없음(정상) ⑤ **prod 배포 완료**(2026-05-22) — `firebase deploy --only functions:notifyPreArrival,hosting` → notifyPreArrival CF 생성·hosting `main.08c0818a.js`, 라이브 검증 OK(번들·트리거 확인). 첫 배포 시점엔 내 정류장 저장 직원 0명이라 무발송 — 직원이 `/p`에서 내 정류장 선택 후 활성화.
-- [x] **2026-05-22** **공지 도달 보장 — 인앱 공지함 + 배터리 안내 + iOS 설치 가이드 개선** (prod 배포 완료 2026-05-22, 커밋 `2c1164e`). 프론트 단독·functions/rules/indexes 무관. PWA 푸시가 OEM 절전(삼성 딥슬립)으로 누락될 수 있어 푸시를 "즉시성 보너스"로 두고 인앱 공지함(pull 폴백)으로 도달 보장. **변경 2파일**: `src/pages/EmployeeApp.js`(+약 200줄), `src/components/InstallPrompt.js`(전면 재작성 — `InstallGuide` named export 추가). **작업 A — `/p` 공지함 탭**: EmployeeApp 탭 4→5개(홈/노선/**공지**/탑승/설정). 기존 공지배너 구독을 부모 레벨에서 전체 목록(`notices` `where active==true` + `orderBy createdAt desc`)으로 확장 → `partnerCode` 클라이언트 필터(`null`=전체 또는 세션 partnerCode 일치, 공지배너와 동일 규칙) → 배너(최신 1건) + `NoticesTab`(전체 목록, 최신순, 제목·본문·날짜, 긴급/일반 배지) 공유. **안 읽음 배지**: `buslink_notice_read_{empNo}` localStorage 키(사번별 분리, `buslink_` 접두사 컨벤션)에 마지막 공지함 진입 시각(ms) 저장 → 이보다 나중 `createdAt` 공지 수를 탭 아이콘 우상단 빨강 배지로 표시. 공지 탭 진입·배너 탭 시 읽음 처리. 공지 구독 `useEffect` deps에 `useWakeTick` 포함(백그라운드 복귀 신선화). **인덱스 신규 없음** — 기존 `notices(active+createdAt)` + 클라 partnerCode 필터로 회피. 배너 본문 영역 탭 시 공지함 탭으로 이동(연결 통로). **작업 B — 배터리 안내 카드**: SettingsTab 🔔 알림 진단 카드 아래에 절전 예외 안내 카드 추가. `detectBatteryGuidePlatform()` UA 헬퍼 — `SM-`/`SamsungBrowser`/`Samsung` → 갤럭시용 단계(배터리 → 백그라운드 사용 제한 → 제한 없음), 그 외 안드로이드 → 일반 단계. **안드로이드만 노출**(iOS·데스크톱 null → 미표시). One UI 버전차 감안해 메뉴명 너무 구체적이지 않게 + "기종마다 다를 수 있음" 단서. **작업 C — iOS 설치 가이드 + 설정 진입점**: `InstallPrompt.js` iOS 모드를 1줄 텍스트 → **단계 번호 일러스트 바텀시트**(①공유 버튼 탭 + Safari 하단 툴바 모형에 화살표로 공유 위치 지시 ②'홈 화면에 추가' ③'추가'). `ShareGlyph`/`AddToHomeGlyph` SVG + `SafariToolbarHint`/`StepRow` 신규. 가드 없는 `InstallGuide` named export 분리 → 바텀시트(iOS·android-manual)와 SettingsTab 인라인이 공유. SettingsTab에 상시 "📲 앱 설치하기" 접이식 항목(`InstallGuide inline`, 3일 스누즈 무관 상시 진입). `android`/`android-manual` 모드·BIP 글로벌 stash 다중 소비자 공유(`window.__buslinkDeferredBIP` 비우지 않음)·standalone/스누즈 가드 전부 보존. **InstallPrompt.js Firebase import 0 유지**. **회귀-0**: 카카오 SDK 컴포넌트 HEAD=NOW(EmployeeApp Map 2/2·MapMarker 2/2·Polyline 3/3·CustomOverlayMap 5/5), `useWakeTick`·`data-route-strip` 보존. **빌드**: `CI=false npm run build` 통과(`main.25b9e8df.js`, gzip +2.35KB), 신규 ESLint 경고 0(기존 LoginScreen `isFirst`/HomeTab `tick`/`routeTotal`/`showBusBetween` 등 untouched 코드 경고만). 번들 한국어 라벨 ASCII escape 검증 OK(공지사항/새 공지/배터리/절전 예외/앱 설치하기 등 9건). `appkey=58bf34` 운영키 확인. **사용자 검증 잔여**: ① `/p` 진입 → 공지 탭 신규 표시·AdminApp에서 공지 발송 후 목록 즉시 반영·안 읽음 배지 증감·탭 진입 시 배지 소거 ② 협력사 직원 계정으로 partnerCode 지정 공지가 본인에게만·전체 공지는 모두에게 보이는지 ③ 안드로이드(삼성/비삼성)에서 설정 탭 배터리 안내 카드 단계 분기 확인·iOS·데스크톱에서 미표시 ④ iOS Safari에서 설치 바텀시트 단계 일러스트·설정 탭 "앱 설치하기" 인라인 가이드 ⑤ prod 배포 완료(2026-05-22) — `main.25b9e8df.js`(이후 도착임박 푸시 빌드 `main.08c0818a.js`에 누적), 라이브 검증 OK.
-- [x] **2026-05-22** **PWA 설치 충돌 해소 — 기사앱 `/driver` 경로 분리 prod 배포** (`main.8a33eceb.js`, `968c8f9`). 사용자 보고 "직원앱 설치 시 이미 설치됨·아이콘 없음, 기사 아이콘 실행하면 직원앱 열림". **단계적 진단**: 1차 manifest 3종 `id` 필드 부재 발견 → 고유 id 부여(`085deac`, `main.c21d45a2.js` — 관제 `/?app=admin`·기사 `/?app=driver`·직원 `/p` + index.js `/p` 조기 manifest 교체). 2차 — id 분리 후에도 충돌 지속 → **근인=Chrome PWA `scope`(path prefix) dedupe**: 기사앱 scope `/`가 직원앱 `/p`를 경로상 포함 → `/p`가 기사앱 영역 귀속 → 독립 설치 거부. scope는 쿼리·id로 못 나눔. **최종 해결**: 기사앱 전용 경로 `/driver` 신설 — `App.js isDriverRoute`(기존 "그 외(/)" 분기에 자연 포함, 렌더 분기만 추가), `manifest-driver.json` id/start_url/scope 전부 `/driver`, `index.js` `/driver` 조기 manifest 교체, `/` 기사 역할 진입 시 `window.location.replace("/driver")` 자동 이동(기존 `/` 북마크 흡수). 직원앱 `/p`·기사앱 `/driver` scope 완전 분리. `firebase.json headers` 신설(html·manifest·sw `no-cache` — 기존 헤더 전무). 관제 `/` 유지(PC 전용). **사용자 검증 완료 — 해결 확인**. id/경로 변경으로 기존 WebAPK는 orphan → 완전 재설치 필요(홈 아이콘 + 안드로이드 시스템 앱 WebAPK).
-- [x] **2026-05-22** **기사앱·승객앱 도착시간 정밀화 prod 배포** (`main.69bb5377.js`, 프론트 단독·functions/rules 무관). 사용자 보고 4건 근본원인 1-shot 수정. **변경 3파일**: `src/lib/stopSchedule.js`·`src/lib/gps.js`·`src/pages/DriverApp.js`. **A — `computeStopEstimates` 단조증가 재설계**: 기존 `(e)` 단순 clamp(`estMs < T_NOW-30s → T_NOW`) 제거 → 정류장을 order 순서대로 순회하며 estMs를 단조증가로 누적. 각 미통과 정류장 estMs = max(planCandidate[plan+누적지연], chainCandidate[직전 estMs+구간이동시간], [next]gpsCandidate) 후 `estMs[i] >= estMs[i-1]+MIN_STOP_GAP_SEC(25s)` + `estMs[i] >= now+MIN_FUTURE_BUFFER_SEC(30s)`(과거 금지) 강제. 구간이동시간 = routePath 구간거리(`projectToPolyline` progress 차분) ÷ 유효속도(`max(차량속도,20km/h)` 저속 노이즈 하한), routePath 없으면 haversine 직선거리 ÷ 기본 30km/h. → **이슈 #2(과거 시각)·#3(도착지·이전 정류장 동일값)·#4(정밀화) 동시 해결**. 상수 파일 상단 명명 분리. **B — `gps.js startGPS` GPS 복구 정류장 백필**: 인자 `routePath` 추가. 기존 100m 직접 감지(`STOP_ARRIVE_M`)는 그대로 유지(`viaBackfill=false`) + routePath 유효 시 `detectStops`가 버스/정류장을 폴리라인 투영 → `busProgress > stopProgress + PASS_MARGIN_M(40m)`인데 visitedStops에 없는 정류장 = 통신장애 통과 누락 → order 낮은 것부터 순차 `onStopReached(stop,dist,true)`. TIMEOUT 재시작 watch 콜백도 `detectStops` 호출(복구 직후 백필 필요 시점). routePath 없으면 백필 skip(폴백·회귀 0). → **이슈 #1(통신장애 정류장 누락) 해결**. **C — `DriverApp.js`**: routes 문서 `routePath` 로드(`loadStops`에 getDoc 추가, state `routePath`), `startGPS`에 전달. `onStopReached`의 `setCurrentStopIdx`를 `prev => Math.max(prev,newIdx)`로(백필 다중 호출 역행 방지). `stopArrivals` 기록에 `estimated:!!viaBackfill` 플래그 추가(백필 기록분 진단용, computeStopEstimates는 actualAt만 쓰므로 무영향). `computeStopEstimates`에 routePath 주입(vehiclePos는 null 유지 — gpsCandidate 미발생·구간전파만 정밀화, 회귀 표면 0). **D — EmployeeApp/PassengerApp 무변경**: 이미 vehiclePos/speed/routePath 주입 중 → 작업 A 알고리즘 개선 자동 반영(승객앱 #1·#2 해결). **회귀-0**: `computeStopEstimates` 출력 계약(stopId/plannedAt/estimatedAt/delaySec/status enum/source enum) 100% 유지·`useSmoothedEta`/`formatPassengerEta`/`describeEtaSource`/`formatDelayLabel` 무변경. arrived actual 표시 불변·unplanned 폴백 불변·routePath 미설정 직선 폴백 불변. 카카오 SDK 컴포넌트 호출 무변(DriverApp 0/0/0/0). 신규 ESLint 경고 0(기존 PartnerApp/PassengerApp 경고만). 단위 검증: now=07:30·5개 정류장 모두 과거 계획시각 케이스에서 단조증가 OK·과거시각 0건·연속동일값 0건(routePath 유·무, arrived 일부, 정차 속도0, unplanned 폴백 5케이스). curl `main.69bb5377.js`+`appkey=58bf34`. **사용자 검증 잔여**: ① AdminApp 시뮬레이터 차량 1대 주행 + 속도 토글하며 `/p`·`/bus` 정류장 ETA가 항상 이전 정류장보다 이후·과거시각 0·동일값 0(routePath 있는·없는 노선 양쪽) ② 기사앱 운행 중 GPS 일시 끊김(터널 등) 후 복구 시 누락 정류장이 자동으로 visitedStops에 들어가 currentStopIdx 진행 ③ routePath 미설정 노선은 직선 폴백이라 백필 정밀도 낮음 — 운영 노선 routePath 그리기 권장.
+- [x] **2026-05-26** BoardingApp 익명 인증 hotfix(`main.3c4d91c8.js`) — QR 탑승이 통계 안 잡힌 결함. `signInAnonymously` 마운트 호출 추가(EmployeeApp 패턴 일관). 이전 QR 탑승은 복구 불가(토큰 만료). issues.md `[해결]`.
+- [x] **2026-05-26** 탑승 통계 — GPS 기반 정류장별 정밀 집계(`main.75f79871.js`) — 신규 `lib/stopMapping.js`(haversine 매핑·반경 300m), boarding.js 차량 GPS 캡처, AdminApp/PartnerApp 정류장별 패널.
+- [x] **2026-05-26** QR 탑승 통계 — AdminApp 신규 탭 + PartnerApp 일자별 누적(`main.44de1aa0.js`) — boarding.js partnerCode denormalize·BoardingStatsTab(탭 9)·BoardingStatsMode(메인탭3)·PartnerApp 익명 인증·rules boardings read = isAuth().
+- [x] **2026-05-26** 운행이력 — 배차별 GPS 시간범위 필터(`main.797cd3d4.js`) — `dispatchTimeRange(d, all)` 헬퍼, 같은 차량 여러 배차 시 GPS 동일 표시 결함 차단.
+- [x] **2026-05-26** `Map` shadow hotfix + 실시간 관제 일자별 조회(`main.c2b238ce.js`) — HistoryTab `new window.Map()` 가드, 날짜 picker + 자동 노선도 전환 + 과거 데이터 배너.
+- [x] **2026-05-26** AdminApp 실시간 관제 노선도 뷰 + 운행이력 노선별 그룹화(`main.60c54a0d.js`) — MapTab 지도/노선도 토글·RouteTimelineCard·dispatchGroups·차량 직접선택 보조.
+- [x] **2026-05-26** 도착예정·지연 표시 4건 일괄 수정(`main.b5108380.js`) — MIN_STOP_GAP_SEC=60·DWELL_SEC=30·unplanned chain 전파+prevDelaySec carry·GPS 가중 0.85:0.15.
+- [x] **2026-05-26** PartnerApp 라이트 리스킨 7단계(`main.371e3b15.js`) — tokens.css 전면 적용·BusLinkLogo+Pill 채택·로직 100% 보존.
+- [x] **2026-05-26** 협력사 영구 삭제 + 기사 삭제 성공 팝업(`main.346b6b07.js` + rules) — 비활성만 삭제 허용·직원수 confirm·`partnerCodes.delete = isAdmin(resource.data.companyId)`.
 > 그 이전 완료는 @.claude/tasks-log.md.
 
 ## 저장소 메모

@@ -421,6 +421,10 @@ export default function PassengerApp() {
               } else if (est.status === 'upcoming' && est.plannedAt) {
                 timeLabel = est.plannedAt;
                 timeColor = isMyStop ? 'rgba(255,255,255,0.92)' : 'var(--color-label-mute)';
+              } else if (est.estimatedAt) {
+                // 2026-05-26: offsetMin 미설정(status='unplanned')이지만 chain 전파된 예상시각 보유.
+                timeLabel = `예상 ${est.estimatedAt}`;
+                timeColor = isMyStop ? 'rgba(255,255,255,0.92)' : 'var(--color-label-mute)';
               }
             }
             return (
@@ -626,10 +630,10 @@ export default function PassengerApp() {
                     </div>
                     {s.address && <div style={S.stopItemAddr}>{s.address}</div>}
                     {s.description && <div style={S.stopItemDesc}>{s.description}</div>}
-                    {/* 계획·예상시각 (offsetMin 설정 시) */}
+                    {/* 계획·예상시각 — plannedAt 또는 chain-propagated estimatedAt 보유 정류장. */}
                     {(() => {
                       const e = estByStopId[s.id];
-                      if (!e || !e.plannedAt) return null;
+                      if (!e || (!e.plannedAt && !e.estimatedAt)) return null;
                       const lab = formatDelayLabel(e.delaySec);
                       const labColor = lab.tone === 'danger' ? 'var(--color-destructive)'
                         : lab.tone === 'warn' ? 'var(--color-cautionary)'
@@ -637,9 +641,9 @@ export default function PassengerApp() {
                       const arrived = e.status === 'arrived';
                       return (
                         <div style={{ fontSize:11, marginTop:2, fontWeight:600, color:"var(--color-label-mute)" }}>
-                          {arrived ? "도착 " : "계획 "}
-                          <span style={{ color: arrived ? 'var(--color-positive)' : 'var(--color-primary-deep)', fontWeight:700 }}>{arrived ? e.estimatedAt : e.plannedAt}</span>
-                          {!arrived && e.estimatedAt && e.estimatedAt !== e.plannedAt && (
+                          {arrived ? "도착 " : e.plannedAt ? "계획 " : "예상 "}
+                          <span style={{ color: arrived ? 'var(--color-positive)' : 'var(--color-primary-deep)', fontWeight:700 }}>{arrived ? e.estimatedAt : (e.plannedAt || e.estimatedAt)}</span>
+                          {!arrived && e.plannedAt && e.estimatedAt && e.estimatedAt !== e.plannedAt && (
                             <> · 예상 <span style={{ color: 'var(--color-primary-deep)', fontWeight:700 }}>{e.estimatedAt}</span></>
                           )}
                           {lab.label && lab.tone !== 'mute' && (

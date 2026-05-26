@@ -657,17 +657,18 @@ export default function DriverApp({ companyId: propCompanyId }) {
                       }}>
                         {stop.name}
                       </div>
-                      {/* 계획·실제 시각 — offsetMin 설정된 정류장만(폴백은 정류장명만).
+                      {/* 계획·실제 시각 — plannedAt 또는 chain-propagated estimatedAt 있는 정류장.
+                          (2026-05-26 보강: offsetMin 미설정 정류장도 chain 전파된 예상시각·지연 표시)
                           예상/지연은 운행 중 또는 도착 실측이 있을 때만 — 어르신 기사 가독성 위해 크게+칩 형태. */}
-                      {est && est.plannedAt && (
+                      {est && (est.plannedAt || est.estimatedAt) && (
                         <div style={{ fontSize: 16, marginTop: 5, fontWeight: 700, color: "var(--color-label)", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                           <span style={{ color: "var(--color-label-mute)" }}>
-                            {arrived ? "도착" : "계획"}
+                            {arrived ? "도착" : est.plannedAt ? "계획" : "예상"}
                           </span>
                           <span style={{ color: arrived ? 'var(--color-positive)' : 'var(--color-primary-deep)', fontWeight: 800, fontSize: 18 }}>
-                            {arrived ? est.estimatedAt : est.plannedAt}
+                            {arrived ? est.estimatedAt : (est.plannedAt || est.estimatedAt)}
                           </span>
-                          {!arrived && driving && est.estimatedAt && est.estimatedAt !== est.plannedAt && (
+                          {!arrived && driving && est.plannedAt && est.estimatedAt && est.estimatedAt !== est.plannedAt && (
                             <>
                               <span style={{ color: "var(--color-label-alt)" }}>·</span>
                               <span style={{ color: "var(--color-label-mute)" }}>예상</span>

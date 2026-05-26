@@ -28,6 +28,10 @@
 - 권한·PWA설치: `lib/usePermissions.js` + `components/PermissionGate.js` + `components/InstallPrompt.js`(순수 브라우저 API, Firebase import 금지). `src/index.js`가 ①`firebase-messaging-sw.js` 1회 선등록(idempotent) ②`beforeinstallprompt` 글로벌 stash(`window.__buslinkDeferredBIP`, render 전) ③pathname `/p`·`/driver` 시 manifest `<link>` 조기 교체(마운트 useEffect 교체는 BIP 평가보다 늦을 수 있음).
 - 앱별 PWA(3종, 단일 origin 다중 PWA — 각 고유 `id`+`scope` 필수): `manifest.json`(관제, id/start_url `/?app=admin`·scope `/`) + `manifest-driver.json`(기사, 전부 `/driver`) + `manifest-employee.json`(직원, 전부 `/p`). scope는 path 기반이라 경로 분리 필수(id만으론 Chrome scope dedupe 회피 불가 — 상세 @.claude/issues.md). `lib/pwaManifest.js applyAppManifest`를 EmployeeApp/DriverApp 마운트 시 호출(조기 교체의 마운트-시점 재확인). `firebase.json` `headers`로 html·manifest·sw `no-cache`.
 
+## 데이터 흐름 — 탑승/통계 (2026-05-26)
+- **QR 탑승**: DriverApp이 `boardingTokens` 생성(5분 만료, vehicleId/routeId/dispatchDate 포함) → 직원이 모바일 카메라로 QR 스캔 → `/board?t={tokenId}` BoardingApp 진입 → `signInAnonymously` 인증 → `validateAndBoard`(`lib/boarding.js`)로 토큰 검증·boarding 도큐먼트 생성. boarding 시 ①`passengers/{empNo}.partnerCode` getDoc → `partnerCode` denormalize(협력사별 통계용) ②`gps/{companyId}_{vehicleId}` getDoc → `vehicleLat/vehicleLng/vehicleSpeed` 캡처(정류장 매핑용). 둘 다 try/catch — 미수신 시 null(boarding 자체는 진행).
+- **정류장별 GPS 매핑**: `lib/stopMapping.js`(순수 함수, routeProgress.haversine 재사용). `nearestStop(lat,lng,stops,maxMeters=300)` + `aggregateBoardingsByStop(boardings,stopsByRoute)` → boarding의 vehicleLat/Lng를 routeId의 stops 좌표와 비교, 반경 300m 이내 가장 가까운 stop으로 매핑. AdminApp `BoardingStatsTab`·PartnerApp `BoardingStatsMode` 양쪽에서 lazy stops fetch + 클라이언트 집계.
+
 ## 데이터 흐름 — 공지/FCM
 - **공지**: AdminApp → `lib/notifications.js sendNotice` → `notices` + `fcmQueue` 생성 → CF `sendNoticeToCompany` 멀티캐스트. 직원앱 `/p` 공지 탭이 `notices`를 직접 구독(푸시 누락 대비 pull 폴백).
 - **도착 임박**: 기사앱 도착 감지 → `dispatches/.../stopArrivals` 갱신 → CF `notifyPreArrival`이 내 정류장(`fcmTokens`에 routeId+stopId denormalize) 2/1정거장 전 직원에 FCM. 상세 @.claude/functions.md.

@@ -15,6 +15,7 @@
 - [x] 3단계 — AdminApp 실시간관제 탭(MapTab) 라이트 (배포 완료)
 - [x] 4단계 — AdminApp 전체 라이트 통일 (배포 완료, 결정 확장분)
 - [x] **배포** 1·2·3·4단계 + QA안정화 → buslink-prod 라이브 (2026-05-16, `main.28978312.js`)
+- [x] 7단계 — PartnerApp(`/partner`) 라이트 리스킨 (2026-05-26, `main.371e3b15.js` 배포 완료, 누락 마지막 화면 통일). `BusLinkLogo+Pill` 채택, tokens.css 전면 적용, AdminApp 모달/통계 카드 패턴 차용, 로직 100% 보존(import HEAD=NOW, STEPS/REG_MODES/mainTab 분기 동일, hashPin dynamic import 유지). 상세 @.claude/tasks.md.
 
 ## 현재 진행 단계
 - [x] **5단계 — 사이드바 메뉴 세련화** (2026-05-16, 사용자 지적: 메뉴바가 타 섹션 대비 덜 세련) — **배포 완료**(buslink-prod, `main.7e4fa34f.js`)
