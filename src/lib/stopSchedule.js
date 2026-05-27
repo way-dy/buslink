@@ -5,11 +5,13 @@
 //     → 정류장 계획 진입시각("HH:MM" 또는 null).
 //   - computeStopEstimates: 정류장별 status·계획시각·예상시각·지연(초) 산출.
 //     정류장을 order 순서대로 순회하며 estMs를 "단조증가"로 강제(2026-05-22):
-//     각 정류장 estMs[i] = max(plan+누적지연, 직전 estMs+구간이동시간, [next]GPS) 후
+//     chain 우선(직전 actual·estMs + 구간이동시간), plan+delay는 chain 부재 시
+//     fallback. next는 chain·gps 0.7:0.3 가중. (2026-05-27 변경 — 이전엔
+//     plan+delay와 chain 중 max였으나, 누적지연을 모든 미래 정류장에 carry해
+//     "actual 기반 재추정"이라는 사용자 의도와 불일치 → chain 우선으로 전환).
 //     estMs[i] >= estMs[i-1]+MIN_STOP_GAP_SEC + estMs[i] >= now+버퍼(과거 금지).
 //     → 도착지·이전 정류장 동일값·역전·과거 시각 표시 결함 원천 차단.
-//     next 정류장은 plan+delay 70 : gps 30 가중(GPS 노이즈 비중 축소) 후 같은
-//     단조증가·과거금지 후처리. offsetMin 미설정 정류장은 calcETA 폴백.
+//     offsetMin 미설정 정류장은 calcETA 폴백.
 //   - formatPassengerEta: 부드러워진 ETA(초)를 버킷 라벨(곧 도착/N분 후/약 N분/
 //     HH:MM 예상)로 변환 + 신뢰도 톤(primary/warn/mute).
 // react-kakao-maps-sdk · Firebase import 없음(순수 계산).
@@ -286,23 +288,29 @@ export function computeStopEstimates({
       chainCandidate = chainBase + segTravelMs(i - 1, i);
     }
 
-    // (f) 후보 결합.
-    //   - nextIdx 정류장: 기존 정책대로 plan+delay 70 : gps 30 가중평균(GPS 노이즈
-    //     비중 축소)을 우선 산출 → 그 뒤 chain·단조증가·과거금지 후처리.
-    //   - upcoming 정류장: planCandidate와 chainCandidate 중 max(둘 다 미래 보장의
-    //     하한 — 단조증가는 아래에서 강제). source는 chain 우세면 'plan+delay' 유지
-    //     (체인은 plan 기반 전파라 신뢰도 동일 계열).
+    // (f) 후보 결합 — 2026-05-27 chain 우선 정책으로 전환.
+    //   변경 배경: 이전 정책(plan+delay와 chain 중 max)은 출발 지연(예: 33분)이
+    //   발생하면 누적지연이 모든 미래 정류장 plannedMs에 그대로 carry되어
+    //   chain(actual+segTravel)이 더 빨라도 plan+delay가 채택 → "33분 지연"이
+    //   모든 미래 정류장에 동일 carry. 사용자 의도 = "실제 정류장 도착시간 기반
+    //   으로 바로 다음 정류장 도착예정시간 추정" → chain 우선이 맞음. 지연 라벨이
+    //   chain 기반 estMs로 자연히 줄어드는(예: 33분 → 20분) 동작은 사용자가 수용.
+    //
+    //   - nextIdx 정류장: chain·gps 0.7:0.3 가중(chain 정본, GPS 미세 보정).
+    //   - upcoming 정류장: chain 우선, 없으면 plan+delay fallback.
+    //   - source는 chain 채택 시 'plan+delay' 유지(describeEtaSource 한국어 라벨
+    //     "계획+지연"이 actual 후 추정 = 계획 갱신 형태로 사용자에게 자연스러움).
     let estMs = null;
     let source = "plan+delay";
     if (i === nextIdx) {
-      // next: plan+delay와 gps 가중평균.
-      // 2026-05-26 보강: 0.7:0.3 → 0.85:0.15. 이유 = 터널/약전계에서 GPS 위치가
-      // stale 또는 multipath(역행)로 busProgress가 부정확해질 때 ETA가 "갑자기
-      // 늘어남". plan+delay는 통과 정류장 기록 시점에만 갱신되어 안정적 — GPS
-      // 비중을 절반 가까이 축소하면 터널 ETA 점프 표면이 크게 줄어듦.
-      if (planCandidate != null && gpsCandidate != null) {
-        estMs = 0.85 * planCandidate + 0.15 * gpsCandidate;
+      // next: chain 우선·GPS 미세 보정.
+      if (chainCandidate != null && gpsCandidate != null) {
+        // chain(actual+segTravel)이 정본, GPS 노이즈는 30% 비중 보정.
+        estMs = 0.7 * chainCandidate + 0.3 * gpsCandidate;
         source = "gps";
+      } else if (chainCandidate != null) {
+        estMs = chainCandidate;
+        // source 'plan+delay' 유지(chain도 plan과 같은 계열로 사용자 표시).
       } else if (gpsCandidate != null) {
         estMs = gpsCandidate;
         source = "gps";
@@ -310,14 +318,16 @@ export function computeStopEstimates({
         estMs = planCandidate;
         source = "plan+delay";
       }
-      // next도 chain 후보가 더 늦으면 그쪽 채택(역전 방지).
-      if (chainCandidate != null) {
-        estMs = (estMs != null) ? Math.max(estMs, chainCandidate) : chainCandidate;
-      }
     } else {
-      // upcoming: plan+delay와 chain 중 더 늦은(=보수적) 시각.
-      const cands = [planCandidate, chainCandidate].filter(x => x != null);
-      if (cands.length > 0) estMs = Math.max(...cands);
+      // upcoming: chain 우선(직전 actual·estMs 기반 전파). plan+delay는 chain 부재 시 fallback.
+      if (chainCandidate != null) {
+        estMs = chainCandidate;
+        // source 'plan+delay' 유지(chain은 plan과 무관한 actual+구간이동시간 전파이나
+        // describeEtaSource 라벨 한국어("계획+지연")가 사용자에게 자연스러움 = actual
+        // 후 추정 = 계획 갱신 형태).
+      } else if (planCandidate != null) {
+        estMs = planCandidate;
+      }
     }
     if (estMs == null) estMs = planCandidate; // 최종 폴백(이론상 plannedMs는 항상 존재)
 

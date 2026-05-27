@@ -20,6 +20,9 @@ import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 import { PartnerFilter } from "../components/PartnerFilter";
 // 탭 단위 에러 경계 — 자식 throw 시 흰 화면 방지 + 에러 메시지 가시화
 import { ErrorBoundary } from "../components/ErrorBoundary";
+// 관제도 PWA 설치 자동 안내(2026-05-27) — PC Chrome 에서 "앱 설치" 버튼 노출.
+import InstallPrompt from "../components/InstallPrompt";
+import { applyAppManifest } from "../lib/pwaManifest";
 
 const TABS = ["대시보드", "실시간 관제", "배차 관리", "배차 일정", "노선 관리", "기사 관리", "차량 관리", "시뮬레이터", "운행 이력", "탑승 통계", "협력사 관리", "공지 발송"];
 const TAB_ICONS = ["grid", "pin", "flag", "calendar", "route", "user", "bus", "play", "clock", "chart", "globe", "bell"];
@@ -73,8 +76,20 @@ export default function AdminApp({ user, companyId }) {
     return () => window.removeEventListener("resize", handler);
   }, []);
 
+  // 관제 PWA 매니페스트·아이콘 적용(2026-05-27) — manifest.json 은 이미 admin 아이콘이지만
+  // 직원/기사 앱과 패턴 일관성 위해 동적 호출(idempotent — 이미 같은 href 면 no-op).
+  useEffect(() => {
+    applyAppManifest({
+      manifestHref: "/manifest.json",
+      appleTouchHref: "/icons/admin-1024.png",
+      title: "BusLink 관제",
+    });
+  }, []);
+
   return (
     <div style={S.wrap}>
+      {/* PWA 설치 안내(설치형 앱 전환) — PC Chrome 에서 "앱 설치" 버튼, 모바일은 안내 바텀시트 */}
+      <InstallPrompt />
       {/* ── PC: 사이드바 ── */}
       {!isMobile && (
         <div style={S.sidebar}>

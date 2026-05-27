@@ -85,11 +85,12 @@ exports.sendNoticeToCompany = onDocumentCreated("fcmQueue/{queueId}", async (eve
 
         webpush: {
           headers: { Urgency: "high" },
-          // ★ 브랜드 아이콘 (Chrome 탭/PWA standalone 둘 다 적용): 알림 본문 옆 컬러 로고 + 상태바 배지.
-          // 작은 OS 분류 아이콘은 Chrome 탭=Chrome / PWA standalone=BusLink (OS 정책). icon=본문 옆 표시용.
+          // ★ 브랜드 아이콘: BusLink 직원앱 정본(public/icons/notification-employee.png — passenger-1024 사본).
+          // ⚠ public/logo192.png 는 CRA 기본 React 로고이므로 사용 금지(과거 알림 아이콘이 React 로고로
+          // 표시·상태바 silhouette 변환 실패로 Chrome 폴백되어 사용자가 "Chrome 아이콘"으로 인식한 결함, 2026-05-27).
           notification: {
-            icon: "https://buslink-prod.web.app/logo192.png",
-            badge: "https://buslink-prod.web.app/logo192.png",
+            icon: "https://buslink-prod.web.app/icons/notification-employee.png",
+            badge: "https://buslink-prod.web.app/icons/notification-employee.png",
           },
           fcmOptions: { link: "/p?c=" + companyId },
         },
@@ -180,9 +181,10 @@ function buildPreArrivalMessage(tokens, { companyId, threshold, stopName }) {
     },
     webpush: {
       headers: { Urgency: "high" },
+      // 알림 아이콘 정본 — sendNoticeToCompany 의 webpush 설명 참조.
       notification: {
-        icon: "https://buslink-prod.web.app/logo192.png",
-        badge: "https://buslink-prod.web.app/logo192.png",
+        icon: "https://buslink-prod.web.app/icons/notification-employee.png",
+        badge: "https://buslink-prod.web.app/icons/notification-employee.png",
       },
       fcmOptions: { link: "/p?c=" + companyId },
     },

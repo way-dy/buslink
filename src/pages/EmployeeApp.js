@@ -114,6 +114,93 @@ function detectBatteryGuidePlatform() {
   return "android";
 }
 
+// ─── 강제 공지 모달 (2026-05-27) ─────────────────────────
+// PWA 푸시가 OS 절전·Doze 로 가끔 누락되는 환경에서 도달성 보장 통로.
+// notices 가 onSnapshot 실시간 갱신 → unreadCount > 0 이면 자동 노출,
+// 사용자가 "확인했습니다" 누르면 markNoticesRead 호출 → unreadCount 0 → 모달 자동 사라짐.
+// 새 공지 도착 시 다시 unreadCount > 0 → 자동 재노출(별도 dismissed state 불필요).
+//   - 일반 공지: 즉시 닫기 가능
+//   - 긴급 공지(type==='emergency'): 5초 카운트다운 후 닫기 활성 + 진동
+function NoticeForceModal({ notice, onClose }) {
+  const isEmergency = notice.type === "emergency";
+  const [countdown, setCountdown] = useState(isEmergency ? 5 : 0);
+
+  useEffect(() => {
+    if (!isEmergency) return;
+    if ("vibrate" in navigator) {
+      try { navigator.vibrate([200, 100, 200, 100, 200]); } catch { /* 무해 */ }
+    }
+  }, [isEmergency]);
+
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const t = setTimeout(() => setCountdown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [countdown]);
+
+  const canClose = !isEmergency || countdown <= 0;
+  const headerBg = isEmergency ? "var(--color-destructive)" : "var(--color-primary)";
+
+  const createdLabel = (() => {
+    const ms = noticeCreatedMs(notice);
+    if (!ms) return "";
+    const d = new Date(ms);
+    return `${d.getMonth() + 1}월 ${d.getDate()}일 ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  })();
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 99999,
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+    }}>
+      <div style={{
+        background: "var(--color-bg)", borderRadius: "var(--radius-16)",
+        maxWidth: 480, width: "100%", maxHeight: "85vh",
+        display: "flex", flexDirection: "column", overflow: "hidden",
+        boxShadow: "var(--shadow-emphasize)",
+      }}>
+        <div style={{
+          padding: "16px 20px", background: headerBg, color: "#fff",
+          fontWeight: 800, fontSize: 15, display: "flex", alignItems: "center", gap: 8,
+        }}>
+          <span style={{ fontSize: 18 }}>{isEmergency ? "🚨" : "📢"}</span>
+          <span>{isEmergency ? "긴급 공지" : "공지사항"}</span>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "22px 22px 16px" }}>
+          <div style={{ fontSize: 17, fontWeight: 800, color: "var(--color-label)", marginBottom: 8, lineHeight: 1.4 }}>
+            {notice.title}
+          </div>
+          {createdLabel && (
+            <div style={{ fontSize: 12, color: "var(--color-label-mute)", marginBottom: 14 }}>
+              {createdLabel}
+            </div>
+          )}
+          <div style={{ fontSize: 14.5, color: "var(--color-label)", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+            {notice.body}
+          </div>
+        </div>
+        <div style={{ padding: "12px 16px 16px", borderTop: "1px solid var(--color-line)" }}>
+          <button
+            onClick={canClose ? onClose : undefined}
+            disabled={!canClose}
+            style={{
+              width: "100%", padding: "14px",
+              borderRadius: "var(--radius-12)",
+              background: canClose ? "var(--color-primary)" : "var(--color-bg-soft)",
+              color: canClose ? "#fff" : "var(--color-label-mute)",
+              border: "none", fontSize: 15, fontWeight: 800,
+              cursor: canClose ? "pointer" : "not-allowed",
+              fontFamily: "inherit",
+            }}
+          >
+            {canClose ? "확인했습니다" : `${countdown}초 후 닫기 활성화`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── 탭 정의 ──────────────────────────────────────────
 const TABS = [
   { id: "home",     icon: "🏠", label: "홈" },
@@ -226,6 +313,11 @@ export default function EmployeeApp() {
   // 안 읽음 공지 수 — 마지막 읽은 시각보다 나중 createdAt 공지 개수.
   const unreadCount = notices.filter(n => noticeCreatedMs(n) > noticeReadAt).length;
 
+  // 강제 공지 모달 — 안 읽음이 1건 이상이면 가장 최신 공지를 풀스크린으로 노출.
+  // 닫기(markNoticesRead) 호출 시 noticeReadAt 갱신되어 unreadCount=0 → 자동 사라짐.
+  // 새 공지 도착 시 다시 unreadCount>0 → 자동 재노출.
+  const forceNotice = (unreadCount > 0 && notices.length > 0) ? notices[0] : null;
+
   // ── FCM 초기화 ───────────────────────────────────────
   // partnerCode 도 deps 에 포함 → 협력사 변경 시 fcmTokens 자동 재upsert (idempotent).
   useEffect(() => {
@@ -253,6 +345,8 @@ export default function EmployeeApp() {
   return (
     <div style={S.appWrap}>
       <InstallPrompt />
+      {/* ── 강제 공지 모달 — 안 읽음 공지 1건을 풀스크린으로 노출(푸시 누락 대비 도달성 보장 통로) ── */}
+      {forceNotice && <NoticeForceModal notice={forceNotice} onClose={markNoticesRead} />}
       {/* ── 공지 배너 — 본문 영역 탭 시 공지함으로 이동(읽음 처리) ── */}
       {activeNotice && (
         <div style={{

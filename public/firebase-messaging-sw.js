@@ -34,8 +34,9 @@ messaging.onBackgroundMessage(payload => {
 
   self.registration.showNotification(title, {
     body: body,
-    icon: "/logo192.png",
-    badge: "/logo192.png",
+    // ⚠ logo192.png 는 CRA 기본 React 로고 — 사용 금지(아이콘이 React 로고로 표시되는 결함, 2026-05-27).
+    icon: "/icons/notification-employee.png",
+    badge: "/icons/notification-employee.png",
     tag: "buslink-" + Date.now(),  // ★ 고유 tag — 알림 덮어쓰기 방지
     data: payload.data,
     vibrate: type === "emergency" ? [200, 100, 200, 100, 200] : [100],

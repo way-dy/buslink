@@ -9,6 +9,12 @@
       "purpose": "any"
     },
     {
+      "src": "/icons/notification-employee.png",
+      "sizes": "192x192 256x256 384x384 512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
       "src": "/icons/passenger-1024.png",
       "sizes": "1024x1024",
       "type": "image/png",
