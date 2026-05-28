@@ -2,9 +2,9 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
-## 현재 상태 (2026-05-27 세션 종료)
+## 현재 상태 (2026-05-28 세션 종료)
 > 이 저장소가 작업 정본. **어느 PC든** `git pull` + `.env.local`(↓부트스트랩)이면 빌드·배포 가능.
-> prod 라이브 = `main.3c4d91c8.js` (코드 변경 없음). 2026-05-27 변천: 신규 별건 도구 `docs/manual-ppt/`(PPT 매뉴얼 3종, prod 캡처 일부 반영). prod 콘솔 권한 오류 1건 발견(EmployeeApp 내 정류장 복원, issues.md `[미해결]`).
+> prod 라이브 = `main.6fa4ef2d.js` (2026-05-28 배포). 변천: 양방향 탑승 QR(역방향 = 직원 발행 → 기사 스캔). 카메라 권한 없는 협력사용 + 혼승 노선 노선 단위 override 지원. issues.md `[패턴]` 등록.
 
 ### git 원격
 - `origin/master` = 작업 정본. 3월 폐갈래는 `origin/archive/remote-march-2026`(`f63321c`) 영구 백업.
@@ -47,6 +47,7 @@
 - [ ] **협력사 삭제·기사 삭제 팝업**: 비활성만 삭제 허용·직원수 confirm·성공 alert
 
 ## 완료 (최근·시간역순. 옛 누적은 @.claude/tasks-log.md)
+- [x] **2026-05-28** 양방향 탑승 QR — 역방향(직원 발행 → 기사 스캔) 신설(`main.6fa4ef2d.js` + rules) — 카메라 권한 없는 협력사용. **신규 컬렉션 `passengerTokens/{tokenId}`**(2분 만료·1회 소각·companyId 일치 검증, boardingTokens와 분리 = rules·정책 독립). 우선순위 = **`routes.boardingMode` > `partnerCodes.boardingMode` > `'driver-qr'`**(혼승 노선 대응 — 노선 단위 override 우선). QR 페이로드는 URL 대신 JSON(`{v:1,t:"passenger",tokenId,companyId,empNo}`) — 기사앱이 외부 브라우저 튀는 사고 방지. EmployeeApp ScanTab 改名+래퍼(`ScanTabDriverQR` 100% 보존 + `ScanTabPassengerQR` 신규) — 호출부 변경 0. DriverApp 운행 시작 시 mode 조회 후 발행 카드 ↔ 카메라 스캔 UI 분기. AdminApp 협력사 발급/편집 + 노선 편집 모달 각각에 셀렉터·배지. boardings 스키마 100% 동일 → 통계 다운스트림 무영향. issues.md `[패턴]` 등록.
 - [x] **2026-05-27** 관제 AdminApp PWA 설치 안내(`main.<재배포>.js`) — `<InstallPrompt/>` 마운트 + `applyAppManifest({manifestHref:"/manifest.json", appleTouchHref:"/icons/admin-1024.png", title:"BusLink 관제"})` 호출. PC Chrome 자동 바텀시트·주소창 설치 아이콘 활성화. 모바일 관제 시 직원앱 `/p`와 scope `/` 중첩 잠재 충돌(issues.md). manifest.json은 이미 admin 아이콘 정본. issues.md `[패턴]` 등록.
 - [x] **2026-05-27** 강제 공지 모달(`NoticeForceModal`, `main.00a13b12.js`) — PWA 푸시 OS 누락 대비 도달성 보장. EmployeeApp 마운트 시 `unreadCount > 0`이면 가장 최신 안 읽음 공지 풀스크린 자동 노출. 일반=즉시 닫기·긴급(type=emergency)=5초 카운트다운+진동. `notices`/`noticeReadAt`/`markNoticesRead` 인프라 재사용·신규 Firestore 구조 0. 사용자 "안 본 공지 못 지나가게" 명시 결정. issues.md `[패턴]` 등록.
 - [x] **2026-05-27** 알림 아이콘 결함 fix(`main.7c7dff9b.js` + functions 재배포) — `public/logo192.png`가 CRA 기본 React 로고였음. `public/icons/notification-employee.png`(passenger-1024.png 사본) 신설 + CF `sendNoticeToCompany`·`buildPreArrivalMessage` `webpush.notification.icon`+`badge` 교체 + SW `firebase-messaging-sw.js` `showNotification` 교체 + `manifest-employee.json icons`에 192~512 사이즈 등록. 부수 발견: 안드로이드 알림 발신자 "Chrome <URL>" 형태 = WebAPK 미설치 진단 단서. issues.md `[패턴]` 등록.

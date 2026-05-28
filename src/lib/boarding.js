@@ -83,6 +83,105 @@ export async function validateAndBoard({ tokenId, empNo, name, stopId, stopName 
   return { routeName, vehicleNo, dispatchDate };
 }
 
+// ─── 승객 발행 QR (역방향, 2026-05-27) ─────────────────────
+// 카메라 권한이 없는 협력사 직원이 본인 폰에서 QR을 발행 → 기사가 자기 폰 카메라로 스캔.
+// 별도 컬렉션 `passengerTokens` 로 분리: rules 영향 좁고, 만료/소각 정책 독립(2분 만료).
+// tokenId 는 기존 generateTokenId() 재사용(20자 영숫자).
+export async function createPassengerToken({ companyId, empNo, name, partnerCode }) {
+  const tokenId = generateTokenId();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 2 * 60 * 1000); // 2분 후 만료
+
+  await setDoc(doc(db, "passengerTokens", tokenId), {
+    tokenId,
+    companyId,
+    empNo: (empNo || "").toString().trim(),
+    name: (name || "").toString().trim(),
+    partnerCode: partnerCode || null,
+    createdAt: serverTimestamp(),
+    expiresAt: Timestamp.fromDate(expiresAt),
+    used: false,
+  });
+
+  return tokenId;
+}
+
+// ─── 승객 토큰 검증 + 탑승 기록 (기사 스캔측) ──────────────
+// 기사앱이 스캔한 승객 QR(JSON 페이로드의 tokenId)로 호출.
+// 흐름은 validateAndBoard 와 동일한 boardings 스키마(통계 화면 무영향) 유지하되,
+// 입력 출처가 다르므로 별도 함수로 분리(소각 컬렉션도 passengerTokens 로 다름).
+export async function validateAndBoardByDriver({
+  tokenId, driverId,
+  companyId, routeId, routeName, vehicleId, vehicleNo, dispatchDate,
+  stopId, stopName,
+}) {
+  const ref = doc(db, "passengerTokens", tokenId);
+  const snap = await getDoc(ref);
+
+  if (!snap.exists()) throw new Error("유효하지 않은 QR코드입니다");
+
+  const token = snap.data();
+  const now = new Date();
+  const expiresAt = token.expiresAt.toDate();
+
+  if (now > expiresAt) throw new Error("QR코드가 만료되었습니다\n직원에게 새 QR 발행을 요청하세요");
+  if (token.used) throw new Error("이미 사용된 QR코드입니다");
+  // 서로 다른 회사 토큰 차단(직원이 다른 회사 QR을 본인 폰에서 띄워도 다른 회사 기사가 스캔 못 함).
+  if (token.companyId && companyId && token.companyId !== companyId) {
+    throw new Error("회사가 일치하지 않는 QR코드입니다");
+  }
+
+  const empNo = (token.empNo || "").toString().trim();
+  const name = (token.name || "").toString().trim();
+  if (!empNo) throw new Error("사번 정보가 없는 QR코드입니다");
+
+  // partnerCode 는 토큰에 이미 포함(직원 발행 시 session.partnerCode 저장).
+  // 비어있으면(레거시/구버전) passengers/{empNo}.partnerCode 폴백 — validateAndBoard 와 동일 패턴.
+  let partnerCode = token.partnerCode || null;
+  if (!partnerCode) {
+    try {
+      const passSnap = await getDoc(doc(db, "companies", companyId, "passengers", empNo));
+      if (passSnap.exists()) partnerCode = passSnap.data().partnerCode || null;
+    } catch (_) { /* 권한/네트워크 오류는 partnerCode 부재로 처리 — 탑승 기록 자체는 진행 */ }
+  }
+
+  // 차량 GPS 위치 캡처 — validateAndBoard 와 동일(통계 일관성).
+  let vehicleLat = null, vehicleLng = null, vehicleSpeed = null;
+  try {
+    const gpsSnap = await getDoc(doc(db, "gps", `${companyId}_${vehicleId}`));
+    if (gpsSnap.exists()) {
+      const g = gpsSnap.data();
+      vehicleLat = typeof g.lat === "number" ? g.lat : null;
+      vehicleLng = typeof g.lng === "number" ? g.lng : null;
+      vehicleSpeed = typeof g.speed === "number" ? g.speed : null;
+    }
+  } catch (_) { /* GPS 미수신/권한 → null 처리, 탑승 자체는 진행 */ }
+
+  // 탑승 기록 저장 — 기존 boardings 스키마와 100% 동일.
+  const boardingRef = collection(db, "companies", companyId, "boardings", dispatchDate, "list");
+  await addDoc(boardingRef, {
+    empNo,
+    name,
+    tokenId,
+    companyId, routeId, routeName,
+    vehicleId, vehicleNo, driverId,
+    stopId: stopId || "",
+    stopName: stopName || "",
+    partnerCode,
+    vehicleLat, vehicleLng, vehicleSpeed,
+    boardedAt: serverTimestamp(),
+  });
+
+  // 토큰 소각(재사용 방지) — 기사 본인 식별자 기록.
+  await setDoc(ref, {
+    used: true,
+    usedAt: serverTimestamp(),
+    usedByDriverId: driverId || "",
+  }, { merge: true });
+
+  return { routeName, vehicleNo, dispatchDate, empNo, name };
+}
+
 // ─── 유틸 ────────────────────────────────────────────────
 function generateTokenId() {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';

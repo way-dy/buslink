@@ -5,8 +5,9 @@ import { collection, query, where, getDocs, doc, updateDoc, getDoc, onSnapshot, 
 import { startGPS, stopGPS, clearGPS } from "../lib/gps";
 import { planTimeForStop, computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
 import { ensureGeolocationPermission } from "../lib/usePermissions";
-import { createBoardingToken, getBoardingUrl } from "../lib/boarding";
+import { createBoardingToken, getBoardingUrl, validateAndBoardByDriver } from "../lib/boarding";
 import QRCode from "qrcode";
+import jsQR from "jsqr";
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 import InstallPrompt from "../components/InstallPrompt";
 import { applyAppManifest } from "../lib/pwaManifest";
@@ -50,6 +51,10 @@ export default function DriverApp({ companyId: propCompanyId }) {
   const [qrDataUrl, setQrDataUrl] = useState(null); // canvas → base64 이미지
   const [activeTab, setActiveTab] = useState("운행");          // "운행" | "QR"
   const tokenTimerRef = useRef(null);
+  // 협력사 boardingMode (2026-05-27, 역방향 QR) — 'driver-qr'(기본·null도 동치) | 'passenger-qr'
+  // dispatch.routeId → routes/{id}.partnerCode → partnerCodes/{code}.boardingMode 체인.
+  // 미설정·null·조회 실패 = 'driver-qr' (기본·회귀 0).
+  const [boardingMode, setBoardingMode] = useState("driver-qr");
   const [nextStopDist, setNextStopDist] = useState(null);
   const [driving, setDriving] = useState(false);
   const [watchId, setWatchId] = useState(null);
@@ -203,6 +208,39 @@ export default function DriverApp({ companyId: propCompanyId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDispatchId, dispatch?.routeId, companyId]);
 
+  // boardingMode 조회 (2026-05-27 역방향 QR) — 우선순위: routes.boardingMode > partnerCodes.boardingMode > 'driver-qr'.
+  // 노선 단위 override가 우선 — 혼승 노선(여러 협력사 직원 공유) 대응. 명시 미설정 시 협력사 정책 fallback.
+  // 'passenger-qr' 시 기사앱이 발행 대신 카메라로 스캔. 미설정·null·실패 = 'driver-qr'(회귀 0).
+  useEffect(() => {
+    let cancelled = false;
+    if (!dispatch?.routeId || !companyId) { setBoardingMode("driver-qr"); return; }
+    (async () => {
+      try {
+        const routeSnap = await getDoc(doc(db, "companies", companyId, "routes", dispatch.routeId));
+        if (!routeSnap.exists()) { if (!cancelled) setBoardingMode("driver-qr"); return; }
+        const r = routeSnap.data();
+        // (1) 노선 단위 override
+        if (r.boardingMode === "passenger-qr" || r.boardingMode === "driver-qr") {
+          if (!cancelled) setBoardingMode(r.boardingMode);
+          return;
+        }
+        // (2) 협력사 단위 fallback
+        const partnerCode = r.partnerCode || null;
+        if (!partnerCode) { if (!cancelled) setBoardingMode("driver-qr"); return; }
+        const pcSnap = await getDoc(doc(db, "partnerCodes", partnerCode));
+        if (cancelled) return;
+        const mode = pcSnap.exists() ? (pcSnap.data().boardingMode || "driver-qr") : "driver-qr";
+        setBoardingMode(mode === "passenger-qr" ? "passenger-qr" : "driver-qr");
+      } catch (e) {
+        if (!cancelled) {
+          console.warn("[boardingMode 조회 실패]", e.message);
+          setBoardingMode("driver-qr"); // 안전한 폴백
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [dispatch?.routeId, companyId]);
+
   // ── 활성 dispatch 문서 실시간 구독 — stopArrivals 표시·멱등 가드용 ──
   // 운행중일 때만 구독(미운행 시엔 정류장 표시 자체가 없으므로 비용 절감).
   // dispatch.stopArrivals = { [stopId]: { actualAt: serverTimestamp, plannedAt, delaySec } }
@@ -340,10 +378,12 @@ export default function DriverApp({ companyId: propCompanyId }) {
     });
     setWatchId(id);
     setDriving(true);
-    // ✅ 탑승 QR 토큰 최초 생성
-    await refreshToken(driver, dispatch);
-    // 5분마다 자동 갱신
-    tokenTimerRef.current = setInterval(() => refreshToken(driver, dispatch), 5 * 60 * 1000);
+    // ✅ 탑승 QR 토큰 최초 생성 — passenger-qr 모드(역방향: 직원 발행/기사 스캔)는 skip.
+    if (boardingMode !== "passenger-qr") {
+      await refreshToken(driver, dispatch);
+      // 5분마다 자동 갱신
+      tokenTimerRef.current = setInterval(() => refreshToken(driver, dispatch), 5 * 60 * 1000);
+    }
   };
 
   const handleStop = async () => {
@@ -567,12 +607,12 @@ export default function DriverApp({ companyId: propCompanyId }) {
           </button>
         )}
 
-        {/* 탭 전환 — 항상 표시 */}
+        {/* 탭 전환 — 항상 표시. passenger-qr 모드는 라벨이 'QR 스캔'(기사가 스캔측). */}
         <div style={S.tabRow}>
           {["운행", "탑승 QR"].map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
               style={{ ...S.tabBtn, ...(activeTab === tab ? S.tabBtnActive : S.tabBtnIdle) }}>
-              {tab === "탑승 QR" && <Icon name="qr" size={16} />} {tab}
+              {tab === "탑승 QR" && <Icon name="qr" size={16} />} {tab === "탑승 QR" && boardingMode === "passenger-qr" ? "QR 스캔" : tab}
             </button>
           ))}
         </div>
@@ -700,8 +740,9 @@ export default function DriverApp({ companyId: propCompanyId }) {
           </div>
         )}
 
-        {/* ─ 탑승 QR 탭 ─ */}
-        {activeTab === "탑승 QR" && !driving && (
+        {/* ─ 탑승 QR 탭 — boardingMode 분기 ─ */}
+        {/* (a) driver-qr 모드(기본): 기사 발행 → 직원 스캔 (기존 흐름 100% 보존) */}
+        {activeTab === "탑승 QR" && boardingMode !== "passenger-qr" && !driving && (
           <div style={S.qrNotice}>
             <Icon name="qr" size={26} />
             <div>
@@ -710,7 +751,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
             </div>
           </div>
         )}
-        {activeTab === "탑승 QR" && driving && (
+        {activeTab === "탑승 QR" && boardingMode !== "passenger-qr" && driving && (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
             {qrUrl ? (
               <>
@@ -735,6 +776,25 @@ export default function DriverApp({ companyId: propCompanyId }) {
               <div style={S.qrGuide}>QR 생성 중...</div>
             )}
           </div>
+        )}
+
+        {/* (b) passenger-qr 모드: 직원 발행 → 기사 스캔 (2026-05-27 역방향) */}
+        {activeTab === "탑승 QR" && boardingMode === "passenger-qr" && !driving && (
+          <div style={S.qrNotice}>
+            <Icon name="qr" size={26} />
+            <div>
+              <div style={S.qrNoticeTitle}>운행 시작 후 스캔이 활성화됩니다</div>
+              <div style={S.qrNoticeSub}>직원이 발행한 QR을 스캔하여 탑승을 기록합니다</div>
+            </div>
+          </div>
+        )}
+        {activeTab === "탑승 QR" && boardingMode === "passenger-qr" && driving && (
+          <DriverPassengerScan
+            companyId={companyId}
+            driver={driver}
+            dispatch={dispatch}
+            currentStop={(currentStopIdx >= 0 && stops[currentStopIdx]) ? stops[currentStopIdx] : null}
+          />
         )}
       </div>
 
@@ -1039,3 +1099,191 @@ const S = {
     cursor: "pointer",
   },
 };
+
+// ─── 기사용 승객 QR 스캔 컴포넌트 (passenger-qr 모드, 2026-05-27) ─────
+// 직원이 본인 폰에서 발행한 passengerTokens QR을 기사 폰 카메라로 스캔.
+// EmployeeApp ScanTab 카메라 로직(getUserMedia+jsQR 루프) 패턴 차용.
+// 성공 시 3초 success 토스트 → 자동 다음 스캔 모드(연속 탑승).
+function DriverPassengerScan({ companyId, driver, dispatch, currentStop }) {
+  const [step, setStep] = useState("ready"); // ready|scanning|processing|success|error
+  const [errMsg, setErrMsg] = useState("");
+  const [boarded, setBoarded] = useState(null); // { empNo, name } 성공 토스트용
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const rafRef = useRef(null);
+  const activeRef = useRef(false);
+
+  // 언마운트 시 카메라 정리
+  useEffect(() => {
+    return () => { activeRef.current = false; stopStream(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const stopStream = () => {
+    activeRef.current = false;
+    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
+  };
+
+  const startScan = async () => {
+    setErrMsg("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+      });
+      streamRef.current = stream;
+      setStep("scanning");
+      await new Promise(r => setTimeout(r, 100));
+      if (!videoRef.current) throw new Error("카메라 화면을 초기화할 수 없습니다");
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play().catch(() => {});
+      activeRef.current = true;
+      tick();
+    } catch (e) {
+      stopStream();
+      setErrMsg(
+        e.name === "NotAllowedError"
+          ? "카메라 권한을 허용해주세요.\n브라우저 주소창 왼쪽 자물쇠 아이콘 → 카메라 허용"
+          : "카메라 오류: " + e.message
+      );
+      setStep("error");
+    }
+  };
+
+  const tick = () => {
+    if (!activeRef.current) return;
+    const video = videoRef.current;
+    if (!video || video.readyState < 2 || !video.videoWidth) {
+      rafRef.current = requestAnimationFrame(tick);
+      return;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0);
+    let imageData;
+    try { imageData = ctx.getImageData(0, 0, canvas.width, canvas.height); }
+    catch { rafRef.current = requestAnimationFrame(tick); return; }
+    const code = jsQR(imageData.data, canvas.width, canvas.height, { inversionAttempts: "attemptBoth" });
+    if (code?.data) {
+      activeRef.current = false;
+      stopStream();
+      handleScanned(code.data);
+      return;
+    }
+    rafRef.current = requestAnimationFrame(tick);
+  };
+
+  const handleScanned = async (rawValue) => {
+    setStep("processing");
+    try {
+      // 페이로드 = JSON { v:1, t:"passenger", tokenId, companyId, empNo }
+      let payload;
+      try { payload = JSON.parse(rawValue.trim()); }
+      catch { throw new Error("승객 QR 형식이 아닙니다"); }
+      if (payload?.t !== "passenger" || !payload?.tokenId) {
+        throw new Error("승객 QR 형식이 아닙니다");
+      }
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+      const r = await validateAndBoardByDriver({
+        tokenId: payload.tokenId,
+        driverId: driver?.id || "",
+        companyId,
+        routeId: dispatch?.routeId || "",
+        routeName: dispatch?.routeName || "",
+        vehicleId: dispatch?.vehicleId || driver?.vehicleId || "",
+        vehicleNo: dispatch?.vehicleNo || driver?.vehicleNo || "",
+        dispatchDate: today,
+        stopId: currentStop?.id || "",
+        stopName: currentStop?.name || "",
+      });
+      if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]);
+      setBoarded({ empNo: r.empNo, name: r.name });
+      setStep("success");
+      // 3초 후 자동 다음 스캔 모드 복귀(연속 탑승)
+      setTimeout(() => { setBoarded(null); setStep("ready"); startScan(); }, 3000);
+    } catch (e) {
+      setErrMsg(e.message || String(e));
+      setStep("error");
+    }
+  };
+
+  const reset = () => {
+    stopStream();
+    setStep("ready"); setErrMsg(""); setBoarded(null);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, width: "100%" }}>
+      {step === "ready" && (
+        <>
+          <div style={{ width: 90, height: 90, borderRadius: "50%", background: "var(--color-primary-soft)", border: "2px solid var(--color-primary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40 }}>📷</div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "var(--color-label)", marginBottom: 4 }}>탑승 QR 스캔</div>
+            <div style={{ fontSize: 12, color: "var(--color-label-mute)", lineHeight: 1.5 }}>
+              직원의 본인 QR을 카메라로 비춰주세요
+            </div>
+          </div>
+          <button onClick={startScan} style={{ ...S.primaryBtn, maxWidth: 280 }}>
+            <Icon name="qr" size={18} /> 카메라 열기
+          </button>
+        </>
+      )}
+
+      {step === "scanning" && (
+        <div style={{ width: "100%", maxWidth: 360 }}>
+          <div style={{ position: "relative", borderRadius: 20, overflow: "hidden", background: "#000", aspectRatio: "1/1" }}>
+            <video ref={videoRef} autoPlay playsInline muted
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+            {/* 오버레이 — EmployeeApp ScanTab 패턴 동일 */}
+            <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+              <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "18%", background: "rgba(0,0,0,.6)" }} />
+              <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: "18%", background: "rgba(0,0,0,.6)" }} />
+              <div style={{ position: "absolute", top: "18%", left: 0, width: "10%", height: "64%", background: "rgba(0,0,0,.6)" }} />
+              <div style={{ position: "absolute", top: "18%", right: 0, width: "10%", height: "64%", background: "rgba(0,0,0,.6)" }} />
+              <div style={{ position: "absolute", top: "18%", left: "10%", width: 30, height: 30, borderTop: "3px solid var(--color-primary)", borderLeft: "3px solid var(--color-primary)", borderRadius: "6px 0 0 0" }} />
+              <div style={{ position: "absolute", top: "18%", right: "10%", width: 30, height: 30, borderTop: "3px solid var(--color-primary)", borderRight: "3px solid var(--color-primary)", borderRadius: "0 6px 0 0" }} />
+              <div style={{ position: "absolute", bottom: "18%", left: "10%", width: 30, height: 30, borderBottom: "3px solid var(--color-primary)", borderLeft: "3px solid var(--color-primary)", borderRadius: "0 0 0 6px" }} />
+              <div style={{ position: "absolute", bottom: "18%", right: "10%", width: 30, height: 30, borderBottom: "3px solid var(--color-primary)", borderRight: "3px solid var(--color-primary)", borderRadius: "0 0 6px 0" }} />
+            </div>
+          </div>
+          <div style={{ textAlign: "center", marginTop: 12, fontSize: 13, color: "var(--color-primary)", fontWeight: 600 }}>
+            직원의 QR을 사각형 안에 맞춰주세요
+          </div>
+          <button onClick={reset} style={{ ...S.refreshBtn, marginTop: 10 }}>취소</button>
+        </div>
+      )}
+
+      {step === "processing" && (
+        <>
+          <div style={{ width: 36, height: 36, borderRadius: "50%", border: "3px solid var(--color-line)", borderTopColor: "var(--color-primary)", animation: "spin 0.8s linear infinite" }} />
+          <div style={{ fontSize: 13, color: "var(--color-label-mute)" }}>탑승 처리 중...</div>
+        </>
+      )}
+
+      {step === "success" && boarded && (
+        <>
+          <div style={{ width: 80, height: 80, borderRadius: "50%", background: "#E6F7EB", border: "2px solid var(--color-positive)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 36, color: "#007A29" }}>✓</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "#007A29" }}>탑승 완료!</div>
+          <div style={{ fontSize: 14, color: "var(--color-label)", fontWeight: 700 }}>
+            {boarded.name} ({boarded.empNo})
+          </div>
+          <div style={{ fontSize: 11, color: "var(--color-label-alt)" }}>잠시 후 다음 스캔을 시작합니다…</div>
+        </>
+      )}
+
+      {step === "error" && (
+        <>
+          <div style={{ width: 72, height: 72, borderRadius: "50%", background: "var(--color-atomic-red-90)", border: "2px solid var(--color-destructive)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, color: "var(--color-destructive)" }}>✕</div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "var(--color-destructive)" }}>오류</div>
+          <div style={{ fontSize: 13, color: "var(--color-label-mute)", textAlign: "center", whiteSpace: "pre-line", lineHeight: 1.6 }}>{errMsg}</div>
+          <button onClick={reset} style={{ ...S.primaryBtn, maxWidth: 280 }}>다시 시도</button>
+        </>
+      )}
+    </div>
+  );
+}

@@ -132,6 +132,16 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ─── 승객 발행 탑승 QR 토큰 (역방향, 2026-05-27) ─────
+    // boardingTokens 와 분리: 직원이 본인 폰에서 발행 → 기사가 자기 폰 카메라로 스캔.
+    // 2분 만료·1회 소각. 직원(익명 인증)이 create, 기사가 read 후 update(소각).
+    match /passengerTokens/{tokenId} {
+      allow read:   if isAuth();
+      allow create: if isAuth();
+      allow update: if isAuth();
+      allow delete: if false;
+    }
+
     // ─── 협력사 코드 ─────────────────────────────────────
     match /partnerCodes/{code} {
       allow read:   if true;

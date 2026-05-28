@@ -15,8 +15,9 @@ import { computeStopEstimates, formatDelayLabel, formatPassengerEta, describeEta
 import { useSmoothedEta } from "../lib/useSmoothedEta";
 import { useWakeTick } from "../lib/useWakeTick";
 
-import { validateAndBoard } from "../lib/boarding";
+import { validateAndBoard, createPassengerToken } from "../lib/boarding";
 import { hashPin } from "../lib/partner";
+import QRCode from "qrcode";
 import { BusLinkLogo, StatusDot } from "../components/ui";
 import InstallPrompt, { InstallGuide } from "../components/InstallPrompt";
 import { applyAppManifest } from "../lib/pwaManifest";
@@ -1727,7 +1728,235 @@ function NoticesTab({ notices, unreadCount }) {
 // ════════════════════════════════════════════════════════
 // 탑승 탭 — QR 스캔
 // ════════════════════════════════════════════════════════
+// ─── ScanTab — 협력사 boardingMode 분기 래퍼 (2026-05-27) ─────
+// partnerCode 미설정/null/'driver-qr' = 기존 카메라 스캔 UI (직원이 기사 QR 스캔)
+// 'passenger-qr' = 본인 QR 발행 UI (기사가 직원 QR 스캔)
+// 부모(EmployeeApp)에서 함수 호출부 변경 최소화 위해 같은 이름 유지·내부에서 분기.
 function ScanTab({ companyId, session }) {
+  const [boardingMode, setBoardingMode] = useState(null); // null=로딩중, 'driver-qr'|'passenger-qr'
+
+  // mode 우선순위: routes.boardingMode > partnerCodes.boardingMode > 'driver-qr'.
+  // 노선 단위 override가 우선 — 혼승 노선(여러 협력사 직원 공유) 대응.
+  // session.routeId 또는 partnerCode 변경 시 재조회.
+  useEffect(() => {
+    let cancelled = false;
+    const partnerCode = session?.partnerCode || null;
+    const routeId = session?.routeId || null;
+    if (!routeId && !partnerCode) {
+      setBoardingMode("driver-qr"); // 둘 다 없으면 기본
+      return;
+    }
+    (async () => {
+      try {
+        // (1) 노선 단위 override
+        if (routeId && companyId) {
+          const rSnap = await getDoc(doc(db, "companies", companyId, "routes", routeId));
+          if (cancelled) return;
+          if (rSnap.exists()) {
+            const rm = rSnap.data().boardingMode;
+            if (rm === "passenger-qr" || rm === "driver-qr") {
+              setBoardingMode(rm);
+              return;
+            }
+          }
+        }
+        // (2) 협력사 단위 fallback
+        if (!partnerCode) { setBoardingMode("driver-qr"); return; }
+        const snap = await getDoc(doc(db, "partnerCodes", partnerCode));
+        if (cancelled) return;
+        const mode = snap.exists() ? (snap.data().boardingMode || "driver-qr") : "driver-qr";
+        setBoardingMode(mode === "passenger-qr" ? "passenger-qr" : "driver-qr");
+      } catch (e) {
+        if (!cancelled) {
+          console.warn("[boardingMode 조회 실패]", e.message);
+          setBoardingMode("driver-qr"); // 폴백 = 기본
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [session?.partnerCode, session?.routeId, companyId]);
+
+  if (boardingMode === null) {
+    return (
+      <div style={{ display:"flex", flex:1, alignItems:"center", justifyContent:"center", background:"var(--color-bg-alt)" }}>
+        <div style={S.spinner} />
+      </div>
+    );
+  }
+
+  if (boardingMode === "passenger-qr") {
+    return <ScanTabPassengerQR companyId={companyId} session={session} />;
+  }
+  return <ScanTabDriverQR companyId={companyId} session={session} />;
+}
+
+// ─── 본인 QR 발행 UI (passenger-qr 모드, 2026-05-27) ──────────
+// 협력사 정책으로 카메라 권한 없는 직원이 본인 폰에서 QR을 띄워 기사에게 보여줌.
+// 2분 만료·자동 갱신(110초마다)·소각 시 "탑승 완료" → 5초 후 새 토큰 재발급(연속 탑승).
+function ScanTabPassengerQR({ companyId, session }) {
+  // tokenId state는 setTokenId 만 사용(현재 발급된 토큰 추적용 — 향후 진단 UI 확장 여지).
+  // eslint-disable-next-line no-unused-vars
+  const [tokenId, setTokenId] = useState(null);
+  const [qrDataUrl, setQrDataUrl] = useState(null);
+  const [expiresAt, setExpiresAt] = useState(null); // ms
+  const [now, setNow] = useState(Date.now());
+  const [step, setStep] = useState("active"); // active | success
+  const [errMsg, setErrMsg] = useState("");
+  const refreshTimerRef = useRef(null);
+  const tickTimerRef = useRef(null);
+  const tokenUnsubRef = useRef(null);
+
+  // 토큰 발급 + QR 이미지 생성 (멱등 — 호출 전 기존 unsubscribe).
+  const issueToken = useCallback(async () => {
+    setErrMsg("");
+    try {
+      if (tokenUnsubRef.current) { tokenUnsubRef.current(); tokenUnsubRef.current = null; }
+      const newTokenId = await createPassengerToken({
+        companyId,
+        empNo: session.empNo,
+        name: session.name,
+        partnerCode: session.partnerCode || null,
+      });
+      // QR 페이로드 = JSON (URL 아님 — 기사앱이 외부 브라우저로 튀는 사고 방지)
+      const payload = JSON.stringify({
+        v: 1, t: "passenger",
+        tokenId: newTokenId,
+        companyId,
+        empNo: session.empNo,
+      });
+      const dataUrl = await QRCode.toDataURL(payload, {
+        width: 240,
+        margin: 2,
+        color: { dark: "#0B1A2E", light: "#FFFFFF" },
+        errorCorrectionLevel: "M",
+      });
+      setTokenId(newTokenId);
+      setQrDataUrl(dataUrl);
+      setExpiresAt(Date.now() + 2 * 60 * 1000);
+      setStep("active");
+      // 소각 감지 — used:true 가 되면 "탑승 완료" 화면 + 5초 후 재발급
+      const tref = doc(db, "passengerTokens", newTokenId);
+      const unsub = onSnapshot(tref, snap => {
+        if (!snap.exists()) return;
+        const d = snap.data();
+        if (d.used) {
+          setStep("success");
+          if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]);
+        }
+      }, () => {});
+      tokenUnsubRef.current = unsub;
+    } catch (e) {
+      setErrMsg("QR 발행 실패: " + (e?.message || String(e)));
+    }
+  }, [companyId, session?.empNo, session?.name, session?.partnerCode]);
+
+  // 마운트 시 첫 발급 + 자동 갱신 타이머(110초마다, 만료 10초 전)
+  useEffect(() => {
+    issueToken();
+    refreshTimerRef.current = setInterval(() => {
+      // 탑승 완료 화면 표시 중에는 갱신 멈춤(소각된 토큰 재발급은 success 후 5초 효과로 처리)
+      issueToken();
+    }, 110 * 1000);
+    return () => {
+      if (refreshTimerRef.current) { clearInterval(refreshTimerRef.current); refreshTimerRef.current = null; }
+      if (tokenUnsubRef.current) { tokenUnsubRef.current(); tokenUnsubRef.current = null; }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, session?.empNo, session?.partnerCode]);
+
+  // 카운트다운 tick (1초)
+  useEffect(() => {
+    tickTimerRef.current = setInterval(() => setNow(Date.now()), 1000);
+    return () => { if (tickTimerRef.current) clearInterval(tickTimerRef.current); };
+  }, []);
+
+  // 탑승 완료 → 5초 후 자동 재발급 (연속 탑승: 환승 시나리오)
+  useEffect(() => {
+    if (step !== "success") return;
+    const t = setTimeout(() => { issueToken(); }, 5000);
+    return () => clearTimeout(t);
+  }, [step, issueToken]);
+
+  const remainSec = expiresAt ? Math.max(0, Math.ceil((expiresAt - now) / 1000)) : 0;
+  const remainLabel = remainSec >= 60
+    ? `${Math.floor(remainSec / 60)}분 ${remainSec % 60}초`
+    : `${remainSec}초`;
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", flex:1, overflow:"hidden", background:"var(--color-bg-alt)" }}>
+      <div style={{ background:"var(--color-bg)", padding:"14px 16px", borderBottom:"1px solid var(--color-line)" }}>
+        <div style={{ fontSize:16, fontWeight:800, color:"var(--color-label)", letterSpacing:"-0.02em" }}>탑승 QR</div>
+        <div style={{ fontSize:12, color:"var(--color-label-mute)", marginTop:2 }}>기사님께 이 QR을 보여주세요</div>
+      </div>
+
+      <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24, gap:18, overflowY:"auto" }}>
+
+        {step === "active" && (
+          <>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontSize:17, fontWeight:800, color:"var(--color-label)", marginBottom:6 }}>
+                {session.name} ({session.empNo})
+              </div>
+              <div style={{ fontSize:13, color:"var(--color-label-mute)", lineHeight:1.6 }}>
+                기사님께 아래 QR을 보여주세요
+              </div>
+            </div>
+
+            <div style={{ background:"var(--color-bg)", padding:18, borderRadius:"var(--radius-16)", border:"1px solid var(--color-line)", boxShadow:"var(--shadow-emphasize)" }}>
+              {qrDataUrl ? (
+                <img src={qrDataUrl} alt="탑승 QR" width={240} height={240} style={{ display:"block", borderRadius:8 }} />
+              ) : (
+                <div style={{ width:240, height:240, display:"flex", alignItems:"center", justifyContent:"center", color:"var(--color-label-mute)" }}>
+                  생성 중...
+                </div>
+              )}
+            </div>
+
+            <div style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 14px", borderRadius:999, background: remainSec <= 20 ? "#FFF3E0" : "var(--color-primary-soft)", border: remainSec <= 20 ? "1px solid var(--color-cautionary)" : "1px solid var(--color-primary)" }}>
+              <StatusDot tone={remainSec <= 20 ? "warn" : "primary"} size={8} pulse />
+              <span style={{ fontSize:13, fontWeight:700, color: remainSec <= 20 ? "var(--color-cautionary)" : "var(--color-primary-deep)" }}>
+                {remainSec > 0 ? `유효시간 ${remainLabel}` : "갱신 중…"}
+              </span>
+            </div>
+
+            <div style={{ fontSize:11, color:"var(--color-label-alt)", textAlign:"center", lineHeight:1.5 }}>
+              QR은 2분마다 자동 갱신됩니다<br/>
+              기사 폰에 가까이 대주세요
+            </div>
+
+            <button
+              onClick={issueToken}
+              style={{ background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:"var(--radius-12)", padding:"10px 20px", color:"var(--color-label-mute)", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
+              🔄 즉시 갱신
+            </button>
+
+            {errMsg && (
+              <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", borderRadius:8, padding:"9px 12px", fontSize:12, fontWeight:600, color:"#A81818" }}>
+                {errMsg}
+              </div>
+            )}
+          </>
+        )}
+
+        {step === "success" && (
+          <>
+            <div style={{ width:90, height:90, borderRadius:"50%", background:"#E6F7EB", border:"2px solid var(--color-positive)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:44, color:"#007A29" }}>✓</div>
+            <div style={{ fontSize:22, fontWeight:800, color:"#007A29" }}>탑승 완료!</div>
+            <div style={{ fontSize:14, color:"var(--color-label)", fontWeight:700 }}>{session.name} ({session.empNo})</div>
+            <div style={{ fontSize:12, color:"var(--color-label-mute)" }}>{new Date().toLocaleTimeString("ko-KR")}</div>
+            <div style={{ fontSize:11, color:"var(--color-label-alt)", marginTop:4 }}>
+              잠시 후 새 QR이 발행됩니다 (환승 시 사용)
+            </div>
+          </>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+// ─── 기사 QR 스캔 UI (driver-qr 모드, 기존 ScanTab 그대로) ────
+function ScanTabDriverQR({ companyId, session }) {
   const [step, setStep] = useState("ready"); // ready|loading|scanning|confirm|success|error
   // jsQR npm 패키지로 직접 import — 항상 사용 가능
   const [scannedToken, setScannedToken] = useState(null);

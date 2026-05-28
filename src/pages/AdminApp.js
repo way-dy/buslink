@@ -1399,7 +1399,7 @@ function RoutesTab({ companyId }) {
   const [editItem, setEditItem] = useState(null);
   const [filter, setFilter] = useState("전체");
   const [search, setSearch] = useState("");
-  const [form, setForm] = useState({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"" });
+  const [form, setForm] = useState({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"", boardingMode:"" });
   const [loading, setLoading] = useState(false);
   const [partners, setPartners] = useState([]); // 협력사 목록
   const [partnerFilter, setPartnerFilter] = useState("전체"); // 거래처 필터
@@ -1453,17 +1453,19 @@ function RoutesTab({ companyId }) {
     );
   }, [stopsRoute, companyId]);
 
-  const openAdd = () => { setEditItem(null); setForm({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"" }); setShowForm(true); };
+  const openAdd = () => { setEditItem(null); setForm({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"", boardingMode:"" }); setShowForm(true); };
   const openEdit = (item) => {
     setEditItem(item);
-    setForm({ name:item.name||"", code:item.code||"", type:item.type||"출근", shift:item.shift||"주간조", seats:item.seats?.toString()||"", departTime:item.departTime||"", memo:item.memo||"", partnerCode:item.partnerCode||"", partnerName:item.partnerName||"" });
+    setForm({ name:item.name||"", code:item.code||"", type:item.type||"출근", shift:item.shift||"주간조", seats:item.seats?.toString()||"", departTime:item.departTime||"", memo:item.memo||"", partnerCode:item.partnerCode||"", partnerName:item.partnerName||"", boardingMode:item.boardingMode||"" });
     setShowForm(true);
   };
 
   const handleSave = async () => {
     if (!form.name || !form.departTime) return alert("노선명과 출발시간은 필수입니다");
     setLoading(true);
-    const data = { name:form.name.trim(), code:form.code.trim(), type:form.type, shift:form.shift, seats:form.seats?parseInt(form.seats):null, departTime:form.departTime, memo:form.memo.trim(), partnerCode:form.partnerCode, partnerName:form.partnerName, updatedAt:new Date().toISOString() };
+    // boardingMode: ""(미설정=협력사 정책 fallback) | "driver-qr"(노선 강제 기사발행) | "passenger-qr"(노선 강제 직원발행).
+    // 2026-05-27 — 혼승 노선 대응을 위한 노선 단위 override.
+    const data = { name:form.name.trim(), code:form.code.trim(), type:form.type, shift:form.shift, seats:form.seats?parseInt(form.seats):null, departTime:form.departTime, memo:form.memo.trim(), partnerCode:form.partnerCode, partnerName:form.partnerName, boardingMode:form.boardingMode||"", updatedAt:new Date().toISOString() };
     try {
       if (editItem) {
         await updateDoc(doc(db, "companies", companyId, "routes", editItem.id), data);
@@ -2236,6 +2238,17 @@ function RoutesTab({ companyId }) {
           <input style={S.input} type="time" value={form.departTime} onChange={e=>setForm({...form,departTime:e.target.value})} />
           <label style={S.label}>좌석수</label>
           <input style={S.input} type="number" placeholder="45" value={form.seats} onChange={e=>setForm({...form,seats:e.target.value})} />
+          {/* 탑승 QR 방향(노선 단위 override) — 혼승 노선 대응. 미설정 시 협력사 정책 따름. 2026-05-27 */}
+          <label style={S.label}>탑승 QR 방향 (노선 override)</label>
+          <select style={S.input} value={form.boardingMode}
+            onChange={e=>setForm({...form, boardingMode:e.target.value})}>
+            <option value="">협력사 정책 따름 (기본)</option>
+            <option value="driver-qr">기사 발행 → 직원 스캔 (강제)</option>
+            <option value="passenger-qr">직원 발행 → 기사 스캔 (강제)</option>
+          </select>
+          <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:-2, marginBottom:6, lineHeight:1.4 }}>
+            여러 협력사 직원이 같이 타는 혼승 노선은 "강제"로 한쪽을 명시하세요.
+          </div>
           <label style={S.label}>메모</label>
           <input style={S.input} placeholder="비고 사항" value={form.memo} onChange={e=>setForm({...form,memo:e.target.value})} />
           <div style={{display:"flex",gap:8,marginTop:8}}>
@@ -3224,11 +3237,16 @@ function PartnerTab({ companyId }) {
   const [codes, setCodes] = useState([]);
   const [routes, setRoutes] = useState([]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ partnerName: "", memo: "" });
+  // 발급 모달 — 신규 발급 시 boardingMode 도 함께 결정 (2026-05-27 역방향 QR)
+  const [form, setForm] = useState({ partnerName: "", memo: "", boardingMode: "driver-qr" });
   const [loading, setLoading] = useState(false);
   const [copiedCode, setCopiedCode] = useState(null);
   const [passengers, setPassengers] = useState([]);
   const [selectedCode, setSelectedCode] = useState(null);
+  // 모드 편집 모달 — 기존 협력사의 boardingMode 변경 (2026-05-27)
+  const [modeEditTarget, setModeEditTarget] = useState(null); // partnerCodes doc | null
+  const [modeEditValue, setModeEditValue] = useState("driver-qr");
+  const [modeEditLoading, setModeEditLoading] = useState(false);
 
   useEffect(() => {
     if (!companyId) return;
@@ -3259,11 +3277,37 @@ function PartnerTab({ companyId }) {
     try {
       const { createPartnerCode: create } = await import("../lib/partner");
       const code = await create({ companyId, partnerName: form.partnerName.trim(), memo: form.memo.trim() });
+      // boardingMode 'passenger-qr' 인 경우만 추가 setDoc merge (기본값=null=driver-qr 동치, 노이즈 회피).
+      if (form.boardingMode === "passenger-qr") {
+        await updateDoc(doc(db, "partnerCodes", code), { boardingMode: "passenger-qr" });
+      }
       setShowForm(false);
-      setForm({ partnerName: "", memo: "" });
+      setForm({ partnerName: "", memo: "", boardingMode: "driver-qr" });
       alert(`업체코드 발급 완료:\n${code}\n\n협력사에 전달해주세요.`);
     } catch (e) { alert("오류: " + e.message); }
     setLoading(false);
+  };
+
+  // 모드 편집 모달 열기 (2026-05-27)
+  const openModeEdit = (code) => {
+    setModeEditTarget(code);
+    setModeEditValue(code.boardingMode === "passenger-qr" ? "passenger-qr" : "driver-qr");
+  };
+
+  // 모드 저장 — partnerCodes.{code}.boardingMode update
+  const handleModeSave = async () => {
+    if (!modeEditTarget) return;
+    setModeEditLoading(true);
+    try {
+      await updateDoc(doc(db, "partnerCodes", modeEditTarget.id), {
+        boardingMode: modeEditValue,
+      });
+      setModeEditTarget(null);
+      alert(`'${modeEditTarget.partnerName}' 협력사의 탑승 QR 방향이 변경되었습니다.\n\n해당 협력사 직원들은 다음 로그인부터 새 모드가 적용됩니다.`);
+    } catch (e) {
+      alert("오류: " + (e?.message || String(e)));
+    }
+    setModeEditLoading(false);
   };
 
   const handleDeactivate = async (code) => {
@@ -3344,7 +3388,17 @@ function PartnerTab({ companyId }) {
               ) : [...codes].sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0)).map(c => (
                 <tr key={c.id} style={{ ...S.tr, background: selectedCode === c.id ? "var(--color-primary-soft)" : "var(--color-bg)" }}
                   onClick={() => setSelectedCode(selectedCode === c.id ? null : c.id)}>
-                  <td style={{ ...S.td, fontWeight: 600 }}>{c.partnerName}</td>
+                  <td style={{ ...S.td, fontWeight: 600 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span>{c.partnerName}</span>
+                      {/* boardingMode 배지 — passenger-qr 만 표시(driver-qr=기본·노이즈 회피). 2026-05-27 */}
+                      {c.boardingMode === "passenger-qr" && (
+                        <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#FFF1E0", color: "#B95300", border: "1px solid #FFE0C2", fontWeight: 700 }}>
+                          직원발행 QR
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td style={{ ...S.td }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <code style={{ fontSize: 11, color: "var(--color-primary)", background: "var(--color-bg-alt)", padding: "2px 8px", borderRadius: 4 }}>
@@ -3365,14 +3419,19 @@ function PartnerTab({ companyId }) {
                   <td style={{ ...S.td, color: "var(--color-primary)", fontWeight: 600 }}>{c.uploadCount || 0}회</td>
                   <td style={{ ...S.td, fontSize: 12, color: "var(--color-label-mute)" }}>{formatDate(c.lastUploadAt)}</td>
                   <td style={S.td} onClick={e => e.stopPropagation()}>
-                    {c.active ? (
-                      <button style={S.delBtn} onClick={() => handleDeactivate(c)}>비활성화</button>
-                    ) : (
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button style={S.actBtn} onClick={() => handleActivate(c)}>활성화</button>
-                        <button style={S.delBtn} onClick={() => handleDelete(c)}>삭제</button>
-                      </div>
-                    )}
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button style={{ ...S.editBtn, padding: "4px 10px", fontSize: 11 }} onClick={() => openModeEdit(c)}>
+                        QR 방향
+                      </button>
+                      {c.active ? (
+                        <button style={S.delBtn} onClick={() => handleDeactivate(c)}>비활성화</button>
+                      ) : (
+                        <>
+                          <button style={S.actBtn} onClick={() => handleActivate(c)}>활성화</button>
+                          <button style={S.delBtn} onClick={() => handleDelete(c)}>삭제</button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -3430,6 +3489,13 @@ function PartnerTab({ companyId }) {
           <label style={S.label}>메모 (선택)</label>
           <input style={S.input} placeholder="예) 삼성 천안캠퍼스 노선 전용"
             value={form.memo} onChange={e => setForm({ ...form, memo: e.target.value })} />
+          {/* 탑승 QR 방향 — 사내 보안상 직원 폰 카메라 권한이 없는 협력사용. 2026-05-27 */}
+          <label style={S.label}>탑승 QR 방향</label>
+          <select style={S.input} value={form.boardingMode}
+            onChange={e => setForm({ ...form, boardingMode: e.target.value })}>
+            <option value="driver-qr">기사 발행 → 직원 스캔 (기본)</option>
+            <option value="passenger-qr">직원 발행 → 기사 스캔 (직원 카메라 없을 때)</option>
+          </select>
           <div style={{ background: "#FFF1E0", border: "1px solid #FFE0C2", borderRadius: 8, padding: "10px 14px", fontSize: 12, fontWeight: 500, color: "#B95300" }}>
             ⓘ 유효기간 1년 · 발급 후 협력사 담당자에게 코드를 전달하세요
           </div>
@@ -3438,6 +3504,33 @@ function PartnerTab({ companyId }) {
               {loading ? "발급 중..." : "발급하기"}
             </button>
             <button style={{ ...S.closeBtn, flex: 1 }} onClick={() => setShowForm(false)}>취소</button>
+          </div>
+        </div></div>
+      )}
+
+      {/* ── 탑승 QR 방향 편집 모달 (2026-05-27) ── */}
+      {modeEditTarget && (
+        <div style={S.overlay}><div style={S.modal}>
+          <div style={S.modalTitle}>📷 탑승 QR 방향 변경</div>
+          <div style={{ background: "var(--color-bg-alt)", borderRadius: 8, padding: "10px 14px", marginBottom: 4 }}>
+            <div style={{ fontSize: 12, color: "var(--color-label-mute)", marginBottom: 4 }}>대상 협력사</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-label)" }}>{modeEditTarget.partnerName}</div>
+            <div style={{ fontSize: 11, color: "var(--color-label-alt)", fontFamily: "monospace", marginTop: 2 }}>{modeEditTarget.code}</div>
+          </div>
+          <label style={S.label}>QR 방향</label>
+          <select style={S.input} value={modeEditValue} onChange={e => setModeEditValue(e.target.value)}>
+            <option value="driver-qr">기사 발행 → 직원 스캔 (기본)</option>
+            <option value="passenger-qr">직원 발행 → 기사 스캔 (직원 카메라 없을 때)</option>
+          </select>
+          <div style={{ background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#003A99", lineHeight: 1.55 }}>
+            ⓘ 변경 후, 이 협력사 소속 직원·기사는 <b>다음 로그인부터</b> 새 모드가 적용됩니다.
+            노선당 한쪽 방향만 동작 — 같은 노선에서 양방향 동시 허용되지 않습니다.
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button style={{ ...S.addBtn, flex: 1, opacity: modeEditLoading ? 0.6 : 1 }} onClick={handleModeSave} disabled={modeEditLoading}>
+              {modeEditLoading ? "저장 중..." : "저장"}
+            </button>
+            <button style={{ ...S.closeBtn, flex: 1 }} onClick={() => setModeEditTarget(null)}>취소</button>
           </div>
         </div></div>
       )}
