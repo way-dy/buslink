@@ -33,6 +33,20 @@ function getDistance(p1, p2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
+// 정류장 좌표 lat·lng 정규화 — Firestore 저장 형식 다양성(number / string "37.5" /
+// GeoPoint{latitude,longitude} / {location:{latitude,longitude}}) 흡수. 엄격한
+// `typeof === "number"` 비교가 string·GeoPoint 좌표를 전부 탈락시켜 도착 감지·진행률
+// 백필이 통째로 비활성화되던 결함 차단(2026-06-02, issues.md 등록 함정의 감지층 적용).
+// 유효 시 { lat, lng }(number), 아니면 null.
+function toLatLng(s) {
+  if (!s) return null;
+  const rawLat = s.lat ?? s.latitude ?? s.location?.latitude ?? s._latitude;
+  const rawLng = s.lng ?? s.longitude ?? s.location?.longitude ?? s._longitude;
+  const lat = Number(rawLat), lng = Number(rawLng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+}
+
 // 각 정류장까지 거리 계산 → 가장 가까운 정류장 반환
 export function getNearestStop(pos, stops) {
   if (!stops || stops.length === 0) return null;
@@ -101,8 +115,9 @@ export function startGPS({ companyId, vehicleId, vehicleNo, driverId, driverName
   // 각 정류장 progress 사전 산출 1회 캐시(반복 투영 비용 절감).
   const stopProg = usePath
     ? stops.map(s => {
-        if (typeof s.lat !== "number" || typeof s.lng !== "number") return null;
-        const proj = projectToPolyline({ lat: s.lat, lng: s.lng }, routePath, pathCum);
+        const ll = toLatLng(s);
+        if (!ll) return null;
+        const proj = projectToPolyline(ll, routePath, pathCum);
         return proj ? proj.progress : null;
       })
     : null;
@@ -141,7 +156,9 @@ export function startGPS({ companyId, vehicleId, vehicleNo, driverId, driverName
     // ① 100m 직접 감지 (기존 로직 — 폴백·정밀 케이스). viaBackfill=false.
     stops.forEach(stop => {
       if (visitedStops.has(stop.id)) return;
-      const dist = getDistance(curr, { lat: stop.lat, lng: stop.lng });
+      const ll = toLatLng(stop);
+      if (!ll) return;
+      const dist = getDistance(curr, ll);
       if (dist <= STOP_ARRIVE_M) {
         visitedStops.add(stop.id);
         onStopReached(stop, Math.round(dist), false);
@@ -163,7 +180,8 @@ export function startGPS({ companyId, vehicleId, vehicleNo, driverId, driverName
             visitedStops.add(stop.id);
             // 추정 거리 = 현재 좌표 → 정류장 직선거리(통과 누락분이라 정확한 통과
             // 시각·거리는 추정 불가 — 진단/알림용 근사값). viaBackfill=true.
-            const approxDist = Math.round(getDistance(curr, { lat: stop.lat, lng: stop.lng }));
+            const ll = toLatLng(stop);
+            const approxDist = ll ? Math.round(getDistance(curr, ll)) : 0;
             onStopReached(stop, approxDist, true);
           }
         }

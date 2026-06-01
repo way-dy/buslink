@@ -55,6 +55,11 @@ export default function DriverApp({ companyId: propCompanyId }) {
   });
   const [stops, setStops] = useState([]);
   const [routePath, setRoutePath] = useState([]); // 노선 사전경로 — GPS 복구 백필·estimates 구간전파용
+  // 노선 데이터(stops+routePath) 로드 완료 플래그(2026-06-02). startGPS 는 호출 시점의
+  // stops/routePath 를 1회 캡처 → 로드 전 "운행 시작"을 누르면 빈 routePath 가 캡처돼
+  // 도착 진행률 백필이 세션 내내 비활성화(고속 주행 시 100m 직접 감지만으론 정류장
+  // 통과를 놓침 → 도착시간 0건). 로드 완료 전 운행 시작 버튼을 막아 경합 차단.
+  const [routeDataReady, setRouteDataReady] = useState(false);
   const [currentStopIdx, setCurrentStopIdx] = useState(-1);
   // [DIAG-ETA 제거예정] 진단 오버레이 토글 (운행 중일 때만 노출, 기본 닫힘)
   // 사용자가 폰 실측 시 정류장별 ETA·source·delay를 직접 캡쳐하기 위한 임시 카드.
@@ -199,6 +204,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
   };
 
   const loadStops = async (routeId, cid) => {
+    setRouteDataReady(false); // 로드 시작 — 완료까지 운행 시작 게이트
     try {
       const snap = await getDocs(query(
         collection(db, "companies", cid, "routes", routeId, "stops"),
@@ -218,6 +224,8 @@ export default function DriverApp({ companyId: propCompanyId }) {
       console.warn("[BusLink] 노선 경로 로드 실패:", e.message);
       setRoutePath([]);
     }
+    // stops + routePath fetch 완료 → 운행 시작 허용(startGPS 가 실 데이터 캡처 보장).
+    setRouteDataReady(true);
   };
 
   // 운행 중 "GPS 신호 확보 중…" 안내 자동 해제 — 실제 측위가 들어오면 표시 끔.
@@ -235,7 +243,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
 
   // 활성 배차 변경 시 stops 재로드 + 선택 영속화
   useEffect(() => {
-    if (!dispatch?.routeId || !companyId) { setStops([]); return; }
+    if (!dispatch?.routeId || !companyId) { setStops([]); setRouteDataReady(false); return; }
     loadStops(dispatch.routeId, companyId);
     try {
       const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
@@ -785,14 +793,15 @@ export default function DriverApp({ companyId: propCompanyId }) {
           </div>
         )}
 
-        {/* 운행 시작 버튼 (미운행 시) */}
+        {/* 운행 시작 버튼 (미운행 시) — 노선 데이터(stops+routePath) 로드 완료 후에만 활성화.
+            로드 전 시작 시 startGPS 가 빈 routePath 를 캡처해 도착 백필이 꺼지는 경합 차단(2026-06-02). */}
         {!driving && (
           <button
-            style={{ ...S.primaryBtn, ...(dispatch ? {} : S.primaryBtnDisabled) }}
+            style={{ ...S.primaryBtn, ...(dispatch && routeDataReady ? {} : S.primaryBtnDisabled) }}
             onClick={handleStart}
-            disabled={!dispatch}
+            disabled={!dispatch || !routeDataReady}
           >
-            <Icon name="play" size={18} /> 운행 시작
+            <Icon name="play" size={18} /> {dispatch && !routeDataReady ? "노선 불러오는 중…" : "운행 시작"}
           </button>
         )}
 
