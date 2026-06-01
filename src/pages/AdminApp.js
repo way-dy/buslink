@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Map, MapMarker, Polyline, CustomOverlayMap } from "react-kakao-maps-sdk";
+import { Map, MapMarker, Polyline, CustomOverlayMap, Circle } from "react-kakao-maps-sdk";
 import { db, auth } from "../firebase";
 import { signOut } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
@@ -26,6 +26,12 @@ import { applyAppManifest } from "../lib/pwaManifest";
 
 const TABS = ["대시보드", "실시간 관제", "배차 관리", "배차 일정", "노선 관리", "기사 관리", "차량 관리", "시뮬레이터", "운행 이력", "탑승 통계", "협력사 관리", "공지 발송"];
 const TAB_ICONS = ["grid", "pin", "flag", "calendar", "route", "user", "bus", "play", "clock", "chart", "globe", "bell"];
+
+// SaaS Phase 1.2 (2026-05-28) — 슈퍼관리자 전용 추가 탭(인덱스 12).
+// 일반 admin 에는 노출하지 않으므로 TABS/TAB_ICONS 원본 배열은 절대 불변.
+const SUPER_TAB_LABEL = "회사 관리";
+const SUPER_TAB_ICON = "globe";
+const SUPER_TAB_INDEX = TABS.length;   // 12
 const functions = getFunctions(undefined, "us-central1");
 const getToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 
@@ -62,12 +68,41 @@ function timeSince(ts) {
 }
 
 // ═══════════════════════════════════════════════════════
-export default function AdminApp({ user, companyId }) {
+export default function AdminApp({ user, companyId, role }) {
   const [tab, setTab] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
-  const vehicles = useVehicles(companyId);
-  const drivers = useDrivers(companyId);
+
+  // SaaS Phase 1.2 (2026-05-28) — 슈퍼관리자 분기.
+  // selectedCompanyId: 일반 admin = companyId prop 고정. 슈퍼관리자만 회사 전환 가능.
+  // 모든 11탭이 이 state 를 prop 으로 받아 자동 re-subscribe.
+  const isSuperAdmin = role === "superadmin";
+  const [selectedCompanyId, setSelectedCompanyId] = useState(companyId);
+  // companyId prop 변경(예: 재로그인) 시 동기화 — 일반 admin 도 안전.
+  useEffect(() => { setSelectedCompanyId(companyId); }, [companyId]);
+
+  const activeCompanyId = selectedCompanyId || companyId;
+  const vehicles = useVehicles(activeCompanyId);
+  const drivers = useDrivers(activeCompanyId);
+
+  // 슈퍼관리자 전용: 회사 목록(헤더 드롭다운 + 회사 관리 탭 공유).
+  // listCompanies onCall 호출 — 일반 admin 은 호출 자체 안 함(권한 거부 + 비용 절약).
+  const [companies, setCompanies] = useState([]);
+  const [companiesLoading, setCompaniesLoading] = useState(false);
+  const reloadCompanies = useCallback(async () => {
+    if (!isSuperAdmin) return;
+    setCompaniesLoading(true);
+    try {
+      const callable = httpsCallable(functions, "listCompanies");
+      const res = await callable({});
+      setCompanies(res.data?.companies || []);
+    } catch (e) {
+      console.error("[회사목록] 로드 실패:", e.message);
+    } finally {
+      setCompaniesLoading(false);
+    }
+  }, [isSuperAdmin]);
+  useEffect(() => { reloadCompanies(); }, [reloadCompanies]);
 
   // 화면 크기 변경 감지
   useEffect(() => {
@@ -106,11 +141,36 @@ export default function AdminApp({ user, companyId }) {
                 {t}
               </div>
             ))}
+            {/* SaaS Phase 1.2 — 슈퍼관리자 전용 탭. 일반 admin 비표시. */}
+            {isSuperAdmin && (
+              <div data-nav-item onClick={() => setTab(SUPER_TAB_INDEX)}
+                style={{ ...S.navItem, ...(tab === SUPER_TAB_INDEX ? S.navActive : {}) }}>
+                {tab === SUPER_TAB_INDEX && <span style={S.navAccent} />}
+                <span style={S.navIcon}><Icon name={SUPER_TAB_ICON} size={17} stroke={tab === SUPER_TAB_INDEX ? 2 : 1.7} /></span>
+                {SUPER_TAB_LABEL}
+              </div>
+            )}
           </nav>
           <div style={{ flex: 1 }} />
           <div style={S.sideFoot}>
             <StatusDot tone="positive" size={7} />
-            <span>{companyId}</span>
+            {isSuperAdmin ? (
+              <select
+                value={activeCompanyId || ""}
+                onChange={(e) => setSelectedCompanyId(e.target.value)}
+                style={{ background:"transparent", border:"1px solid var(--color-line)", borderRadius:6, padding:"3px 6px", fontSize:11, color:"var(--color-label)" }}
+                title="회사 전환(슈퍼관리자 전용)"
+              >
+                {companies.length === 0 && <option value={companyId}>{companyId}</option>}
+                {companies.map(c => (
+                  <option key={c.id} value={c.id} disabled={!c.active}>
+                    {c.name || c.id}{c.active ? "" : " (비활성)"}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span>{companyId}</span>
+            )}
           </div>
           <button data-logout style={S.logoutBtn} onClick={() => signOut(auth)}>로그아웃</button>
         </div>
@@ -131,7 +191,23 @@ export default function AdminApp({ user, companyId }) {
               </span>
             </div>
             <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-              <span style={{ fontSize:11, color:"var(--color-label-alt)" }}>{companyId}</span>
+              {isSuperAdmin ? (
+                <select
+                  value={activeCompanyId || ""}
+                  onChange={(e) => setSelectedCompanyId(e.target.value)}
+                  style={{ background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:6, padding:"3px 5px", fontSize:11, color:"var(--color-label)", maxWidth:120 }}
+                  title="회사 전환"
+                >
+                  {companies.length === 0 && <option value={companyId}>{companyId}</option>}
+                  {companies.map(c => (
+                    <option key={c.id} value={c.id} disabled={!c.active}>
+                      {c.name || c.id}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span style={{ fontSize:11, color:"var(--color-label-alt)" }}>{companyId}</span>
+              )}
               <button style={{ ...S.logoutBtn, padding:"5px 10px", fontSize:11 }} onClick={() => signOut(auth)}>로그아웃</button>
             </div>
           </div>
@@ -150,22 +226,45 @@ export default function AdminApp({ user, companyId }) {
                   <Icon name={TAB_ICONS[i]} size={16} /> {t}
                 </div>
               ))}
+              {isSuperAdmin && (
+                <div onClick={() => { setTab(SUPER_TAB_INDEX); setMenuOpen(false); }}
+                  style={{ display:"flex", alignItems:"center", gap:10, padding:"13px 16px", cursor:"pointer", fontSize:13, borderBottom:"1px solid var(--color-line)",
+                    background: tab === SUPER_TAB_INDEX ? "var(--color-primary-soft)" : "transparent",
+                    color: tab === SUPER_TAB_INDEX ? "var(--color-primary-deep)" : "var(--color-label-mute)",
+                    fontWeight: tab === SUPER_TAB_INDEX ? 700 : 500 }}>
+                  <Icon name={SUPER_TAB_ICON} size={16} /> {SUPER_TAB_LABEL}
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {tab === 0 && <ErrorBoundary label="대시보드"><DashboardTab companyId={companyId} drivers={drivers} vehicles={vehicles} onNav={setTab} /></ErrorBoundary>}
-        {tab === 1 && <ErrorBoundary label="실시간 관제"><MapTab companyId={companyId} /></ErrorBoundary>}
-        {tab === 2 && <ErrorBoundary label="배차 관리"><DispatchTab companyId={companyId} vehicles={vehicles} drivers={drivers} /></ErrorBoundary>}
-        {tab === 3 && <ErrorBoundary label="배차 일정"><DispatchScheduleTab companyId={companyId} vehicles={vehicles} drivers={drivers} /></ErrorBoundary>}
-        {tab === 4 && <ErrorBoundary label="노선 관리"><RoutesTab companyId={companyId} /></ErrorBoundary>}
-        {tab === 5 && <ErrorBoundary label="기사 관리"><DriverTab companyId={companyId} vehicles={vehicles} /></ErrorBoundary>}
-        {tab === 6 && <ErrorBoundary label="차량 관리"><VehicleTab companyId={companyId} vehicles={vehicles} /></ErrorBoundary>}
-        {tab === 7 && <ErrorBoundary label="시뮬레이터"><SimulatorTab companyId={companyId} vehicles={vehicles} drivers={drivers} /></ErrorBoundary>}
-        {tab === 8 && <ErrorBoundary label="운행 이력"><HistoryTab companyId={companyId} vehicles={vehicles} /></ErrorBoundary>}
-        {tab === 9 && <ErrorBoundary label="탑승 통계"><BoardingStatsTab companyId={companyId} /></ErrorBoundary>}
-        {tab === 10 && <ErrorBoundary label="협력사 관리"><PartnerTab companyId={companyId} /></ErrorBoundary>}
-        {tab === 11 && <ErrorBoundary label="공지 발송"><NoticeTab companyId={companyId} /></ErrorBoundary>}
+        {tab === 0 && <ErrorBoundary label="대시보드"><DashboardTab companyId={activeCompanyId} drivers={drivers} vehicles={vehicles} onNav={setTab} /></ErrorBoundary>}
+        {tab === 1 && <ErrorBoundary label="실시간 관제"><MapTab companyId={activeCompanyId} /></ErrorBoundary>}
+        {tab === 2 && <ErrorBoundary label="배차 관리"><DispatchTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} /></ErrorBoundary>}
+        {tab === 3 && <ErrorBoundary label="배차 일정"><DispatchScheduleTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} /></ErrorBoundary>}
+        {tab === 4 && <ErrorBoundary label="노선 관리"><RoutesTab companyId={activeCompanyId} /></ErrorBoundary>}
+        {tab === 5 && <ErrorBoundary label="기사 관리"><DriverTab companyId={activeCompanyId} vehicles={vehicles} /></ErrorBoundary>}
+        {tab === 6 && <ErrorBoundary label="차량 관리"><VehicleTab companyId={activeCompanyId} vehicles={vehicles} /></ErrorBoundary>}
+        {tab === 7 && <ErrorBoundary label="시뮬레이터"><SimulatorTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} /></ErrorBoundary>}
+        {tab === 8 && <ErrorBoundary label="운행 이력"><HistoryTab companyId={activeCompanyId} vehicles={vehicles} /></ErrorBoundary>}
+        {tab === 9 && <ErrorBoundary label="탑승 통계"><BoardingStatsTab companyId={activeCompanyId} /></ErrorBoundary>}
+        {tab === 10 && <ErrorBoundary label="협력사 관리"><PartnerTab companyId={activeCompanyId} /></ErrorBoundary>}
+        {tab === 11 && <ErrorBoundary label="공지 발송"><NoticeTab companyId={activeCompanyId} /></ErrorBoundary>}
+        {/* SaaS Phase 1.2 — 슈퍼관리자 전용 회사 관리 탭(인덱스 12). 일반 admin 비표시. */}
+        {isSuperAdmin && tab === SUPER_TAB_INDEX && (
+          <ErrorBoundary label="회사 관리">
+            <SuperCompanyTab
+              companies={companies}
+              loading={companiesLoading}
+              selectedCompanyId={activeCompanyId}
+              onSelectCompany={setSelectedCompanyId}
+              onReload={reloadCompanies}
+              currentUserCompanyId={companyId}
+              currentUserUid={user?.uid}
+            />
+          </ErrorBoundary>
+        )}
       </div>
     </div>
   );
@@ -2602,6 +2701,12 @@ function HistoryTab({ companyId, vehicles }) {
   // 기존 차량 단일 선택 → 오늘 배차를 노선별로 그룹화한 리스트에서 선택 → 해당 배차의 GPS 이력 자동 로드.
   const [dispatches, setDispatches] = useState([]);
   const [selectedDispatchId, setSelectedDispatchId] = useState(null);
+  // 정류장 시각화 검증 도구(2026-05-29): 선택된 배차의 routeId 기반 stops를 로드해
+  // 카카오맵에 정류장 마커 + 100m 반경 원(도착 감지 임계)을 함께 표시. GPS 경로가
+  // 어느 정류장 반경에 진입했는지 시각적으로 검증해 정류장 도착 감지 실패 원인을 한눈에 파악.
+  const [stopsByRoute, setStopsByRoute] = useState({}); // routeId → stops[]
+  const [showStopMarkers, setShowStopMarkers] = useState(true);
+  const [showStopRadius, setShowStopRadius] = useState(true);
   const vehicle = vehicles.find(v=>v.id===vehicleId);
 
   useEffect(() => {
@@ -2619,6 +2724,33 @@ function HistoryTab({ companyId, vehicles }) {
     return onSnapshot(collection(db, "companies", companyId, "dispatches", date, "list"),
       snap => setDispatches(snap.docs.map(d => ({ id:d.id, ...d.data() }))));
   }, [companyId, date]);
+
+  // 정류장 시각화 — 카드 보조 표시(통과 N/M)에 모든 dispatch 의 routeId stops 필요.
+  // 운영 데이터상 한 날짜의 distinct routeId 수는 보통 ≤ 20 → onSnapshot 대신 getDocs 1회.
+  // BoardingStatsTab 의 stopsByRoute 패턴 그대로 차용(routes 변경 빈도 낮음).
+  useEffect(() => {
+    if (!companyId || dispatches.length === 0) return;
+    const routeIds = Array.from(new window.Set(dispatches.map(d => d.routeId).filter(Boolean)));
+    const toLoad = routeIds.filter(rid => !stopsByRoute[rid]);
+    if (toLoad.length === 0) return;
+    Promise.all(toLoad.map(async rid => {
+      try {
+        const snap = await getDocs(query(
+          collection(db, "companies", companyId, "routes", rid, "stops"),
+          orderBy("order", "asc")
+        ));
+        return [rid, snap.docs.map(d => ({ id: d.id, ...d.data() }))];
+      } catch (_) {
+        return [rid, []];
+      }
+    })).then(pairs => {
+      setStopsByRoute(prev => {
+        const next = { ...prev };
+        pairs.forEach(([rid, stops]) => { next[rid] = stops; });
+        return next;
+      });
+    });
+  }, [companyId, dispatches, stopsByRoute]);
 
   // vehicleId → partnerCode 추정: 그 차량에 등록된 schedule 의 routeId → routes.partnerCode
   // (schedule 없으면 routes 의 vehicleId 매칭은 routes 에 vehicleId 필드 없음 — schedule 기반으로 한정)
@@ -2730,16 +2862,19 @@ function HistoryTab({ companyId, vehicles }) {
     setLoading(false);
   };
 
-  // 배차 요약 정보 — 도착 완료 정류장 수 / 총 누적 지연(분).
+  // 배차 요약 정보 — 도착 완료 정류장 수 / 총 정류장 수 / 누적 지연(분).
+  // totalStops 는 stopsByRoute 캐시 로드 후에만 값 있음(미로드 시 null → "—" 표시).
   const dispatchSummary = (d) => {
     const sa = d.stopArrivals || {};
     const arrivedCount = Object.keys(sa).length;
+    const stops = d.routeId ? stopsByRoute[d.routeId] : null;
+    const totalStops = stops ? stops.length : null;
     // 마지막 도착 정류장의 delaySec를 누적지연 대표값으로 사용.
     let lastDelaySec = null;
     Object.values(sa).forEach(a => {
       if (a && typeof a.delaySec === "number") lastDelaySec = a.delaySec;
     });
-    return { arrivedCount, delayMin: lastDelaySec != null ? Math.round(lastDelaySec / 60) : null };
+    return { arrivedCount, totalStops, delayMin: lastDelaySec != null ? Math.round(lastDelaySec / 60) : null };
   };
 
   const handleLoad = async () => {
@@ -2823,9 +2958,10 @@ function HistoryTab({ companyId, vehicles }) {
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:4, fontSize:11 }}>
                         <span style={{ color:"var(--color-label-mute)" }}>
                           {d.vehicleNo || "차량 미지정"}
-                          {summ.arrivedCount > 0 && (
-                            <span style={{ marginLeft:8, color:"var(--color-positive)", fontWeight:700 }}>● {summ.arrivedCount}정류장</span>
-                          )}
+                          {/* 통과 카운트 — stops 캐시 로드 후에만 분수 표시, 미로드시 "—" */}
+                          <span style={{ marginLeft:8, color:"var(--color-positive)", fontWeight:700 }}>
+                            ✅ {summ.arrivedCount}/{summ.totalStops != null ? summ.totalStops : "—"} 통과
+                          </span>
                         </span>
                         {summ.delayMin != null && (
                           <span style={{ color: delayColor, fontWeight:700, fontSize:11 }}>
@@ -2875,12 +3011,115 @@ function HistoryTab({ companyId, vehicles }) {
         </div>
       </div>
       <div style={{flex:1,position:"relative"}}>
-        <Map center={center} style={{width:"100%",height:"100%"}} level={7}>
-          {path.length>=2&&<Polyline path={path} strokeWeight={4} strokeColor="#0066FF" strokeOpacity={0.8} strokeStyle="solid"/>}
-          {points.length>0&&<MapMarker position={{lat:points[0].lat,lng:points[0].lng}} title="출발"/>}
-          {points.length>1&&<MapMarker position={{lat:points[points.length-1].lat,lng:points[points.length-1].lng}} title="도착"/>}
-          {selected&&<MapMarker position={{lat:selected.lat,lng:selected.lng}}/>}
-        </Map>
+        {/* 선택된 배차의 stops + 통과 여부 — 카카오맵 정류장 시각화 검증 도구 */}
+        {(() => {
+          const selDispatch = selectedDispatchId ? dispatches.find(x => x.id === selectedDispatchId) : null;
+          const selStops = selDispatch?.routeId ? (stopsByRoute[selDispatch.routeId] || []) : [];
+          const arrivals = selDispatch?.stopArrivals || {};
+          // 2026-05-29 fix: Firestore stops 의 lat/lng 가 number 아닌 string·GeoPoint 일 수 있음.
+          // typeof === "number" 엄격 필터로 모두 제외돼 정류장 표시 0개 결함. coerce + GeoPoint 지원.
+          const toLatLng = (s) => {
+            let lat, lng;
+            if (s.lat != null && s.lng != null) {
+              lat = typeof s.lat === "number" ? s.lat : Number(s.lat);
+              lng = typeof s.lng === "number" ? s.lng : Number(s.lng);
+            } else if (s.latitude != null && s.longitude != null) {
+              lat = Number(s.latitude); lng = Number(s.longitude);
+            } else if (s.location && typeof s.location.latitude === "number") {
+              lat = s.location.latitude; lng = s.location.longitude;
+            }
+            return { lat, lng };
+          };
+          const validStops = selStops
+            .map(s => ({ ...s, ...toLatLng(s) }))
+            .filter(s => isFinite(s.lat) && isFinite(s.lng));
+          return (
+            <Map center={center} style={{width:"100%",height:"100%"}} level={7}>
+              {path.length>=2&&<Polyline path={path} strokeWeight={4} strokeColor="#0066FF" strokeOpacity={0.8} strokeStyle="solid"/>}
+              {points.length>0&&<MapMarker position={{lat:points[0].lat,lng:points[0].lng}} title="출발"/>}
+              {points.length>1&&<MapMarker position={{lat:points[points.length-1].lat,lng:points[points.length-1].lng}} title="도착"/>}
+              {selected&&<MapMarker position={{lat:selected.lat,lng:selected.lng}}/>}
+              {/* 정류장 100m 반경 원 — 통과 정류장은 파랑 강조, 미통과는 회색 */}
+              {showStopRadius && validStops.map(stop => {
+                const passed = !!arrivals[stop.id];
+                return (
+                  <Circle
+                    key={`circle-${stop.id}`}
+                    center={{lat:stop.lat,lng:stop.lng}}
+                    radius={100}
+                    strokeWeight={1}
+                    strokeColor={passed ? "#0066FF" : "#666666"}
+                    strokeOpacity={0.6}
+                    strokeStyle="solid"
+                    fillColor={passed ? "#0066FF" : "#aaaaaa"}
+                    fillOpacity={passed ? 0.18 : 0.12}
+                  />
+                );
+              })}
+              {/* 정류장 위치 마커 + 이름 라벨(통과=녹/미통과=회색 tone) */}
+              {showStopMarkers && validStops.map(stop => {
+                const passed = !!arrivals[stop.id];
+                return (
+                  <CustomOverlayMap key={`label-${stop.id}`} position={{lat:stop.lat,lng:stop.lng}} yAnchor={1.4}>
+                    <div style={{
+                      padding:"3px 8px",
+                      background: passed ? "var(--color-positive)" : "var(--color-bg)",
+                      color: passed ? "#fff" : "var(--color-label-mute)",
+                      border: `1px solid ${passed ? "var(--color-positive)" : "var(--color-line)"}`,
+                      borderRadius:10,
+                      fontSize:11,
+                      fontWeight:700,
+                      whiteSpace:"nowrap",
+                      maxWidth:140,
+                      overflow:"hidden",
+                      textOverflow:"ellipsis",
+                      boxShadow:"var(--shadow-soft)",
+                      pointerEvents:"none",
+                    }}>
+                      {stop.name || "정류장"}
+                    </div>
+                  </CustomOverlayMap>
+                );
+              })}
+            </Map>
+          );
+        })()}
+        {/* 토글 컨트롤 바 — 좌측 상단 */}
+        {selectedDispatchId && (
+          <div style={{
+            position:"absolute", top:12, left:12, zIndex:5,
+            background:"rgba(255,255,255,0.95)", backdropFilter:"blur(8px)", WebkitBackdropFilter:"blur(8px)",
+            border:"1px solid var(--color-line)", borderRadius:10, padding:"8px 12px",
+            boxShadow:"var(--shadow-soft)", display:"flex", gap:14, fontSize:12,
+          }}>
+            <label style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",color:"var(--color-label)"}}>
+              <input type="checkbox" checked={showStopRadius} onChange={e=>setShowStopRadius(e.target.checked)} />
+              <span>🎯 정류장 반경 100m</span>
+            </label>
+            <label style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",color:"var(--color-label)"}}>
+              <input type="checkbox" checked={showStopMarkers} onChange={e=>setShowStopMarkers(e.target.checked)} />
+              <span>📍 정류장 마커</span>
+            </label>
+          </div>
+        )}
+        {/* 범례 — 좌측 하단 */}
+        {selectedDispatchId && (showStopRadius || showStopMarkers) && (
+          <div style={{
+            position:"absolute", left:12, bottom:12, zIndex:5,
+            background:"rgba(255,255,255,0.92)", backdropFilter:"blur(8px)", WebkitBackdropFilter:"blur(8px)",
+            border:"1px solid var(--color-line)", borderRadius:8, padding:"7px 10px",
+            boxShadow:"var(--shadow-soft)", fontSize:11, color:"var(--color-label-mute)",
+            display:"flex", gap:10, alignItems:"center",
+          }}>
+            <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
+              <span style={{width:9,height:9,borderRadius:"50%",background:"var(--color-positive)"}}/>통과
+            </span>
+            <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
+              <span style={{width:9,height:9,borderRadius:"50%",background:"#aaaaaa"}}/>미통과
+            </span>
+            <span style={{color:"var(--color-label-alt)"}}>· 반경 100m</span>
+          </div>
+        )}
         {selected&&(
           <div style={S.infoBox}>
             <div style={S.infoTitle}>📌 포인트 #{selected.idx}</div>
@@ -3934,3 +4173,1194 @@ const S = {
   label:{fontSize:12,fontWeight:600,color:"var(--color-label-mute)",marginTop:4},
   input:{background:"var(--color-bg)",border:"1px solid var(--color-line)",borderRadius:8,padding:"10px 14px",color:"var(--color-label)",fontSize:14,outline:"none",fontFamily:"inherit",width:"100%",boxSizing:"border-box"},
 };
+
+// ═══════════════════════════════════════════════════════
+// SaaS Phase 1.2 (2026-05-28) — 슈퍼관리자 회사 관리 탭
+// listCompanies / createCompany / toggleCompanyActive onCall 사용.
+// 회사 카드 + 신규 회사 등록 모달 + 활성 토글 + 전환 버튼.
+// ═══════════════════════════════════════════════════════
+// ETA 자동 진단 조회 카드(슈퍼관리자 전용, 2026-05-29)
+// CF fetchEtaDiagnostic 호출 → JSON 텍스트 노출 → 복사로 채팅 붙여넣어 부모 분석.
+// 부모(개발자)가 prod Firestore 직접 접근(gcloud/ADC) 없이 진단 데이터를 회수하는 임시 채널.
+function EtaDiagnosticCard() {
+  // 기본 날짜 = 오늘(KST). en-CA = YYYY-MM-DD.
+  const todayKst = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
+  const [date, setDate] = useState(todayKst);
+  const [runIds, setRunIds] = useState([]);
+  const [selectedRunId, setSelectedRunId] = useState("");
+  const [pointsJson, setPointsJson] = useState("");
+  const [loadingRuns, setLoadingRuns] = useState(false);
+  const [loadingPoints, setLoadingPoints] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
+  const [copyMsg, setCopyMsg] = useState("");
+
+  const fetchRuns = async () => {
+    setErrMsg(""); setCopyMsg("");
+    setLoadingRuns(true);
+    setRunIds([]); setSelectedRunId(""); setPointsJson("");
+    try {
+      const callable = httpsCallable(functions, "fetchEtaDiagnostic");
+      const res = await callable({ date });
+      const ids = Array.isArray(res.data?.runIds) ? res.data.runIds : [];
+      setRunIds(ids);
+      if (ids.length === 0) {
+        setErrMsg(`${date} 에 진단 데이터가 없습니다.`);
+      }
+    } catch (err) {
+      setErrMsg(err.message || "조회 실패");
+    } finally {
+      setLoadingRuns(false);
+    }
+  };
+
+  const fetchPoints = async () => {
+    setErrMsg(""); setCopyMsg(""); setPointsJson("");
+    if (!selectedRunId) { setErrMsg("run을 선택하세요"); return; }
+    setLoadingPoints(true);
+    try {
+      const callable = httpsCallable(functions, "fetchEtaDiagnostic");
+      const res = await callable({ date, runId: selectedRunId });
+      // 전체 응답 JSON(date/runId/count/points) 을 그대로 textarea 에 노출.
+      setPointsJson(JSON.stringify(res.data, null, 2));
+    } catch (err) {
+      setErrMsg(err.message || "조회 실패");
+    } finally {
+      setLoadingPoints(false);
+    }
+  };
+
+  const copyAll = async () => {
+    setCopyMsg("");
+    if (!pointsJson) { setErrMsg("복사할 내용이 없습니다"); return; }
+    try {
+      await navigator.clipboard.writeText(pointsJson);
+      setCopyMsg("복사 완료");
+      setTimeout(() => setCopyMsg(""), 2000);
+    } catch (e) {
+      setErrMsg("복사 실패: " + (e?.message || e));
+    }
+  };
+
+  return (
+    <div style={{
+      background: "var(--color-bg)",
+      border: "1px solid var(--color-line)",
+      borderRadius: 12,
+      padding: "14px 16px",
+      margin: "16px 20px 0 20px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 10,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-label)" }}>🔍 ETA 진단 조회</div>
+          <div style={{ fontSize: 11, color: "var(--color-label-mute)", marginTop: 2 }}>
+            etaDiagnostics 컬렉션에서 진단 데이터를 회수해 텍스트로 노출 → 복사해 개발자에게 전달
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+        <label style={{ fontSize: 12, color: "var(--color-label-mute)", fontWeight: 600 }}>날짜</label>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+          style={{ ...S.input, width: 160, padding: "8px 12px" }} />
+        <button onClick={fetchRuns} disabled={loadingRuns}
+          style={{ ...S.addBtn, opacity: loadingRuns ? 0.6 : 1 }}>
+          {loadingRuns ? "조회 중..." : "Runs 목록 조회"}
+        </button>
+      </div>
+
+      {runIds.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+          <label style={{ fontSize: 12, color: "var(--color-label-mute)", fontWeight: 600 }}>Run</label>
+          <select value={selectedRunId} onChange={(e) => setSelectedRunId(e.target.value)}
+            style={{ ...S.input, minWidth: 280, padding: "8px 12px" }}>
+            <option value="">— 선택 ({runIds.length}개) —</option>
+            {runIds.map(id => <option key={id} value={id}>{id}</option>)}
+          </select>
+          <button onClick={fetchPoints} disabled={loadingPoints || !selectedRunId}
+            style={{ ...S.addBtn, opacity: (loadingPoints || !selectedRunId) ? 0.6 : 1 }}>
+            {loadingPoints ? "조회 중..." : "Points 조회"}
+          </button>
+        </div>
+      )}
+
+      {errMsg && (
+        <div style={{ background: "#FCE5E5", border: "1px solid #F6C9C9", color: "var(--color-destructive)", padding: "8px 12px", borderRadius: 8, fontSize: 12 }}>
+          {errMsg}
+        </div>
+      )}
+
+      {pointsJson && (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button onClick={copyAll} style={{ ...S.addBtn, background: "var(--color-positive)" }}>
+              📋 전체 복사
+            </button>
+            {copyMsg && <span style={{ fontSize: 12, color: "var(--color-positive)", fontWeight: 600 }}>{copyMsg}</span>}
+          </div>
+          <textarea readOnly value={pointsJson}
+            style={{
+              width: "100%",
+              height: 400,
+              boxSizing: "border-box",
+              padding: 10,
+              border: "1px solid var(--color-line)",
+              borderRadius: 8,
+              fontFamily: "Consolas, 'Courier New', monospace",
+              fontSize: 11,
+              lineHeight: 1.4,
+              color: "var(--color-label)",
+              background: "var(--color-bg-soft)",
+              whiteSpace: "pre",
+              overflow: "auto",
+              outline: "none",
+              resize: "vertical",
+            }} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function SuperCompanyTab({ companies, loading, selectedCompanyId, onSelectCompany, onReload, currentUserCompanyId, currentUserUid }) {
+  const [modalOpen, setModalOpen] = useState(false);
+  const [form, setForm] = useState({
+    companyId: "", companyName: "",
+    adminEmpNo: "", adminEmail: "", adminPassword: "", adminName: "",
+  });
+  const [busy, setBusy] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
+
+  // 운영 메뉴 모달(편집 / 비밀번호 초기화 / 영구 삭제) — 단일 state 로 분기.
+  // 각 모달의 입력값은 모달 내부 컴포넌트 state 가 보유. 여기서는 어떤 회사 대상인지만 추적.
+  // opsModal: { kind: "edit"|"reset"|"delete", company: {id,name,...} } | null
+  const [opsModal, setOpsModal] = useState(null);
+
+  const openOps = (kind, company) => setOpsModal({ kind, company });
+  const closeOps = () => setOpsModal(null);
+
+  const handleOpsDone = async () => {
+    closeOps();
+    await onReload();
+  };
+
+  // ── Phase A (2026-05-29) 관리자 관리 — 카드별 펼침 + lazy 로드 + 캐시 ──
+  // expandedCompanyId: 펼친 회사 1건만(다중 펼침 회피 — 스크롤 컨텍스트 단순화).
+  // adminsByCompany: { [companyId]: { admins: [...], partnerCodes: [...], loading, error } }
+  // partnerCodes 도 같이 lazy 로드 — 권한 변경/추가 모달의 다중 체크박스용.
+  const [expandedCompanyId, setExpandedCompanyId] = useState(null);
+  const [adminsByCompany, setAdminsByCompany] = useState({});
+  // adminModal: { kind: "add"|"editPerms"|"deleteAdmin", company, admin? } | null
+  const [adminModal, setAdminModal] = useState(null);
+
+  const loadAdminsAndPartnerCodes = useCallback(async (cid) => {
+    setAdminsByCompany(prev => ({ ...prev, [cid]: { ...(prev[cid] || {}), loading: true, error: "" } }));
+    try {
+      const callAdmins = httpsCallable(functions, "listCompanyAdmins");
+      // partnerCodes 는 클라 권한으로 직접 read 가능(rules read 공개) — onCall 신설 회피.
+      const [adminsRes, codesSnap] = await Promise.all([
+        callAdmins({ companyId: cid }),
+        getDocs(query(collection(db, "partnerCodes"), where("companyId", "==", cid))),
+      ]);
+      const partnerCodes = codesSnap.docs.map(d => {
+        const v = d.data() || {};
+        return {
+          code: d.id,
+          partnerName: v.partnerName || "",
+          active: v.active !== false,
+        };
+      });
+      // 이름순 정렬.
+      partnerCodes.sort((a, b) => (a.partnerName || a.code).localeCompare(b.partnerName || b.code));
+      setAdminsByCompany(prev => ({
+        ...prev,
+        [cid]: { admins: adminsRes.data?.admins || [], partnerCodes, loading: false, error: "" },
+      }));
+    } catch (e) {
+      setAdminsByCompany(prev => ({
+        ...prev,
+        [cid]: { ...(prev[cid] || {}), loading: false, error: e.message || "관리자 목록 로드 실패" },
+      }));
+    }
+  }, []);
+
+  const toggleExpand = async (cid) => {
+    if (expandedCompanyId === cid) {
+      setExpandedCompanyId(null);
+      return;
+    }
+    setExpandedCompanyId(cid);
+    // 캐시 없으면 lazy 로드. 있으면 즉시 표시(다시 펼침 시 재요청 회피).
+    if (!adminsByCompany[cid]) {
+      await loadAdminsAndPartnerCodes(cid);
+    }
+  };
+
+  const reloadAdminsFor = async (cid) => {
+    // 권한 변경/추가/삭제 후 호출 — 강제 재로드.
+    await loadAdminsAndPartnerCodes(cid);
+  };
+
+  const openAdminModal = (kind, company, admin) => setAdminModal({ kind, company, admin });
+  const closeAdminModal = () => setAdminModal(null);
+
+  const handleAdminModalDone = async () => {
+    const cid = adminModal?.company?.id;
+    closeAdminModal();
+    if (cid) await reloadAdminsFor(cid);
+  };
+
+  const reset = () => {
+    setForm({ companyId: "", companyName: "", adminEmpNo: "", adminEmail: "", adminPassword: "", adminName: "" });
+    setErrMsg("");
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErrMsg("");
+    if (!/^[a-z0-9]{3,20}$/.test(form.companyId)) {
+      setErrMsg("companyId는 소문자·숫자 3~20자입니다 (예: sws001)");
+      return;
+    }
+    if (!form.companyName || !form.adminEmpNo || !form.adminEmail || !form.adminPassword || !form.adminName) {
+      setErrMsg("모든 필드를 입력하세요");
+      return;
+    }
+    if (form.adminPassword.length < 6) {
+      setErrMsg("비밀번호는 최소 6자리여야 합니다");
+      return;
+    }
+    setBusy(true);
+    try {
+      const callable = httpsCallable(functions, "createCompany");
+      const res = await callable(form);
+      alert(`회사 생성 완료\n• ${form.companyName} (${form.companyId})\n• 관리자 UID: ${res.data?.uid || "?"}\n\n관리자는 ${form.adminEmail} / 비밀번호로 / 경로에서 로그인할 수 있습니다.`);
+      setModalOpen(false);
+      reset();
+      await onReload();
+    } catch (err) {
+      setErrMsg(err.message || "회사 생성 실패");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggle = async (cid, active) => {
+    if (!window.confirm(`${cid} 회사를 ${active ? "비활성" : "활성"} 처리하시겠어요?`)) return;
+    try {
+      const callable = httpsCallable(functions, "toggleCompanyActive");
+      await callable({ companyId: cid, active: !active });
+      await onReload();
+    } catch (err) {
+      alert(`토글 실패: ${err.message}`);
+    }
+  };
+
+  return (
+    <div style={S.panel}>
+      <div style={S.panelHeader}>
+        <div>
+          <span style={{ fontSize:16, fontWeight:700, color:"var(--color-label)" }}>🌐 회사 관리 (슈퍼관리자)</span>
+          <div style={{ fontSize:12, color:"var(--color-label-mute)", marginTop:2 }}>
+            SaaS 멀티테넌트 — 신규 회사 온보딩 + 활성/비활성 토글
+          </div>
+        </div>
+        <button style={S.addBtn} onClick={() => { reset(); setModalOpen(true); }}>+ 신규 회사 등록</button>
+      </div>
+
+      {/* ETA 자동 진단 조회(임시 채널) — 슈퍼관리자만 도달, 추가 가드 불필요. */}
+      <EtaDiagnosticCard />
+
+      <div style={{ padding:"16px 20px", overflowY:"auto" }}>
+        {loading && <div style={{ padding:"30px 0", textAlign:"center", color:"var(--color-label-mute)" }}>회사 목록 로딩 중...</div>}
+        {!loading && companies.length === 0 && (
+          <div style={{ padding:"30px 0", textAlign:"center", color:"var(--color-label-mute)" }}>
+            등록된 회사가 없습니다. 신규 회사를 등록하세요.
+          </div>
+        )}
+
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(260px, 1fr))", gap:12 }}>
+          {companies.map(c => {
+            const isSelected = c.id === selectedCompanyId;
+            return (
+              <div key={c.id} style={{
+                background: isSelected ? "var(--color-primary-soft)" : "var(--color-bg)",
+                border: `1px solid ${isSelected ? "var(--color-primary)" : "var(--color-line)"}`,
+                borderRadius: 12, padding:"14px 16px", display:"flex", flexDirection:"column", gap:8,
+              }}>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                  <div>
+                    <div style={{ fontSize:15, fontWeight:700, color:"var(--color-label)" }}>{c.name || c.id}</div>
+                    <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:2 }}>{c.id}</div>
+                  </div>
+                  <span style={{
+                    fontSize:11, fontWeight:700, padding:"3px 8px", borderRadius:20,
+                    background: c.active ? "#E6F7EB" : "#FCE5E5",
+                    color: c.active ? "#007A29" : "var(--color-destructive)",
+                  }}>
+                    {c.active ? "활성" : "비활성"}
+                  </span>
+                </div>
+                {c.createdAt && (
+                  <div style={{ fontSize:11, color:"var(--color-label-alt)" }}>
+                    생성: {new Date(c.createdAt).toLocaleString("ko-KR")}
+                  </div>
+                )}
+                <div style={{ display:"flex", gap:6, marginTop:4 }}>
+                  <button
+                    disabled={!c.active || isSelected}
+                    onClick={() => onSelectCompany(c.id)}
+                    style={{
+                      flex:1, padding:"6px 0", borderRadius:6, fontSize:12, fontWeight:600, fontFamily:"inherit",
+                      background: isSelected ? "var(--color-bg-alt)" : "var(--color-primary)",
+                      color: isSelected ? "var(--color-label-mute)" : "#fff",
+                      border:"none", cursor: (!c.active || isSelected) ? "default" : "pointer",
+                      opacity: (!c.active || isSelected) ? 0.6 : 1,
+                    }}
+                  >
+                    {isSelected ? "현재 회사" : "전환"}
+                  </button>
+                  <button
+                    onClick={() => toggle(c.id, c.active)}
+                    style={{ ...S.editBtn, marginRight:0 }}
+                  >
+                    {c.active ? "비활성화" : "활성화"}
+                  </button>
+                </div>
+                {/* 운영 메뉴(편집·비번 초기화·영구 삭제) — 자기 회사는 영구 삭제만 비활성 */}
+                <div style={{ display:"flex", gap:6, marginTop:2 }}>
+                  <button
+                    onClick={() => openOps("edit", c)}
+                    style={{ ...S.editBtn, marginRight:0, flex:1, fontSize:11 }}
+                    title="회사명·관리자 정보 편집"
+                  >
+                    ✏️ 편집
+                  </button>
+                  <button
+                    onClick={() => openOps("reset", c)}
+                    style={{ ...S.editBtn, marginRight:0, flex:1, fontSize:11 }}
+                    title="관리자 비밀번호 초기화"
+                  >
+                    🔑 비번
+                  </button>
+                  <button
+                    onClick={() => openOps("delete", c)}
+                    disabled={c.id === currentUserCompanyId}
+                    title={c.id === currentUserCompanyId ? "자기 소속 회사는 삭제할 수 없습니다" : "회사·모든 데이터 영구 삭제"}
+                    style={{
+                      ...S.editBtn, marginRight:0, flex:1, fontSize:11,
+                      color: c.id === currentUserCompanyId ? "var(--color-label-mute)" : "var(--color-destructive)",
+                      borderColor: c.id === currentUserCompanyId ? "var(--color-line)" : "var(--color-destructive)",
+                      cursor: c.id === currentUserCompanyId ? "not-allowed" : "pointer",
+                      opacity: c.id === currentUserCompanyId ? 0.5 : 1,
+                    }}
+                  >
+                    🗑 삭제
+                  </button>
+                </div>
+                {/* Phase A (2026-05-29) 관리자 목록 펼침 토글 — 같은 회사 안 여러 담당자 admin 관리. */}
+                <button
+                  onClick={() => toggleExpand(c.id)}
+                  style={{
+                    ...S.editBtn, marginRight:0, marginTop:2, fontSize:11, fontWeight:600,
+                    background:"var(--color-bg-soft)",
+                  }}
+                  title="이 회사의 담당자 관리자 목록"
+                >
+                  {expandedCompanyId === c.id ? "▴" : "▾"} 👥 관리자 목록
+                </button>
+                {expandedCompanyId === c.id && (
+                  <AdminListSection
+                    company={c}
+                    cache={adminsByCompany[c.id]}
+                    currentUserUid={currentUserUid}
+                    onAdd={() => openAdminModal("add", c)}
+                    onEditPerms={(adminRow) => openAdminModal("editPerms", c, adminRow)}
+                    onDeleteAdmin={(adminRow) => openAdminModal("deleteAdmin", c, adminRow)}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {modalOpen && (
+        <div style={S.overlay} onClick={(e) => { if (e.target === e.currentTarget && !busy) setModalOpen(false); }}>
+          <form style={S.modal} onSubmit={submit}>
+            <div style={S.modalTitle}>신규 회사 등록</div>
+            <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:6 }}>
+              회사 도큐먼트 + 관리자 Auth 계정 + users 도큐먼트 3건이 동시 생성됩니다.
+            </div>
+
+            <label style={S.label}>회사 ID (소문자·숫자 3~20자)</label>
+            <input style={S.input} placeholder="예: sws001" value={form.companyId}
+              onChange={(e) => setForm({ ...form, companyId: e.target.value.toLowerCase().trim() })} />
+
+            <label style={S.label}>회사 이름</label>
+            <input style={S.input} placeholder="예: 스위스관광" value={form.companyName}
+              onChange={(e) => setForm({ ...form, companyName: e.target.value })} />
+
+            <div style={{ height:1, background:"var(--color-line-soft)", margin:"8px 0" }} />
+            <div style={{ fontSize:12, fontWeight:700, color:"var(--color-label)" }}>관리자 계정</div>
+
+            <label style={S.label}>관리자 이름</label>
+            <input style={S.input} placeholder="홍길동" value={form.adminName}
+              onChange={(e) => setForm({ ...form, adminName: e.target.value })} />
+
+            <label style={S.label}>관리자 사번</label>
+            <input style={S.input} placeholder="예: admin01" value={form.adminEmpNo}
+              onChange={(e) => setForm({ ...form, adminEmpNo: e.target.value.trim() })} />
+
+            <label style={S.label}>관리자 이메일 (로그인 ID)</label>
+            <input style={S.input} type="email" placeholder="admin@sws.com" value={form.adminEmail}
+              onChange={(e) => setForm({ ...form, adminEmail: e.target.value.trim() })} />
+
+            <label style={S.label}>관리자 비밀번호 (6자 이상)</label>
+            <input style={S.input} type="password" placeholder="••••••••" value={form.adminPassword}
+              onChange={(e) => setForm({ ...form, adminPassword: e.target.value })} />
+
+            {errMsg && (
+              <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6 }}>
+                {errMsg}
+              </div>
+            )}
+
+            <div style={{ display:"flex", gap:8, marginTop:12 }}>
+              <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:13 }}
+                disabled={busy} onClick={() => setModalOpen(false)}>취소</button>
+              <button type="submit" style={{ ...S.addBtn, flex:2, padding:"9px 0" }} disabled={busy}>
+                {busy ? "생성 중..." : "회사 생성"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* 운영 메뉴 모달 — 편집/비번초기화/영구삭제 단일 dispatcher */}
+      {opsModal && opsModal.kind === "edit" && (
+        <EditCompanyModal company={opsModal.company} onClose={closeOps} onDone={handleOpsDone} />
+      )}
+      {opsModal && opsModal.kind === "reset" && (
+        <ResetPasswordModal company={opsModal.company} onClose={closeOps} onDone={handleOpsDone} />
+      )}
+      {opsModal && opsModal.kind === "delete" && (
+        <DeleteCompanyModal
+          company={opsModal.company}
+          isSelf={opsModal.company.id === currentUserCompanyId}
+          onClose={closeOps}
+          onDone={handleOpsDone}
+        />
+      )}
+
+      {/* Phase A (2026-05-29) 관리자 관리 모달 — 추가/권한변경/삭제 단일 dispatcher */}
+      {adminModal && adminModal.kind === "add" && (
+        <AddAdminModal
+          company={adminModal.company}
+          partnerCodes={(adminsByCompany[adminModal.company.id] || {}).partnerCodes || []}
+          onClose={closeAdminModal}
+          onDone={handleAdminModalDone}
+        />
+      )}
+      {adminModal && adminModal.kind === "editPerms" && (
+        <EditAdminPermissionsModal
+          company={adminModal.company}
+          admin={adminModal.admin}
+          partnerCodes={(adminsByCompany[adminModal.company.id] || {}).partnerCodes || []}
+          onClose={closeAdminModal}
+          onDone={handleAdminModalDone}
+        />
+      )}
+      {adminModal && adminModal.kind === "deleteAdmin" && (
+        <DeleteAdminModal
+          company={adminModal.company}
+          admin={adminModal.admin}
+          onClose={closeAdminModal}
+          onDone={handleAdminModalDone}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// Phase A (2026-05-29) — 한 회사 카드 안에 펼쳐지는 관리자 목록.
+// 로딩/에러/빈 상태 + 행별 권한 배지 + 권한변경/삭제 버튼 + "+ 관리자 추가".
+// 자기 자신 행은 권한변경/삭제 비활성(이중 안전망, CF 도 거부).
+// ─────────────────────────────────────────────────────────
+function AdminListSection({ company, cache, currentUserUid, onAdd, onEditPerms, onDeleteAdmin }) {
+  const state = cache || { loading: true };
+  const admins = state.admins || [];
+  return (
+    <div style={{
+      marginTop:6, padding:"10px 12px",
+      background:"var(--color-bg-soft)",
+      border:"1px solid var(--color-line-soft)",
+      borderRadius:8,
+      display:"flex", flexDirection:"column", gap:8,
+    }}>
+      {state.loading && (
+        <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center", padding:"6px 0" }}>
+          관리자 목록 로딩 중...
+        </div>
+      )}
+      {state.error && (
+        <div style={{
+          background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)",
+          padding:"6px 10px", borderRadius:6, fontSize:11,
+        }}>
+          {state.error}
+        </div>
+      )}
+      {!state.loading && !state.error && admins.length === 0 && (
+        <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center", padding:"6px 0" }}>
+          등록된 관리자가 없습니다.
+        </div>
+      )}
+      {!state.loading && admins.map(a => {
+        const isSelf = a.uid === currentUserUid;
+        const isAll = Array.isArray(a.allowedPartnerCodes) && a.allowedPartnerCodes[0] === "*";
+        const badge = isAll
+          ? { label: "전체", bg: "#E6F7EB", color: "#007A29" }
+          : { label: `협력사 ${a.allowedPartnerCodes.length}개`, bg: "var(--color-primary-soft)", color: "var(--color-primary-deep)" };
+        return (
+          <div key={a.uid} style={{
+            display:"flex", alignItems:"center", justifyContent:"space-between", gap:8,
+            padding:"6px 8px", background:"var(--color-bg)",
+            border:"1px solid var(--color-line)", borderRadius:6,
+          }}>
+            <div style={{ minWidth:0, flex:1 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:"var(--color-label)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                {a.name || "(이름 없음)"}{isSelf && <span style={{ marginLeft:6, fontSize:10, color:"var(--color-primary)" }}>(나)</span>}
+              </div>
+              <div style={{ fontSize:10, color:"var(--color-label-mute)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                {a.email || "(이메일 없음)"} · {a.empNo || "(사번 없음)"}
+              </div>
+            </div>
+            <span style={{
+              fontSize:10, fontWeight:700, padding:"2px 7px", borderRadius:20,
+              background: badge.bg, color: badge.color, flexShrink:0,
+            }}>{badge.label}</span>
+            <button
+              onClick={() => onEditPerms(a)}
+              disabled={isSelf}
+              title={isSelf ? "자기 자신의 권한은 변경할 수 없습니다" : "협력사 권한 변경"}
+              style={{
+                ...S.editBtn, marginRight:0, fontSize:10, padding:"3px 7px",
+                opacity: isSelf ? 0.4 : 1, cursor: isSelf ? "not-allowed" : "pointer",
+              }}
+            >🛡 권한</button>
+            <button
+              onClick={() => onDeleteAdmin(a)}
+              disabled={isSelf}
+              title={isSelf ? "자기 자신은 삭제할 수 없습니다" : "관리자 삭제"}
+              style={{
+                ...S.editBtn, marginRight:0, fontSize:10, padding:"3px 7px",
+                color: isSelf ? "var(--color-label-mute)" : "var(--color-destructive)",
+                borderColor: isSelf ? "var(--color-line)" : "var(--color-destructive)",
+                opacity: isSelf ? 0.4 : 1, cursor: isSelf ? "not-allowed" : "pointer",
+              }}
+            >🗑</button>
+          </div>
+        );
+      })}
+      {!state.loading && !state.error && (
+        <button
+          onClick={onAdd}
+          style={{
+            ...S.editBtn, marginRight:0, marginTop:2, fontSize:11, fontWeight:700,
+            background:"var(--color-primary)", color:"#fff",
+            border:"1px solid var(--color-primary)",
+          }}
+        >+ 관리자 추가</button>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// Phase A (2026-05-29) — 협력사 권한 체크박스 그룹(공용 UI 헬퍼).
+// "전체 권한(*)" 별도 체크박스 + 그 외 협력사 다중 체크박스(전체 권한 ON 시 disabled).
+// value: string[] ("*" 포함이면 ["*"], 그 외엔 코드들).
+// ─────────────────────────────────────────────────────────
+function PartnerPermissionPicker({ partnerCodes, value, onChange }) {
+  const isAll = value.length > 0 && value[0] === "*";
+  const codeSet = new Set(isAll ? [] : value);
+
+  const toggleAll = () => {
+    if (isAll) onChange([]);   // 전체 해제 → 빈 배열(개별 선택 시작)
+    else onChange(["*"]);
+  };
+  const toggleCode = (code) => {
+    if (isAll) return;
+    const next = new Set(codeSet);
+    if (next.has(code)) next.delete(code);
+    else next.add(code);
+    onChange(Array.from(next));
+  };
+
+  return (
+    <div style={{
+      border:"1px solid var(--color-line)", borderRadius:8,
+      background:"var(--color-bg-soft)",
+      padding:"10px 12px", display:"flex", flexDirection:"column", gap:6,
+      maxHeight:200, overflowY:"auto",
+    }}>
+      <label style={{ display:"flex", alignItems:"center", gap:8, fontSize:12, fontWeight:700, color:"var(--color-label)", cursor:"pointer" }}>
+        <input type="checkbox" checked={isAll} onChange={toggleAll} />
+        ⭐ 전체 권한 (*) — 본부/회사 전체 협력사 관리
+      </label>
+      <div style={{ height:1, background:"var(--color-line-soft)" }} />
+      {partnerCodes.length === 0 && (
+        <div style={{ fontSize:11, color:"var(--color-label-mute)", padding:"4px 0", textAlign:"center" }}>
+          이 회사에 등록된 협력사가 없습니다. 발급 후 권한을 부여하세요.
+        </div>
+      )}
+      {partnerCodes.map(p => (
+        <label key={p.code} style={{
+          display:"flex", alignItems:"center", gap:8, fontSize:12,
+          color: isAll ? "var(--color-label-mute)" : "var(--color-label)",
+          cursor: isAll ? "not-allowed" : "pointer",
+          opacity: isAll ? 0.5 : 1,
+        }}>
+          <input
+            type="checkbox"
+            checked={codeSet.has(p.code)}
+            disabled={isAll}
+            onChange={() => toggleCode(p.code)}
+          />
+          <span style={{ flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+            {p.partnerName || "(이름 없음)"}{!p.active && <span style={{ color:"var(--color-label-mute)", marginLeft:4 }}>· 비활성</span>}
+          </span>
+          <span style={{ fontSize:10, color:"var(--color-label-mute)", fontFamily:"monospace", flexShrink:0 }}>
+            {p.code}
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// Phase A (2026-05-29) — 신규 관리자 추가 모달.
+// empNo / email / name / password(2회) + allowedPartnerCodes(PartnerPermissionPicker).
+// ─────────────────────────────────────────────────────────
+function AddAdminModal({ company, partnerCodes, onClose, onDone }) {
+  const [empNo, setEmpNo] = useState("");
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [pwd, setPwd] = useState("");
+  const [pwd2, setPwd2] = useState("");
+  const [allowed, setAllowed] = useState(["*"]);   // 기본=전체 권한(가장 흔한 케이스)
+  const [busy, setBusy] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
+  const [okMsg, setOkMsg] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErrMsg(""); setOkMsg("");
+    if (!/^[A-Za-z0-9]{1,30}$/.test(empNo.trim())) { setErrMsg("사번은 1~30자 영숫자입니다"); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setErrMsg("이메일 형식이 올바르지 않습니다"); return; }
+    if (!name.trim() || name.trim().length > 30) { setErrMsg("이름은 1~30자입니다"); return; }
+    if (pwd.length < 6) { setErrMsg("비밀번호는 최소 6자리여야 합니다"); return; }
+    if (pwd !== pwd2) { setErrMsg("비밀번호와 확인이 일치하지 않습니다"); return; }
+
+    setBusy(true);
+    try {
+      const callable = httpsCallable(functions, "createCompanyAdmin");
+      const res = await callable({
+        companyId: company.id,
+        empNo: empNo.trim(),
+        email: email.trim(),
+        name: name.trim(),
+        password: pwd,
+        allowedPartnerCodes: allowed,
+      });
+      setOkMsg(`관리자 추가 완료\n• ${name.trim()} (${res.data?.email || email.trim()})\n• UID: ${res.data?.uid || "?"}`);
+      setTimeout(() => { onDone(); }, 1000);
+    } catch (err) {
+      setErrMsg(err.message || "관리자 추가 실패");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={S.overlay} onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+      <form style={S.modal} onSubmit={submit}>
+        <div style={S.modalTitle}>👥 관리자 추가 — {company.name || company.id}</div>
+        <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:6 }}>
+          이 회사를 관리할 담당자 계정을 신규 생성합니다.
+        </div>
+
+        <label style={S.label}>이름 (1~30자)</label>
+        <input style={S.input} placeholder="홍길동" value={name}
+          onChange={(e) => setName(e.target.value)} />
+
+        <label style={S.label}>사번 (1~30자 영숫자)</label>
+        <input style={S.input} placeholder="예: wschoi" value={empNo}
+          onChange={(e) => setEmpNo(e.target.value.trim())} />
+
+        <label style={S.label}>이메일 (로그인 ID)</label>
+        <input style={S.input} type="email" placeholder="manager@example.com" value={email}
+          onChange={(e) => setEmail(e.target.value.trim())} />
+
+        <label style={S.label}>비밀번호 (6자 이상)</label>
+        <input style={S.input} type="password" placeholder="••••••••" value={pwd}
+          onChange={(e) => setPwd(e.target.value)} />
+
+        <label style={S.label}>비밀번호 확인</label>
+        <input style={S.input} type="password" placeholder="••••••••" value={pwd2}
+          onChange={(e) => setPwd2(e.target.value)} />
+
+        <label style={{ ...S.label, marginTop:8 }}>관리 권한 (협력사 범위)</label>
+        <PartnerPermissionPicker partnerCodes={partnerCodes} value={allowed} onChange={setAllowed} />
+
+        {errMsg && (
+          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6, whiteSpace:"pre-wrap" }}>
+            {errMsg}
+          </div>
+        )}
+        {okMsg && (
+          <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6, whiteSpace:"pre-wrap" }}>
+            {okMsg}
+          </div>
+        )}
+
+        <div style={{ display:"flex", gap:8, marginTop:12 }}>
+          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:13 }}
+            disabled={busy} onClick={onClose}>취소</button>
+          <button type="submit" style={{ ...S.addBtn, flex:2, padding:"9px 0" }} disabled={busy}>
+            {busy ? "추가 중..." : "관리자 추가"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// Phase A (2026-05-29) — 기존 관리자의 협력사 권한 변경 모달.
+// allowedPartnerCodes 만 변경(다른 필드 보호).
+// ─────────────────────────────────────────────────────────
+function EditAdminPermissionsModal({ company, admin, partnerCodes, onClose, onDone }) {
+  const [allowed, setAllowed] = useState(
+    Array.isArray(admin?.allowedPartnerCodes) && admin.allowedPartnerCodes.length > 0
+      ? admin.allowedPartnerCodes
+      : ["*"]
+  );
+  const [busy, setBusy] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
+  const [okMsg, setOkMsg] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErrMsg(""); setOkMsg("");
+    setBusy(true);
+    try {
+      const callable = httpsCallable(functions, "updateCompanyAdminPermissions");
+      await callable({ uid: admin.uid, allowedPartnerCodes: allowed });
+      const isAll = allowed[0] === "*";
+      setOkMsg(`권한 변경 완료\n• ${admin.name || admin.email}\n• ${isAll ? "전체 권한" : `협력사 ${allowed.length}개`}`);
+      setTimeout(() => { onDone(); }, 800);
+    } catch (err) {
+      setErrMsg(err.message || "권한 변경 실패");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={S.overlay} onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+      <form style={S.modal} onSubmit={submit}>
+        <div style={S.modalTitle}>🛡 권한 변경 — {admin.name || admin.email}</div>
+        <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:6 }}>
+          소속: {company.name || company.id} · 이메일: {admin.email || "?"}
+        </div>
+
+        <label style={S.label}>관리 가능한 협력사 범위</label>
+        <PartnerPermissionPicker partnerCodes={partnerCodes} value={allowed} onChange={setAllowed} />
+
+        {errMsg && (
+          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6 }}>
+            {errMsg}
+          </div>
+        )}
+        {okMsg && (
+          <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6, whiteSpace:"pre-wrap" }}>
+            {okMsg}
+          </div>
+        )}
+
+        <div style={{ display:"flex", gap:8, marginTop:12 }}>
+          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:13 }}
+            disabled={busy} onClick={onClose}>취소</button>
+          <button type="submit" style={{ ...S.addBtn, flex:2, padding:"9px 0" }} disabled={busy}>
+            {busy ? "변경 중..." : "권한 저장"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// Phase A (2026-05-29) — 관리자 삭제 모달(confirm + Auth + users 삭제).
+// 자기 자신은 카드에서 비활성, 여기서도 이중 가드.
+// ─────────────────────────────────────────────────────────
+function DeleteAdminModal({ company, admin, onClose, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
+  const [okMsg, setOkMsg] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErrMsg(""); setOkMsg("");
+    setBusy(true);
+    try {
+      const callable = httpsCallable(functions, "deleteCompanyAdmin");
+      await callable({ uid: admin.uid });
+      setOkMsg(`관리자 삭제 완료\n• ${admin.name || admin.email}`);
+      setTimeout(() => { onDone(); }, 1000);
+    } catch (err) {
+      setErrMsg(err.message || "관리자 삭제 실패");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={S.overlay} onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+      <form style={{ ...S.modal, borderTop:"4px solid var(--color-destructive)" }} onSubmit={submit}>
+        <div style={{ ...S.modalTitle, color:"var(--color-destructive)" }}>🗑 관리자 삭제 — {admin.name || admin.email}</div>
+        <div style={{
+          background:"#FCE5E5", border:"1px solid #F6C9C9", color:"#B00020",
+          padding:"10px 12px", borderRadius:8, fontSize:12, marginBottom:8, lineHeight:1.5,
+        }}>
+          ⚠️ <b>이 작업은 되돌릴 수 없습니다.</b><br/>
+          이 관리자의 Firebase Auth 계정 + users 도큐먼트가 영구 삭제됩니다.<br/>
+          소속: {company.name || company.id} · 이메일: {admin.email || "?"}
+        </div>
+
+        {errMsg && (
+          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6 }}>
+            {errMsg}
+          </div>
+        )}
+        {okMsg && (
+          <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6, whiteSpace:"pre-wrap" }}>
+            {okMsg}
+          </div>
+        )}
+
+        <div style={{ display:"flex", gap:8, marginTop:12 }}>
+          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:13 }}
+            disabled={busy} onClick={onClose}>취소</button>
+          <button
+            type="submit"
+            disabled={busy}
+            style={{
+              flex:2, padding:"9px 0", borderRadius:6, fontSize:13, fontWeight:700, fontFamily:"inherit",
+              border:"none",
+              background: busy ? "var(--color-bg-alt)" : "var(--color-destructive)",
+              color: busy ? "var(--color-label-mute)" : "#fff",
+              cursor: busy ? "not-allowed" : "pointer",
+            }}
+          >
+            {busy ? "삭제 중..." : "삭제 확인"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// 회사 편집 모달 — 회사명·관리자 이름·이메일·비밀번호(선택) 변경.
+// 비어둔 필드는 변경하지 않음. 비밀번호도 동시 변경 가능(선택).
+// updateCompanyInfo / updateCompanyAdminInfo / resetCompanyAdminPassword 3개 onCall 을
+// 변경된 필드에 대해서만 순차 호출.
+// ─────────────────────────────────────────────────────────
+function EditCompanyModal({ company, onClose, onDone }) {
+  const [companyName, setCompanyName] = useState(company.name || "");
+  const [adminName, setAdminName] = useState("");
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
+  const [okMsg, setOkMsg] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErrMsg("");
+    setOkMsg("");
+    const nameChanged = companyName.trim() && companyName.trim() !== (company.name || "").trim();
+    const adminNameTrim = adminName.trim();
+    const adminEmailTrim = adminEmail.trim();
+    const passwordChanged = adminPassword.length > 0;
+
+    if (!nameChanged && !adminNameTrim && !adminEmailTrim && !passwordChanged) {
+      setErrMsg("변경할 필드를 1개 이상 입력하세요");
+      return;
+    }
+    if (passwordChanged && adminPassword.length < 6) {
+      setErrMsg("비밀번호는 최소 6자리여야 합니다");
+      return;
+    }
+    if (adminEmailTrim && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmailTrim)) {
+      setErrMsg("이메일 형식이 올바르지 않습니다");
+      return;
+    }
+
+    setBusy(true);
+    const log = [];
+    try {
+      if (nameChanged) {
+        const callable = httpsCallable(functions, "updateCompanyInfo");
+        await callable({ companyId: company.id, name: companyName.trim() });
+        log.push(`회사명 → ${companyName.trim()}`);
+      }
+      if (adminNameTrim || adminEmailTrim) {
+        const callable = httpsCallable(functions, "updateCompanyAdminInfo");
+        const payload = { companyId: company.id };
+        if (adminNameTrim) payload.displayName = adminNameTrim;
+        if (adminEmailTrim) payload.email = adminEmailTrim;
+        await callable(payload);
+        if (adminNameTrim) log.push(`관리자 이름 → ${adminNameTrim}`);
+        if (adminEmailTrim) log.push(`관리자 이메일 → ${adminEmailTrim}`);
+      }
+      if (passwordChanged) {
+        const callable = httpsCallable(functions, "resetCompanyAdminPassword");
+        await callable({ companyId: company.id, newPassword: adminPassword });
+        log.push("관리자 비밀번호 변경");
+      }
+      setOkMsg(`완료:\n• ${log.join("\n• ")}`);
+      // 0.8초 후 자동 닫기 + 새로고침.
+      setTimeout(() => { onDone(); }, 800);
+    } catch (err) {
+      setErrMsg(err.message || "편집 실패");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={S.overlay} onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+      <form style={S.modal} onSubmit={submit}>
+        <div style={S.modalTitle}>✏️ 회사 편집 — {company.name || company.id}</div>
+        <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:6 }}>
+          변경할 필드만 입력. 비어두면 그대로 유지.
+        </div>
+
+        <label style={S.label}>회사 이름</label>
+        <input style={S.input} value={companyName}
+          onChange={(e) => setCompanyName(e.target.value)} />
+
+        <div style={{ height:1, background:"var(--color-line-soft)", margin:"8px 0" }} />
+        <div style={{ fontSize:12, fontWeight:700, color:"var(--color-label)" }}>관리자 계정 (선택)</div>
+
+        <label style={S.label}>관리자 이름 (변경 시 입력)</label>
+        <input style={S.input} placeholder="비워두면 변경 안 함" value={adminName}
+          onChange={(e) => setAdminName(e.target.value)} />
+
+        <label style={S.label}>관리자 이메일 (변경 시 입력)</label>
+        <input style={S.input} type="email" placeholder="비워두면 변경 안 함" value={adminEmail}
+          onChange={(e) => setAdminEmail(e.target.value)} />
+
+        <label style={S.label}>관리자 새 비밀번호 (변경 시 입력, 6자 이상)</label>
+        <input style={S.input} type="password" placeholder="비워두면 변경 안 함" value={adminPassword}
+          onChange={(e) => setAdminPassword(e.target.value)} />
+
+        {errMsg && (
+          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6, whiteSpace:"pre-wrap" }}>
+            {errMsg}
+          </div>
+        )}
+        {okMsg && (
+          <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6, whiteSpace:"pre-wrap" }}>
+            {okMsg}
+          </div>
+        )}
+
+        <div style={{ display:"flex", gap:8, marginTop:12 }}>
+          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:13 }}
+            disabled={busy} onClick={onClose}>취소</button>
+          <button type="submit" style={{ ...S.addBtn, flex:2, padding:"9px 0" }} disabled={busy}>
+            {busy ? "변경 중..." : "변경 적용"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// 관리자 비밀번호 초기화 모달 — 새 비밀번호 + 확인 일치 + 6자 이상.
+// 빠르게 비밀번호만 바꾸고 싶을 때(편집 모달과 별도).
+// ─────────────────────────────────────────────────────────
+function ResetPasswordModal({ company, onClose, onDone }) {
+  const [pwd, setPwd] = useState("");
+  const [pwd2, setPwd2] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
+  const [okMsg, setOkMsg] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErrMsg(""); setOkMsg("");
+    if (pwd.length < 6) { setErrMsg("비밀번호는 최소 6자리여야 합니다"); return; }
+    if (pwd !== pwd2) { setErrMsg("새 비밀번호와 확인이 일치하지 않습니다"); return; }
+    setBusy(true);
+    try {
+      const callable = httpsCallable(functions, "resetCompanyAdminPassword");
+      const res = await callable({ companyId: company.id, newPassword: pwd });
+      setOkMsg(`완료\n• 관리자 이메일: ${res.data?.email || "(이메일 정보 없음)"}\n• 새 비밀번호 적용됨`);
+      setTimeout(() => { onDone(); }, 1200);
+    } catch (err) {
+      setErrMsg(err.message || "비밀번호 초기화 실패");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={S.overlay} onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+      <form style={S.modal} onSubmit={submit}>
+        <div style={S.modalTitle}>🔑 관리자 비밀번호 초기화 — {company.name || company.id}</div>
+        <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:6 }}>
+          회사 관리자(역할=admin)의 Firebase Auth 비밀번호를 즉시 변경합니다.
+        </div>
+
+        <label style={S.label}>새 비밀번호 (6자 이상)</label>
+        <input style={S.input} type="password" placeholder="••••••••" value={pwd}
+          onChange={(e) => setPwd(e.target.value)} />
+
+        <label style={S.label}>새 비밀번호 확인</label>
+        <input style={S.input} type="password" placeholder="••••••••" value={pwd2}
+          onChange={(e) => setPwd2(e.target.value)} />
+
+        {errMsg && (
+          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6 }}>
+            {errMsg}
+          </div>
+        )}
+        {okMsg && (
+          <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6, whiteSpace:"pre-wrap" }}>
+            {okMsg}
+          </div>
+        )}
+
+        <div style={{ display:"flex", gap:8, marginTop:12 }}>
+          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:13 }}
+            disabled={busy} onClick={onClose}>취소</button>
+          <button type="submit" style={{ ...S.addBtn, flex:2, padding:"9px 0" }} disabled={busy}>
+            {busy ? "변경 중..." : "비밀번호 초기화"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// 회사 영구 삭제 모달 — 빨간 강조 + companyId 재입력 일치 + 자기 회사 차단.
+// 카드 버튼에서 isSelf 면 처음부터 비활성이지만, 이중 안전망으로 모달에서도 가드.
+// ─────────────────────────────────────────────────────────
+function DeleteCompanyModal({ company, isSelf, onClose, onDone }) {
+  const [confirmId, setConfirmId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
+  const [okMsg, setOkMsg] = useState("");
+
+  const idMatched = confirmId.trim() === company.id;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErrMsg(""); setOkMsg("");
+    if (isSelf) {
+      setErrMsg("자기 소속 회사는 삭제할 수 없습니다");
+      return;
+    }
+    if (!idMatched) {
+      setErrMsg("회사 ID 가 일치하지 않습니다");
+      return;
+    }
+    setBusy(true);
+    try {
+      const callable = httpsCallable(functions, "deleteCompany");
+      const res = await callable({ companyId: company.id, confirmCompanyId: confirmId.trim() });
+      const counts = res.data?.deletedCount || {};
+      const summary = Object.entries(counts).map(([k, v]) => `${k}: ${v}`).join(", ");
+      setOkMsg(`영구 삭제 완료\n• ${company.name || company.id}\n• 삭제 카운트: ${summary || "(상세 없음)"}`);
+      setTimeout(() => { onDone(); }, 1500);
+    } catch (err) {
+      setErrMsg(err.message || "영구 삭제 실패");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={S.overlay} onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+      <form style={{ ...S.modal, borderTop:"4px solid var(--color-destructive)" }} onSubmit={submit}>
+        <div style={{ ...S.modalTitle, color:"var(--color-destructive)" }}>🗑 회사 영구 삭제 — {company.name || company.id}</div>
+        <div style={{
+          background:"#FCE5E5", border:"1px solid #F6C9C9", color:"#B00020",
+          padding:"10px 12px", borderRadius:8, fontSize:12, marginBottom:8, lineHeight:1.5,
+        }}>
+          ⚠️ <b>이 작업은 되돌릴 수 없습니다.</b><br/>
+          회사·노선·기사·직원·차량·운행 이력·탑승 기록·공지·관리자 계정 등<br/>
+          모든 데이터가 영구 삭제됩니다.
+        </div>
+
+        {isSelf ? (
+          <div style={{ background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", padding:"10px 12px", borderRadius:8, fontSize:12, color:"var(--color-label)" }}>
+            자기 소속 회사는 삭제할 수 없습니다. (lockout 방지)
+          </div>
+        ) : (
+          <>
+            <label style={S.label}>확인 — 회사 ID 를 다시 입력하세요 (<code>{company.id}</code>)</label>
+            <input
+              style={{ ...S.input, fontFamily:"monospace" }}
+              placeholder={company.id}
+              value={confirmId}
+              onChange={(e) => setConfirmId(e.target.value)}
+              autoFocus
+            />
+
+            {errMsg && (
+              <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6 }}>
+                {errMsg}
+              </div>
+            )}
+            {okMsg && (
+              <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6, whiteSpace:"pre-wrap" }}>
+                {okMsg}
+              </div>
+            )}
+          </>
+        )}
+
+        <div style={{ display:"flex", gap:8, marginTop:12 }}>
+          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:13 }}
+            disabled={busy} onClick={onClose}>취소</button>
+          <button
+            type="submit"
+            disabled={busy || isSelf || !idMatched}
+            style={{
+              flex:2, padding:"9px 0", borderRadius:6, fontSize:13, fontWeight:700, fontFamily:"inherit",
+              border:"none",
+              background: (busy || isSelf || !idMatched) ? "var(--color-bg-alt)" : "var(--color-destructive)",
+              color: (busy || isSelf || !idMatched) ? "var(--color-label-mute)" : "#fff",
+              cursor: (busy || isSelf || !idMatched) ? "not-allowed" : "pointer",
+            }}
+          >
+            {busy ? "삭제 중..." : "영구 삭제"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}

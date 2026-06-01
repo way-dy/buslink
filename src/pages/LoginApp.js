@@ -25,7 +25,10 @@ export default function LoginApp() {
     try {
       setError("");
       setLoading(true);
-      const email = `${empNo}@buslink.com`;
+      // 2026-05-29: 슈퍼관리자 createCompany 신규 회사 admin은 일반 이메일 그대로 Auth 등록.
+      // 사번 필드에 이메일을 입력하면 합성 없이 그대로 사용. 사번(`emp01` 등) 입력 시는 기존 합성 패턴.
+      const empNoTrim = empNo.trim();
+      const email = empNoTrim.includes("@") ? empNoTrim : `${empNoTrim}@buslink.com`;
       await signInWithEmailAndPassword(auth, email, pin);
       // onAuthStateChanged가 App.js에서 감지해서 자동 분기
     } catch (e) {

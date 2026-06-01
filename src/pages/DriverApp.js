@@ -1,10 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 import { auth, db } from "../firebase";
 import { signOut } from "firebase/auth";
-import { collection, query, where, getDocs, doc, updateDoc, getDoc, onSnapshot, orderBy, serverTimestamp } from "firebase/firestore";
-import { startGPS, stopGPS, clearGPS } from "../lib/gps";
+import { collection, query, where, getDocs, doc, updateDoc, getDoc, onSnapshot, orderBy } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
+import { startGPS, stopGPS, clearGPS, triggerHeartbeat } from "../lib/gps";
 import { planTimeForStop, computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
+import { buildCumulativeLengths, projectToPolyline } from "../lib/routeProgress";
+import { buildRunId, recordEtaDiagnostic, throttleGate } from "../lib/etaDiag";
 import { ensureGeolocationPermission } from "../lib/usePermissions";
+import { useOnlineRecover } from "../lib/useOnlineRecover";
 import { createBoardingToken, getBoardingUrl, validateAndBoardByDriver } from "../lib/boarding";
 import QRCode from "qrcode";
 import jsQR from "jsqr";
@@ -12,6 +16,12 @@ import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 import InstallPrompt from "../components/InstallPrompt";
 import { applyAppManifest } from "../lib/pwaManifest";
 import PermissionGate from "../components/PermissionGate";
+import { resolveByHostname } from "../lib/companyResolver";
+
+// 2026-06-01 — stopArrivals 기록 위임 채널(CF `recordStopArrival`).
+// 클라이언트 직접 updateDoc 이 silent fail(rules 매핑·drivers.uid 누락 등) 하던 결함
+// 차단 — Admin SDK 가 rules 우회. region 명시(PartnerApp 패턴 일관).
+const functions = getFunctions(undefined, "us-central1");
 
 // 리디자인 2단계(2026-05-16): 라이트 테마 리스킨.
 // ── 로직 100% 불변: state/effect·init(driver/dispatch/stops 로드)·loadDispatch
@@ -46,6 +56,11 @@ export default function DriverApp({ companyId: propCompanyId }) {
   const [stops, setStops] = useState([]);
   const [routePath, setRoutePath] = useState([]); // 노선 사전경로 — GPS 복구 백필·estimates 구간전파용
   const [currentStopIdx, setCurrentStopIdx] = useState(-1);
+  // [DIAG-ETA 제거예정] 진단 오버레이 토글 (운행 중일 때만 노출, 기본 닫힘)
+  // 사용자가 폰 실측 시 정류장별 ETA·source·delay를 직접 캡쳐하기 위한 임시 카드.
+  // 다음 커밋에 grep "[DIAG-ETA" 1줄로 통째 제거.
+  const [diagOpen, setDiagOpen] = useState(false);
+  // [/DIAG-ETA]
   const [boardingToken, setBoardingToken] = useState(null);   // 현재 탑승 토큰
   const [qrUrl, setQrUrl] = useState(null);        // 탑승 링크 URL
   const [qrDataUrl, setQrDataUrl] = useState(null); // canvas → base64 이미지
@@ -60,10 +75,31 @@ export default function DriverApp({ companyId: propCompanyId }) {
   const [watchId, setWatchId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [companyId, setCompanyId] = useState(propCompanyId || "dy001");
+  // Phase 1.1 (2026-05-28): App.js propCompanyId 우선, 없으면 hostname 매핑, 최종 dy001.
+  // /driver 직접 진입(Auth users 문서 미존재) 시에도 hostname 으로 자기 회사 자동 결정.
+  const [companyId, setCompanyId] = useState(
+    propCompanyId || resolveByHostname(window.location.hostname) || "dy001"
+  );
   const [gpsStatus, setGpsStatus] = useState("");   // GPS 신호 안내 ("" | "확보중" | "권한")
   const wakeLockRef = useRef(null);
   const currentStopRowRef = useRef(null);
+  // ETA 자동 진단 로깅(2026-05-29) — 운행 1회 단위 runId. 운행 시작 시 산출, 종료 시 null.
+  // 30초 interval + stopArrivals 변경 시 즉시 1건 기록 → etaDiagnostics/{date}/runs/{runId}/points.
+  const [runId, setRunId] = useState(null);
+  // 마지막 차량 GPS 좌표(diagnostic 기록용) — gps/{companyId}_{vehicleId} 본인 발신값 1회 getDoc.
+  const lastVehiclePosRef = useRef(null);
+  const lastVehicleSpeedRef = useRef(null);
+  // 2026-06-01 — stopArrivals 기록 결과 로그(진단 첨부용, 최근 20건만 유지).
+  // 각 entry = { stopId, ok, alreadyExists?, error?, code?, viaBackfill, ts }
+  // 다음 진단 JSON(recordEtaDiagnostic) 에 stopArrivalsLog 로 첨부 → 어느 정류장이
+  // 어떻게 기록됐는지(권한 거부·not-found·alreadyExists 등) 추적 가능.
+  const stopArrivalsLogRef = useRef([]);
+  // 오프라인→온라인 복구 시 onSnapshot 재구독 + Firestore reconnect 강제(2026-05-28).
+  // 통신 안 좋다가 좋아져도 기사앱이 자동 활성화 안 되던 결함 차단 — DriverApp은 GPS 발신측
+  // 이라 useWakeTick 적용 안 했었으나, 장시간 오프라인 후 stale 리스너 가능성 확인되어
+  // useOnlineRecover로 보강. forceFirestoreReconnect=true 로 disableNetwork→enableNetwork
+  // 1회 강제(reconnect 지연 우회).
+  const recoverTick = useOnlineRecover({ forceFirestoreReconnect: true });
 
   // 현재 정류장 변경 시 리스트에서 자동 스크롤(중앙 정렬) — 운행 시작 전/리스트 없음/이미 보임 케이스는 skip
   useEffect(() => {
@@ -107,7 +143,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
   useEffect(() => {
     const u = auth.currentUser;
     if (!u) return;
-    const cid = propCompanyId || "dy001";
+    const cid = propCompanyId || resolveByHostname(window.location.hostname) || "dy001";
     setCompanyId(cid);
     const init = async () => {
       try {
@@ -259,7 +295,19 @@ export default function DriverApp({ companyId: propCompanyId }) {
       });
       setStopArrivals(out);
     }, () => setStopArrivals({}));
-  }, [companyId, dispatch?.id]);
+    // recoverTick 변화 시 본 effect cleanup→재실행으로 onSnapshot 재구독(통신 복구 후
+    // stale 리스너 신선화). companyId/dispatch.id 외 deps라 정상 흐름엔 영향 0.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, dispatch?.id, recoverTick]);
+
+  // 통신 복구(online 전이) + 운행 중 + watchId 보유 시 즉시 1회 heartbeat sendGPS —
+  // 승객앱·관제 마커가 옛 좌표에 멈춰있던 결함 차단. recoverTick 증가가 트리거 신호.
+  useEffect(() => {
+    if (recoverTick === 0) return; // 첫 마운트 skip
+    if (!driving || !watchId) return;
+    const ok = triggerHeartbeat(watchId);
+    if (ok) console.log("[BusLink] 통신 복구 — heartbeat sendGPS 1회 발송");
+  }, [recoverTick, driving, watchId]);
 
   // Wake Lock 재획득
   useEffect(() => {
@@ -288,6 +336,91 @@ export default function DriverApp({ companyId: propCompanyId }) {
   });
   const estByStopId = Object.fromEntries(stopEstimates.map(e => [e.stopId, e]));
 
+  // ── ETA 자동 진단 로깅(2026-05-29) ─────────────────────────────────────────
+  // 운행 중일 때만 활성. 30초 interval + stopArrivals 변경 시 즉시 1건 기록.
+  // 차량 좌표는 gps/{companyId}_{vehicleId} 1회 getDoc(본인 발신값 — driverApp이 발신측).
+  // routePath 유효 시 busProgress / nextStopProgress 도 같이 산출(부모 진단용).
+  const flushDiag = useRef(null);
+  flushDiag.current = async (triggerSource) => {
+    if (!driving || !runId || !companyId || !dispatch?.id) return;
+    // 차량 GPS 1회 조회(본인 발신 doc — 비용 1회 read)
+    let vehiclePos = null, vehicleSpeed = null;
+    try {
+      if (driver?.vehicleId) {
+        const gpsSnap = await getDoc(doc(db, "gps", `${companyId}_${driver.vehicleId}`));
+        if (gpsSnap.exists()) {
+          const g = gpsSnap.data();
+          if (typeof g.lat === "number" && typeof g.lng === "number") {
+            vehiclePos = { lat: g.lat, lng: g.lng };
+            vehicleSpeed = typeof g.speed === "number" ? g.speed : null;
+            lastVehiclePosRef.current = vehiclePos;
+            lastVehicleSpeedRef.current = vehicleSpeed;
+          }
+        }
+      }
+    } catch { /* 무해 — null 인 채로 기록 */ }
+    // busProgress / nextStopProgress 산출 (routePath 유효 + vehiclePos 있을 때만)
+    let busProgress = null, nextStopProgress = null;
+    const validPath = Array.isArray(routePath) && routePath.length >= 2;
+    if (validPath && vehiclePos) {
+      try {
+        const cum = buildCumulativeLengths(routePath);
+        const proj = projectToPolyline(vehiclePos, routePath, cum);
+        if (proj) busProgress = proj.progress;
+        // nextIdx = stopEstimates 의 status==='next' 첫 항목 인덱스(stops 배열 기준).
+        const nextStopId = (stopEstimates.find(e => e.status === "next") || {}).stopId;
+        if (nextStopId) {
+          const ns = stops.find(s => s.id === nextStopId);
+          if (ns && typeof ns.lat === "number" && typeof ns.lng === "number") {
+            const sp = projectToPolyline({ lat: ns.lat, lng: ns.lng }, routePath, cum);
+            if (sp) nextStopProgress = sp.progress;
+          }
+        }
+      } catch { /* 무해 */ }
+    }
+    // nextIdx 산출 (stops 배열 기준 — etaDiag payload용)
+    const nextIdx = stops.findIndex(s => {
+      const e = estByStopId[s.id];
+      return e && e.status === "next";
+    });
+    // 2026-06-01 — stopArrivals 기록 결과 로그 첨부(최근 20건).
+    // 어느 정류장이 ok/alreadyExists/error/code 로 기록됐는지 다음 진단 JSON 에서 추적.
+    const stopArrivalsLog = stopArrivalsLogRef.current.slice(-20);
+    await recordEtaDiagnostic({
+      companyId, runId,
+      vehiclePos, vehicleSpeed,
+      busProgress, nextStopProgress,
+      estimates: stopEstimates,
+      nextIdx,
+      T_NOW: Date.now(),
+      source: triggerSource || "auto",
+      stopArrivalsLog,
+    });
+  };
+
+  // 30초 interval — 운행 중 + runId 있을 때만.
+  useEffect(() => {
+    if (!driving || !runId) return;
+    const tick = () => {
+      if (!throttleGate({ runId, intervalMs: 30_000 })) return;
+      flushDiag.current && flushDiag.current("interval");
+    };
+    // 첫 tick 즉시(throttle 통과 — 마지막 기록 없음)
+    tick();
+    const t = setInterval(tick, 30_000);
+    return () => clearInterval(t);
+  }, [driving, runId]);
+
+  // stopArrivals 변경 시 즉시 1건 기록(throttle 우회 — 이벤트 기반 핵심 데이터)
+  useEffect(() => {
+    if (!driving || !runId) return;
+    // 첫 마운트(빈 stopArrivals)는 interval이 처리 — stopArrivals 갱신만 트리거.
+    if (!stopArrivals || Object.keys(stopArrivals).length === 0) return;
+    throttleGate({ runId, force: true }); // last 시각 갱신(다음 interval 30초 카운트 리셋)
+    flushDiag.current && flushDiag.current("stopArrivals");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stopArrivals, driving, runId]);
+
   const sendNotification = (stop, dist) => {
     if ("Notification" in window && Notification.permission === "granted") {
       new Notification("🚌 정류장 도착", {
@@ -311,17 +444,27 @@ export default function DriverApp({ companyId: propCompanyId }) {
       alert("GPS 권한이 필요합니다.\n위치 권한을 허용해주세요.");
       return;
     }
+    // ── 2026-05-28 버튼 응답성 수정 ─────────────────────────────────────────
+    // 통신 불량 시 `await updateDoc`이 hang하면 setDriving(true) 등 로컬 state 갱신이
+    // 영영 실행 안 됨 → 사용자 인식 "버튼이 안 눌림". 해법 = 로컬 state·startGPS는 즉시,
+    // Firestore 쓰기·refreshToken은 fire-and-forget(`.catch` 로 graceful).
+    // WakeLock도 await 하지 말고 background — 실패해도 운행은 진행.
     if ("wakeLock" in navigator) {
-      try { wakeLockRef.current = await navigator.wakeLock.request("screen"); } catch {}
+      navigator.wakeLock.request("screen")
+        .then(w => { wakeLockRef.current = w; })
+        .catch(() => {});
     }
-    await updateDoc(doc(db, "companies", companyId, "drivers", driver.id), {
+    // Firestore drivers 상태 update — fire-and-forget. 실패해도 운행 흐름 차단 X.
+    updateDoc(doc(db, "companies", companyId, "drivers", driver.id), {
       status: "운행중", startedAt: new Date().toISOString(),
-    });
+    }).catch(e => console.warn("[BusLink] drivers 상태 update 실패(통신):", e.message));
     // 운행 시작 시점의 활성 dispatch·노선 정보를 캡쳐(중간에 dispatch picker 전환되어도
     // 콜백 클로저는 시작 dispatch에 stopArrivals 기록 — 단일 운행 단위 일관성).
     const activeDispId = dispatch?.id || null;
     const activeRouteDepart = dispatch?.departTime || null;
     const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+    // 2026-06-01 — 운행 1회 단위 stopArrivals 기록 로그 초기화(이전 운행 잔존 차단).
+    stopArrivalsLogRef.current = [];
     const id = startGPS({
       companyId, vehicleId: driver.vehicleId, vehicleNo: driver.vehicleNo || "",
       driverId: driver.id, driverName: driver.name || "",
@@ -335,72 +478,118 @@ export default function DriverApp({ companyId: propCompanyId }) {
         const newIdx = stops.findIndex(s => s.id === stop.id);
         if (newIdx >= 0) setCurrentStopIdx(prev => Math.max(prev, newIdx));
         sendNotification(stop, dist);
-        // ── stopArrivals 기록(멱등) ─────────────────────────────
-        // 활성 dispatch 있을 때만, 같은 stopId가 이미 있으면 덮어쓰지 않음(서버측 가드).
-        // 권한: 운행 중 기사(driver) 본인은 자신 dispatch 의 stopArrivals 필드만 update 가능
-        // (firestore.rules 신규 화이트리스트). 실패는 무해 처리(로컬 진행 UI는 불변).
-        if (!activeDispId) return;
-        try {
-          const ref = doc(db, "companies", companyId, "dispatches", todayStr, "list", activeDispId);
-          const snap = await getDoc(ref);
-          if (!snap.exists()) return;
-          const sa = snap.data().stopArrivals || {};
-          if (sa[stop.id]) return; // 멱등 — 첫 도착만 기록
-          const plannedAt = planTimeForStop(activeRouteDepart, stop.offsetMin);
-          // delaySec 추정: plannedAt(오늘 ms) - now. 클라 추정값(서버는 actualAt에 serverTimestamp).
-          let delaySec = null;
-          if (plannedAt && typeof stop.offsetMin === "number") {
-            const m = plannedAt.match(/^(\d{2}):(\d{2})$/);
-            if (m) {
-              const planDate = new Date(); planDate.setHours(+m[1], +m[2], 0, 0);
-              delaySec = Math.round((Date.now() - planDate.getTime()) / 1000);
-            }
+        // ── stopArrivals 기록(CF 위임, 2026-06-01) ─────────────────────────────
+        // 기존 클라이언트 updateDoc 경로는 rules driver 본인 검증(drivers.uid 매핑) 통과
+        // 실패 시 silent fail — 2026-06-01 진단 JSON 분석으로 stopArrivals 갱신 0건
+        // 확정 → CF `recordStopArrival` 위임으로 본질 우회(Admin SDK 가 rules 우회).
+        // 멱등 가드는 CF 측이 수행(alreadyExists 반환). 결과는 stopArrivalsLogRef 에
+        // 누적해 다음 진단 JSON 에 첨부 → 어느 정류장이 어떻게 기록됐는지 추적.
+        const ts = Date.now();
+        if (!activeDispId) {
+          stopArrivalsLogRef.current.push({
+            stopId: stop.id, ok: false, error: "activeDispId null", viaBackfill: !!viaBackfill, ts,
+          });
+          if (stopArrivalsLogRef.current.length > 40) stopArrivalsLogRef.current.shift();
+          return;
+        }
+        const plannedAt = planTimeForStop(activeRouteDepart, stop.offsetMin);
+        // delaySec 추정: plannedAt(오늘 ms) - now. 클라 추정값(서버는 actualAt에 serverTimestamp).
+        let delaySec = null;
+        if (plannedAt && typeof stop.offsetMin === "number") {
+          const m = plannedAt.match(/^(\d{2}):(\d{2})$/);
+          if (m) {
+            const planDate = new Date(); planDate.setHours(+m[1], +m[2], 0, 0);
+            delaySec = Math.round((Date.now() - planDate.getTime()) / 1000);
           }
-          await updateDoc(ref, {
-            [`stopArrivals.${stop.id}`]: {
-              actualAt: serverTimestamp(),
-              plannedAt: plannedAt || null,
-              delaySec,
-              // 백필(GPS 복구 시 진행률로 회복한 통과 누락분) 식별 플래그.
-              // 통신장애 중 통과분은 actualAt=복구시각이라 delaySec이 부정확할 수
-              // 있음 — 향후 진단용. computeStopEstimates는 actualAt만 쓰므로 무영향.
-              estimated: !!viaBackfill,
-            },
+        }
+        try {
+          const callable = httpsCallable(functions, "recordStopArrival");
+          const res = await callable({
+            companyId,
+            date: todayStr,
+            dispatchId: activeDispId,
+            stopId: stop.id,
+            plannedAt: plannedAt || null,
+            delaySec,
+            viaBackfill: !!viaBackfill,
+          });
+          stopArrivalsLogRef.current.push({
+            stopId: stop.id,
+            ok: true,
+            alreadyExists: !!(res && res.data && res.data.alreadyExists),
+            viaBackfill: !!viaBackfill,
+            ts,
           });
         } catch (e) {
-          console.warn("[BusLink] stopArrivals 기록 실패:", e.message);
+          stopArrivalsLogRef.current.push({
+            stopId: stop.id,
+            ok: false,
+            error: e?.message || String(e),
+            code: e?.code || null,
+            viaBackfill: !!viaBackfill,
+            ts,
+          });
+          console.warn("[BusLink] stopArrivals 기록 실패:", e?.code, e?.message);
         }
+        if (stopArrivalsLogRef.current.length > 40) stopArrivalsLogRef.current.shift();
       },
       onGpsError: (err) => {
         // err.code 1=PERMISSION_DENIED, 3=TIMEOUT — 화면 안내(작업4 권한 UI와 연동)
         setGpsStatus(err.code === 1 ? "권한" : "확보중");
       },
     });
+    // 로컬 state는 즉시 반영(버튼 응답성 보장 — 통신 불량과 무관).
     setWatchId(id);
     setDriving(true);
+    // ETA 자동 진단 로깅 runId 산출(2026-05-29) — 운행 1회 단위.
+    setRunId(buildRunId({ driverId: driver.id, vehicleId: driver.vehicleId, startedAtMs: Date.now() }));
     // ✅ 탑승 QR 토큰 최초 생성 — passenger-qr 모드(역방향: 직원 발행/기사 스캔)는 skip.
+    // 2026-05-28: await 제거 — 통신 불량 시 hang으로 운행 시작 자체가 지연되던 결함 차단.
+    // refreshToken 내부에 try/catch 보호장치 있음(이미). 5분 자동 갱신 인터벌은 무관하게 등록.
     if (boardingMode !== "passenger-qr") {
-      await refreshToken(driver, dispatch);
-      // 5분마다 자동 갱신
+      refreshToken(driver, dispatch);
       tokenTimerRef.current = setInterval(() => refreshToken(driver, dispatch), 5 * 60 * 1000);
     }
   };
 
   const handleStop = async () => {
-    stopGPS(watchId);
-    await clearGPS({ companyId, vehicleId: driver.vehicleId });
-    await updateDoc(doc(db, "companies", companyId, "drivers", driver.id), {
-      status: "대기", endedAt: new Date().toISOString(),
-    });
-    if (wakeLockRef.current) { wakeLockRef.current.release(); wakeLockRef.current = null; }
-    if (tokenTimerRef.current) { clearInterval(tokenTimerRef.current); tokenTimerRef.current = null; }
+    // ── 2026-05-28 버튼 응답성 수정 ─────────────────────────────────────────
+    // 통신 불량 시 `await clearGPS`/`await updateDoc`이 hang하면 setDriving(false) 등
+    // 로컬 state 갱신이 영영 실행 안 됨 → "운행 종료 버튼 안 눌림". 해법 = 로컬 state·
+    // stopGPS는 즉시, Firestore 쓰기는 fire-and-forget(`.catch` 로 graceful).
+    const watchToStop = watchId;
+    const vehId = driver?.vehicleId;
+    // 로컬 state 즉시 갱신(통신과 무관 — 버튼 누름 즉시 UI 반응).
     setDriving(false);
     setWatchId(null);
     setGpsStatus("");
     setCurrentStopIdx(-1);
+    // ETA 자동 진단 로깅 runId 해제(2026-05-29) — interval은 effect cleanup으로 자동 정지.
+    setRunId(null);
+    lastVehiclePosRef.current = null;
+    lastVehicleSpeedRef.current = null;
+    // 2026-06-01 — stopArrivals 기록 로그 정리(다음 운행 시 재초기화 + 누적 차단).
+    stopArrivalsLogRef.current = [];
     setBoardingToken(null);
     setQrUrl(null);
     setActiveTab("운행");
+    if (wakeLockRef.current) {
+      try { wakeLockRef.current.release(); } catch {}
+      wakeLockRef.current = null;
+    }
+    if (tokenTimerRef.current) { clearInterval(tokenTimerRef.current); tokenTimerRef.current = null; }
+    // GPS watch 정지는 동기 — 즉시 안전.
+    if (watchToStop != null) stopGPS(watchToStop);
+    // Firestore 쓰기는 background — 실패해도 사용자는 이미 "운행 종료" 인지 가능.
+    if (vehId) {
+      clearGPS({ companyId, vehicleId: vehId })
+        .catch(e => console.warn("[BusLink] clearGPS 실패(통신):", e.message));
+    }
+    if (driver?.id) {
+      updateDoc(doc(db, "companies", companyId, "drivers", driver.id), {
+        status: "대기", endedAt: new Date().toISOString(),
+      }).catch(e => console.warn("[BusLink] drivers 상태 update 실패(통신):", e.message));
+    }
   };
 
   const refreshToken = async (drv, disp) => {
@@ -737,6 +926,57 @@ export default function DriverApp({ companyId: propCompanyId }) {
                 );
               })}
             </div>
+
+            {/* [DIAG-ETA 제거예정] 진단 오버레이 — driving + 운행 탭 한정.
+                정류장별 ETA·source·delay를 표로 가시화해 사용자가 폰으로 직접 캡쳐.
+                다음 커밋에 grep "[DIAG-ETA" 1줄로 통째 제거. */}
+            {driving && (
+              <div style={{ marginTop: 10 }}>
+                <button
+                  onClick={() => setDiagOpen(v => !v)}
+                  style={{
+                    fontSize: 11, padding: "5px 10px",
+                    borderRadius: 8, border: "1px dashed var(--color-label-mute)",
+                    background: "transparent", color: "var(--color-label-mute)",
+                    cursor: "pointer", fontFamily: "inherit",
+                  }}>
+                  🔍 진단 {diagOpen ? "▲" : "▼"}
+                </button>
+                {diagOpen && (
+                  <div style={{
+                    marginTop: 6, padding: 8, borderRadius: 8,
+                    background: "#FFFBEA", border: "1px dashed #C99A2E",
+                    fontSize: 10, fontFamily: "monospace", lineHeight: 1.4,
+                    color: "#3a2e08", overflowX: "auto", whiteSpace: "nowrap",
+                  }}>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>[DIAG-ETA] 정류장 ETA 진단</div>
+                    {stopEstimates.map((e, i) => {
+                      const stop = stops.find(s => s.id === e.stopId);
+                      const name = stop?.name || e.stopId;
+                      const delayMin = e.delaySec != null ? Math.round(e.delaySec / 60) : null;
+                      const delayLab = delayMin == null ? "—"
+                        : delayMin === 0 ? "0분"
+                        : delayMin > 0 ? `+${delayMin}분`
+                        : `${delayMin}분`;
+                      return (
+                        <div key={e.stopId}>
+                          [{i}] {name.length > 8 ? name.slice(0, 8) + "…" : name}
+                          {" | plan "}{e.plannedAt || "—"}
+                          {" | est "}{e.estimatedAt || "—"}
+                          {" | delay "}{delayLab}
+                          {" | "}{e.status}
+                          {" | "}{e.source}
+                        </div>
+                      );
+                    })}
+                    <div style={{ marginTop: 4, opacity: 0.7 }}>
+                      currentStopIdx={currentStopIdx} | stops={stops.length}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {/* [/DIAG-ETA] */}
           </div>
         )}
 

@@ -9,6 +9,7 @@ import PassengerApp from "./pages/PassengerApp";
 import BoardingApp from "./pages/BoardingApp";
 import PartnerApp from "./pages/PartnerApp";
 import EmployeeApp from "./pages/EmployeeApp";
+import { resolveCompanyIdForAuth } from "./lib/companyResolver";
 
 const path = window.location.pathname;
 const isPassengerRoute = path.startsWith("/bus");
@@ -64,10 +65,12 @@ function App() {
         if (snap.exists()) {
           const data = snap.data();
           setRole(data.role);
-          setCompanyId(data.companyId || "dy001");
+          // Phase 1.1 (2026-05-28): users.companyId > hostname 매핑 > dy001 폴백.
+          setCompanyId(resolveCompanyIdForAuth(data));
         } else {
           setRole("driver");
-          setCompanyId("dy001");
+          // users 문서 부재(비정상) — hostname 매핑 우선, 최종 dy001 폴백.
+          setCompanyId(resolveCompanyIdForAuth(null));
         }
         setUser(u);
       } else {
@@ -79,7 +82,9 @@ function App() {
   }, []);
 
   // 카카오 SDK 로드 전 대기 (지도가 필요한 화면)
-  const needsKakao = isPassengerRoute || isEmployeeRoute ||
+  // Phase 1.3 (2026-05-28): PartnerApp 운영 포털 mainTab="ops"에 카카오맵 사용 — isPartnerRoute 포함.
+  // 회귀 표면: PartnerApp 진입 시 카카오 로드 대기(최대 5초). 기존 EmployeeApp/PassengerApp 동일 패턴.
+  const needsKakao = isPassengerRoute || isEmployeeRoute || isPartnerRoute ||
     (!isPassengerRoute && !isBoardingRoute && !isPartnerRoute && !isEmployeeRoute);
 
   if (needsKakao && !kakaoReady) return (
@@ -103,7 +108,7 @@ function App() {
   // /driver 경로 = 기사앱 직결(역할 무관 — 경로가 의도. 데이터 없으면 DriverApp이 안내).
   if (isDriverRoute) return <DriverApp companyId={companyId} />;
   if (role === "admin" || role === "superadmin")
-    return <AdminApp user={user} companyId={companyId} />;
+    return <AdminApp user={user} companyId={companyId} role={role} />;
   // / 진입 + 기사 역할 → /driver 로 이동(PWA scope 분리 — 직원앱 /p 와 설치 충돌 방지).
   // 기존 / 북마크·로그인 흐름은 이 리다이렉트로 자연 흡수.
   if (typeof window !== "undefined") window.location.replace("/driver");

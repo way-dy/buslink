@@ -1,16 +1,33 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   validatePartnerCode, parseEmployeeExcel,
   importEmployees, downloadSampleExcel, hashPin
 } from "../lib/partner";
 import { db, auth } from "../firebase";
 import { signInAnonymously } from "firebase/auth";
-import { collection, getDocs, doc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp } from "firebase/firestore";
+import { collection, getDocs, doc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, limit } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { BusLinkLogo, Pill } from "../components/ui";
 import { aggregateBoardingsByStop } from "../lib/stopMapping";
+// Phase 1.3 (2026-05-28): mainTab="ops" 운영 포털 — 실시간 버스 위치 지도.
+// 카카오 SDK import — react-kakao-maps-sdk의 `Map`이 native `Map` 클래스를 shadow하므로
+// 이 파일 내에서 `new Map()` 쓸 일 있으면 반드시 `new window.Map()`(issues.md `[패턴]`).
+import { Map as KakaoMap, MapMarker, Polyline, CustomOverlayMap } from "react-kakao-maps-sdk";
+import { useAnimatedPositions } from "../lib/useAnimatedPositions";
+import { useWakeTick } from "../lib/useWakeTick";
+import { useOnlineRecover } from "../lib/useOnlineRecover";
 
 const STEPS = { CODE:"code", MAIN:"main", DONE:"done", MANAGE:"manage" };
 const REG_MODES = { FILE:"file", SINGLE:"single", MULTI:"multi" };
+
+// Phase 1.4 (2026-05-29) — 협력사 공지 발송 onCall(`sendPartnerNotice`) 호출용.
+// region="us-central1" 명시(AdminApp 패턴 일관, functions/index.js 리전 고정).
+const functions = getFunctions(undefined, "us-central1");
+
+// 공지 발송 제한 상수(CF 와 동일 — UI 카운터·placeholder 용도. CF가 실제 게이트).
+const PARTNER_NOTICE_LIMIT_PER_HOUR = 5;
+const PARTNER_NOTICE_TITLE_MAX = 50;
+const PARTNER_NOTICE_BODY_MAX = 500;
 
 export default function PartnerApp() {
   const [step, setStep] = useState(STEPS.CODE);
@@ -18,7 +35,8 @@ export default function PartnerApp() {
   const [codeData, setCodeData] = useState(null);
   const [routes, setRoutes] = useState([]);
   const [regMode, setRegMode] = useState(REG_MODES.FILE);
-  const [mainTab, setMainTab] = useState("register"); // "register" | "manage"
+  // mainTab 4종(2026-05-28 Phase 1.3): register|manage|stats|ops. 기본 "register" 유지(회귀 0).
+  const [mainTab, setMainTab] = useState("register");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
@@ -56,7 +74,10 @@ export default function PartnerApp() {
 
   return (
     <div style={S.wrap}>
-      <div style={{ ...S.card, maxWidth: regMode === REG_MODES.MULTI && step === STEPS.MAIN ? 720 : 480 }}>
+      <div style={{ ...S.card, maxWidth:
+        step === STEPS.MAIN && mainTab === "ops" ? 760 :
+        regMode === REG_MODES.MULTI && step === STEPS.MAIN ? 720 :
+        480 }}>
         {/* 헤더 */}
         <div style={S.header}>
           <BusLinkLogo size={26} sub="협력사 포털" />
@@ -112,9 +133,9 @@ export default function PartnerApp() {
               <div style={{ fontSize:11, color:"var(--color-label-alt)", marginTop:2 }}>{codeData.companyId} 소속</div>
             </div>
 
-            {/* 메인 탭 선택 */}
+            {/* 메인 탭 선택 — 2026-05-28 Phase 1.3 운영 포털 탭 추가 (4번째) */}
             <div style={S.tabBar}>
-              {[["register","📋 직원 등록"],["manage","👥 직원 관리"],["stats","📊 탑승 통계"]].map(([t,label])=>(
+              {[["register","📋 직원 등록"],["manage","👥 직원 관리"],["stats","📊 탑승 통계"],["ops","🚌 운영 포털"]].map(([t,label])=>(
                 <button key={t} onClick={()=>setMainTab(t)}
                   style={{ ...S.tabBtn,
                     background: mainTab===t ? "var(--color-primary)" : "transparent",
@@ -154,6 +175,11 @@ export default function PartnerApp() {
             {/* ── 탑승 통계 탭 ── */}
             {mainTab === "stats" && (
               <BoardingStatsMode codeData={codeData} code={code} routes={routes} />
+            )}
+
+            {/* ── 운영 포털 탭(Phase 1.3) ── */}
+            {mainTab === "ops" && (
+              <OperationsMode codeData={codeData} code={code} routes={routes} />
             )}
           </>
         )}
@@ -1230,6 +1256,736 @@ function BoardingStatsMode({ codeData, code, routes }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
+// 운영 포털 모드(Phase 1.3, 2026-05-28)
+// — 협력사 담당자가 자사 노선만 실시간 조회: 직원 노선 요약 / 실시간 버스 위치(카카오맵)
+//   / 오늘 탑승 현황 / 공지 수신함. 모두 partnerCode 단위 필터(클라이언트).
+// — BoardingStatsMode·EmployeeManageMode 인프라(props codeData/code/routes) 재사용.
+// — onSnapshot deps에 wakeTick + recoverTick 포함(백그라운드/오프라인 복귀 자동 재구독).
+// ════════════════════════════════════════════════════════
+function OperationsMode({ codeData, code, routes }) {
+  const companyId = codeData?.companyId;
+  const wakeTick = useWakeTick();
+  const recoverTick = useOnlineRecover({ forceFirestoreReconnect: true });
+  const todayStr = useMemo(
+    () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()),
+    []
+  );
+
+  // ── 자사 직원 ↦ routeId 분포 ─────────────────────────
+  const [passengers, setPassengers] = useState([]); // [{empNo,name,routeId,...}]
+  const [passengersLoading, setPassengersLoading] = useState(true);
+  useEffect(() => {
+    if (!companyId || !code) return;
+    setPassengersLoading(true);
+    const q = query(
+      collection(db, "companies", companyId, "passengers"),
+      where("partnerCode", "==", code),
+      where("active", "==", true)
+    );
+    getDocs(q).then(snap => {
+      setPassengers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setPassengersLoading(false);
+    }).catch(e => {
+      console.warn("[OperationsMode] passengers 조회 오류:", e?.message);
+      setPassengers([]); setPassengersLoading(false);
+    });
+  }, [companyId, code]);
+
+  // 자사 routeId 집합 + 노선별 직원 수
+  const { myRouteIds, byRouteCount, unassignedCount } = useMemo(() => {
+    const m = new window.Map();
+    let unassigned = 0;
+    passengers.forEach(p => {
+      const rid = p.routeId || null;
+      if (!rid) { unassigned++; return; }
+      m.set(rid, (m.get(rid) || 0) + 1);
+    });
+    return {
+      myRouteIds: new window.Set(m.keys()),
+      byRouteCount: m,
+      unassignedCount: unassigned,
+    };
+  }, [passengers]);
+
+  // 노선 카드용 — routes props에서 매칭 + 필요 정보만 추출.
+  const myRoutesList = useMemo(() => {
+    const list = [];
+    routes.forEach(r => {
+      if (myRouteIds.has(r.id)) {
+        list.push({
+          id: r.id,
+          name: r.name || r.code || r.id,
+          type: r.type,
+          shift: r.shift,
+          departTime: r.departTime,
+          stopsCount: undefined, // (정류장 수는 lazy load 안 함 — V1에서는 미표시. routePath 길이로도 대용 불가)
+          routePath: Array.isArray(r.routePath) ? r.routePath.filter(p => typeof p?.lat === 'number' && typeof p?.lng === 'number') : [],
+          employeeCount: byRouteCount.get(r.id) || 0,
+        });
+      }
+    });
+    list.sort((a, b) => (a.departTime || "").localeCompare(b.departTime || ""));
+    return list;
+  }, [routes, myRouteIds, byRouteCount]);
+
+  // 노선 필터(노선 카드 클릭 시 토글). null=전체.
+  const [routeFilter, setRouteFilter] = useState(null);
+
+  // ── 노선별 stops lazy fetch(미설정 노선은 폴리라인 폴백용) ──
+  const [stopsByRoute, setStopsByRoute] = useState({}); // { routeId: [{id,name,lat,lng,order}] }
+  useEffect(() => {
+    if (!companyId || myRoutesList.length === 0) return;
+    const toLoad = myRoutesList.map(r => r.id).filter(rid => !stopsByRoute[rid]);
+    if (toLoad.length === 0) return;
+    Promise.all(toLoad.map(async rid => {
+      try {
+        const snap = await getDocs(query(
+          collection(db, "companies", companyId, "routes", rid, "stops"),
+          orderBy("order", "asc")
+        ));
+        return [rid, snap.docs.map(d => ({ id: d.id, ...d.data() }))];
+      } catch (_) { return [rid, []]; }
+    })).then(pairs => {
+      setStopsByRoute(prev => {
+        const next = { ...prev };
+        pairs.forEach(([rid, stops]) => { next[rid] = stops; });
+        return next;
+      });
+    });
+  }, [companyId, myRoutesList, stopsByRoute]);
+
+  // ── 오늘 dispatches(routeId in myRouteIds) ─────────────
+  const [todayDispatches, setTodayDispatches] = useState([]); // [{id, routeId, vehicleId, vehicleNo, driverName, ...}]
+  useEffect(() => {
+    if (!companyId) return;
+    return onSnapshot(
+      collection(db, "companies", companyId, "dispatches", todayStr, "list"),
+      snap => {
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        // 우리 routeId만
+        setTodayDispatches(list.filter(d => myRouteIds.has(d.routeId)));
+      },
+      err => {
+        console.warn("[OperationsMode] dispatches 구독 오류:", err.message);
+        setTodayDispatches([]);
+      }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, todayStr, myRouteIds, wakeTick, recoverTick]);
+
+  // 우리 노선의 vehicleId 집합
+  const myVehicleIds = useMemo(() => {
+    const s = new window.Set();
+    todayDispatches.forEach(d => { if (d.vehicleId) s.add(d.vehicleId); });
+    return s;
+  }, [todayDispatches]);
+
+  // ── GPS 구독 — 우리 회사 + 우리 vehicleId 한정 ────────
+  // gps 컬렉션은 top-level, doc id = `{companyId}_{vehicleId}`.
+  // companyId 동등 필터 1개로 자사 차량만 받고 vehicleId in 필터는 클라이언트(노선 dispatch와 정합).
+  const [rawBuses, setRawBuses] = useState([]);
+  useEffect(() => {
+    if (!companyId) return;
+    return onSnapshot(
+      query(collection(db, "gps"), where("companyId", "==", companyId)),
+      snap => {
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        // 우리 vehicleId만(노선 dispatch에 묶인 차량만 표시)
+        setRawBuses(list.filter(b => myVehicleIds.has(b.vehicleId)));
+      },
+      err => {
+        console.warn("[OperationsMode] gps 구독 오류:", err.message);
+        setRawBuses([]);
+      }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, myVehicleIds, wakeTick, recoverTick]);
+  const buses = useAnimatedPositions(rawBuses);
+
+  // 노선 필터 적용된 dispatches/buses
+  const filteredDispatches = useMemo(() => (
+    routeFilter ? todayDispatches.filter(d => d.routeId === routeFilter) : todayDispatches
+  ), [todayDispatches, routeFilter]);
+  const filteredVehicleIds = useMemo(() => {
+    const s = new window.Set();
+    filteredDispatches.forEach(d => { if (d.vehicleId) s.add(d.vehicleId); });
+    return s;
+  }, [filteredDispatches]);
+  const filteredBuses = useMemo(() => (
+    buses.filter(b => filteredVehicleIds.has(b.vehicleId))
+  ), [buses, filteredVehicleIds]);
+
+  // 지도 중심 — 첫 버스/첫 정류장/한국 기본
+  const mapCenter = useMemo(() => {
+    if (filteredBuses[0] && filteredBuses[0].lat && filteredBuses[0].lng) {
+      return { lat: filteredBuses[0].lat, lng: filteredBuses[0].lng };
+    }
+    for (const r of myRoutesList) {
+      if (routeFilter && r.id !== routeFilter) continue;
+      const ss = stopsByRoute[r.id];
+      if (ss && ss.length > 0) return { lat: ss[0].lat, lng: ss[0].lng };
+    }
+    return { lat: 37.3894, lng: 126.9522 };
+  }, [filteredBuses, myRoutesList, stopsByRoute, routeFilter]);
+
+  // ── 오늘 탑승 현황 ─────────────────────────────────
+  // boardings/{today}/list where partnerCode==code. partnerCode 인덱스는 없으나
+  // 단일 컬렉션 동등매칭은 자동 단일필드 인덱스로 처리.
+  const [todayBoardings, setTodayBoardings] = useState([]);
+  const [boardingsLoaded, setBoardingsLoaded] = useState(false);
+  useEffect(() => {
+    if (!companyId || !code) return;
+    return onSnapshot(
+      query(
+        collection(db, "companies", companyId, "boardings", todayStr, "list"),
+        where("partnerCode", "==", code)
+      ),
+      snap => {
+        setTodayBoardings(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setBoardingsLoaded(true);
+      },
+      err => {
+        console.warn("[OperationsMode] boardings 구독 오류:", err.message);
+        setBoardingsLoaded(true);
+      }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, code, todayStr, wakeTick, recoverTick]);
+
+  // 노선별 탑승 카운트
+  const boardingByRoute = useMemo(() => {
+    const m = new window.Map();
+    todayBoardings.forEach(b => {
+      const k = b.routeId || "_";
+      m.set(k, (m.get(k) || 0) + 1);
+    });
+    return m;
+  }, [todayBoardings]);
+  const totalEmployees = passengers.length;
+  const totalBoarded = todayBoardings.length;
+  const boardingRate = totalEmployees > 0 ? Math.round(totalBoarded / totalEmployees * 100) : 0;
+
+  // ── 공지 수신함(EmployeeApp NoticeTab 패턴 일관) ────
+  const [notices, setNotices] = useState([]);
+  useEffect(() => {
+    if (!companyId) return;
+    return onSnapshot(
+      query(
+        collection(db, "companies", companyId, "notices"),
+        where("active", "==", true),
+        orderBy("createdAt", "desc"),
+        limit(20)
+      ),
+      snap => {
+        const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        // partnerCode null=전체 + 우리 코드 일치만(EmployeeApp NoticeTab 패턴)
+        setNotices(all.filter(n => {
+          const p = n.partnerCode || null;
+          return p === null || p === code;
+        }));
+      },
+      err => console.warn("[OperationsMode] notices 구독 오류:", err.message)
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, code, wakeTick, recoverTick]);
+
+  const fmtNoticeDate = (n) => {
+    const ts = n.createdAt;
+    const ms = ts?.toMillis ? ts.toMillis() : (typeof ts === 'number' ? ts : null);
+    if (!ms) return "";
+    return new Date(ms).toLocaleString("ko-KR", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  };
+
+  // 지도 폴리라인 path 산출 — routePath 우선, 없으면 stops 직선 폴백.
+  const routePolylines = useMemo(() => {
+    const out = [];
+    myRoutesList.forEach(r => {
+      if (routeFilter && r.id !== routeFilter) return;
+      let path = r.routePath;
+      if (!path || path.length < 2) {
+        const ss = stopsByRoute[r.id];
+        if (ss && ss.length >= 2) path = ss.map(s => ({ lat: s.lat, lng: s.lng }));
+      }
+      if (path && path.length >= 2) out.push({ routeId: r.id, path });
+    });
+    return out;
+  }, [myRoutesList, stopsByRoute, routeFilter]);
+
+  // dispatchById — 버스 마커 라벨용
+  const dispatchByVehicleId = useMemo(() => {
+    const m = new window.Map();
+    filteredDispatches.forEach(d => { if (d.vehicleId) m.set(d.vehicleId, d); });
+    return m;
+  }, [filteredDispatches]);
+
+  // 지도 컨테이너 ref — 0px init 방어용
+  const mapKeyRef = useRef(0);
+
+  // ── 공지 발송(Phase 1.4) ─────────────────────────────
+  // CF `sendPartnerNotice` 호출. CF 가 partnerCodes 검증·rate-limit·notices/fcmQueue create.
+  const [noticeTitle, setNoticeTitle] = useState("");
+  const [noticeBody, setNoticeBody] = useState("");
+  const [noticeType, setNoticeType] = useState("normal");
+  const [noticeSending, setNoticeSending] = useState(false);
+  const [noticeConfirming, setNoticeConfirming] = useState(false);
+  const [noticeResult, setNoticeResult] = useState(null); // {ok, msg, tone:"success"|"error", remaining?}
+  const [noticeRemaining, setNoticeRemaining] = useState(null); // CF 반환 remainingPerHour 캐시
+
+  // partnerCodes 의 recentNoticeTimestamps onSnapshot 으로 현재 남은 발송 횟수 표시
+  // (CF write 후 자동 반영 + 다른 세션 발송도 즉시 가시화).
+  useEffect(() => {
+    if (!code) return;
+    return onSnapshot(
+      doc(db, "partnerCodes", code),
+      snap => {
+        const arr = snap.exists() ? (snap.data().recentNoticeTimestamps || []) : [];
+        const cutoff = Date.now() - 60 * 60 * 1000;
+        const inWindow = arr.filter(ts => typeof ts === "number" && ts > cutoff);
+        const remaining = Math.max(0, PARTNER_NOTICE_LIMIT_PER_HOUR - inWindow.length);
+        setNoticeRemaining(remaining);
+      },
+      err => console.warn("[OperationsMode] partnerCodes 구독 오류:", err.message)
+    );
+  }, [code, wakeTick, recoverTick]);
+
+  const noticeTitleLen = noticeTitle.trim().length;
+  const noticeBodyLen = noticeBody.trim().length;
+  const canSubmit = noticeTitleLen > 0 && noticeTitleLen <= PARTNER_NOTICE_TITLE_MAX
+    && noticeBodyLen > 0 && noticeBodyLen <= PARTNER_NOTICE_BODY_MAX
+    && !noticeSending && (noticeRemaining === null || noticeRemaining > 0);
+
+  const handleNoticeSubmit = async () => {
+    if (!canSubmit) return;
+    setNoticeSending(true);
+    setNoticeResult(null);
+    try {
+      const callable = httpsCallable(functions, "sendPartnerNotice");
+      const res = await callable({
+        companyId,
+        partnerCode: code,
+        title: noticeTitle.trim(),
+        body: noticeBody.trim(),
+        type: noticeType,
+      });
+      const out = res.data || {};
+      setNoticeResult({
+        ok: true,
+        tone: "success",
+        msg: `발송 완료 (이번 시간 남은 발송 ${out.remainingPerHour ?? "?"}건)`,
+        remaining: out.remainingPerHour,
+      });
+      setNoticeTitle("");
+      setNoticeBody("");
+      setNoticeType("normal");
+      setNoticeConfirming(false);
+    } catch (e) {
+      // HttpsError 한국어 메시지(CF 가 생성) 그대로 노출.
+      setNoticeResult({
+        ok: false,
+        tone: "error",
+        msg: e?.message || "발송 실패. 잠시 후 다시 시도해주세요",
+      });
+    } finally {
+      setNoticeSending(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* ── 섹션 A: 자사 노선 요약 카드 ─────────────────── */}
+      <div style={{ background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 10, overflow: "hidden" }}>
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--color-line-soft)", fontSize: 12, fontWeight: 700, color: "var(--color-label)", display: "flex", alignItems: "center", gap: 8 }}>
+          <span>🛣 자사 노선</span>
+          {routeFilter && (
+            <button onClick={() => setRouteFilter(null)} style={{
+              fontSize: 10, padding: "2px 8px", borderRadius: 999, border: "1px solid var(--color-line)",
+              background: "var(--color-bg-soft)", color: "var(--color-label-mute)", cursor: "pointer", fontFamily: "inherit"
+            }}>전체 보기</button>
+          )}
+        </div>
+        {passengersLoading ? (
+          <div style={{ padding: 20, textAlign: "center", color: "var(--color-label-mute)", fontSize: 12 }}>로딩 중...</div>
+        ) : myRoutesList.length === 0 ? (
+          <div style={{ padding: 24, textAlign: "center", color: "var(--color-label-mute)", fontSize: 13 }}>
+            배정된 직원이 없습니다
+            <div style={{ fontSize: 11, color: "var(--color-label-alt)", marginTop: 4 }}>
+              직원 등록 탭에서 노선을 배정하세요
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 8, padding: 12 }}>
+            {myRoutesList.map(r => {
+              const active = routeFilter === r.id;
+              return (
+                <div key={r.id} onClick={() => setRouteFilter(active ? null : r.id)}
+                  style={{
+                    background: active ? "var(--color-primary-soft)" : "var(--color-bg-soft)",
+                    border: `1px solid ${active ? "var(--color-primary)" : "var(--color-line)"}`,
+                    borderRadius: 10, padding: "10px 12px", cursor: "pointer",
+                  }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 4 }}>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: active ? "var(--color-primary-deep)" : "var(--color-label)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
+                    {r.type && <Pill tone="primary">{r.type}</Pill>}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, fontSize: 11, color: "var(--color-label-mute)" }}>
+                    {r.departTime && <span>🕒 {r.departTime}</span>}
+                    <span>👤 {r.employeeCount}명</span>
+                  </div>
+                </div>
+              );
+            })}
+            {unassignedCount > 0 && (
+              <div style={{
+                background: "var(--color-bg-soft)", border: "1px dashed var(--color-line)",
+                borderRadius: 10, padding: "10px 12px",
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--color-label-mute)", marginBottom: 4 }}>미배정</div>
+                <div style={{ fontSize: 11, color: "var(--color-label-alt)" }}>👤 {unassignedCount}명</div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── 섹션 B: 실시간 버스 위치 (카카오맵) ────────── */}
+      <div style={{ background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 10, overflow: "hidden" }}>
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--color-line-soft)", fontSize: 12, fontWeight: 700, color: "var(--color-label)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span>📍 실시간 버스 위치</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: filteredBuses.length > 0 ? "var(--color-positive)" : "var(--color-label-mute)" }}>
+            {filteredBuses.length > 0 ? `${filteredBuses.length}대 운행 중` : (todayDispatches.length === 0 ? "오늘 배차 없음" : "운행 대기")}
+          </span>
+        </div>
+        {myRoutesList.length === 0 ? (
+          <div style={{ padding: 24, textAlign: "center", color: "var(--color-label-mute)", fontSize: 13 }}>
+            배정된 노선이 없습니다
+          </div>
+        ) : (
+          <div style={{ height: "40vh", minHeight: 280, position: "relative" }}>
+            <KakaoMap key={routeFilter || "all"} center={mapCenter} style={{ width: "100%", height: "100%" }} level={routeFilter ? 6 : 9}
+              onCreate={m => { m.relayout(); setTimeout(() => m.relayout(), 300); mapKeyRef.current++; }}>
+              {/* 노선 폴리라인 */}
+              {routePolylines.map(rp => (
+                <Polyline key={rp.routeId} path={rp.path} strokeWeight={4} strokeColor="#0066FF" strokeOpacity={0.6} strokeStyle="solid" />
+              ))}
+              {/* 정류장 마커 — 작은 빨간 점(필터된 노선만, 너무 많으면 생략) */}
+              {routeFilter && (stopsByRoute[routeFilter] || []).map((s, i) => (
+                <MapMarker key={`stop-${s.id}`} position={{ lat: s.lat, lng: s.lng }}
+                  image={{
+                    src: "https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/marker_red.png",
+                    size: { width: 16, height: 24 }
+                  }}
+                />
+              ))}
+              {/* 버스 마커 */}
+              {filteredBuses.map(b => b.lat && b.lng && (
+                <CustomOverlayMap key={b.id} position={{ lat: b.lat, lng: b.lng }} yAnchor={1.5}>
+                  <div style={{ position: "relative", display: "inline-block" }}>
+                    <span style={{
+                      position: "absolute", inset: -2, borderRadius: 999,
+                      background: "var(--color-primary)", opacity: 0.4,
+                      animation: "buspulse 2s ease-out infinite", pointerEvents: "none"
+                    }} />
+                    <div style={{
+                      position: "relative", background: "#fff",
+                      border: "2px solid var(--color-primary)", borderRadius: 999,
+                      padding: "5px 10px", display: "flex", alignItems: "center", gap: 6,
+                      boxShadow: "0 4px 12px rgba(0,102,255,0.3)",
+                    }}>
+                      <span style={{ fontSize: 16 }}>🚌</span>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: "var(--color-label)" }}>
+                          {b.vehicleNo || (dispatchByVehicleId.get(b.vehicleId)?.vehicleNo) || b.vehicleId || "차량"}
+                        </div>
+                        <div style={{ fontSize: 9, fontWeight: 600, color: "var(--color-label-mute)" }}>
+                          {Math.round(b.speed || 0)} km/h
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </CustomOverlayMap>
+              ))}
+            </KakaoMap>
+            {filteredBuses.length === 0 && todayDispatches.length > 0 && (
+              <div style={{
+                position: "absolute", top: 8, left: 8, right: 8,
+                background: "rgba(255,255,255,0.95)", border: "1px solid var(--color-line)",
+                borderRadius: 8, padding: "6px 10px", fontSize: 11, fontWeight: 600,
+                color: "var(--color-label-mute)", textAlign: "center", pointerEvents: "none"
+              }}>
+                ⓘ 배차 {todayDispatches.length}건 — GPS 신호 대기 중
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── 섹션 C: 오늘 탑승 현황 ─────────────────────── */}
+      <div style={{ background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 10, overflow: "hidden" }}>
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--color-line-soft)", fontSize: 12, fontWeight: 700, color: "var(--color-label)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span>🎫 오늘 탑승 현황</span>
+          <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-label-alt)" }}>{todayStr}</span>
+        </div>
+        <div style={{ padding: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
+            <div style={S.statCard}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "var(--color-primary)", fontFamily: "var(--font-brand)" }}>
+                {totalBoarded}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--color-label-mute)", fontWeight: 600, marginTop: 2 }}>탑승 인원</div>
+            </div>
+            <div style={S.statCard}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "var(--color-positive)", fontFamily: "var(--font-brand)" }}>
+                {totalEmployees}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--color-label-mute)", fontWeight: 600, marginTop: 2 }}>전체 직원</div>
+            </div>
+            <div style={S.statCard}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "var(--color-cautionary)", fontFamily: "var(--font-brand)" }}>
+                {boardingRate}%
+              </div>
+              <div style={{ fontSize: 11, color: "var(--color-label-mute)", fontWeight: 600, marginTop: 2 }}>탑승률</div>
+            </div>
+          </div>
+          {/* 노선별 미니 차트(상위 5) */}
+          {boardingByRoute.size > 0 ? (
+            <div>
+              {[...boardingByRoute.entries()]
+                .map(([rid, c]) => {
+                  const r = myRoutesList.find(x => x.id === rid);
+                  return { rid, name: r?.name || "노선 미지정", count: c };
+                })
+                .sort((a, b) => b.count - a.count)
+                .slice(0, 5)
+                .map(item => {
+                  const peak = Math.max(...[...boardingByRoute.values()], 1);
+                  return (
+                    <div key={item.rid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
+                      <span style={{ fontSize: 11, color: "var(--color-label-mute)", width: 100, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {item.name}
+                      </span>
+                      <div style={{ flex: 1, height: 12, background: "var(--color-bg-soft)", borderRadius: 3, overflow: "hidden" }}>
+                        <div style={{ width: `${(item.count / peak) * 100}%`, height: "100%", background: "var(--color-primary)", borderRadius: 3 }} />
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 800, color: "var(--color-primary)", width: 32, textAlign: "right" }}>{item.count}</span>
+                    </div>
+                  );
+                })}
+              <div style={{ fontSize: 10, color: "var(--color-label-alt)", textAlign: "right", marginTop: 6 }}>
+                ⓘ 상세 통계는 <span style={{ fontWeight: 700, color: "var(--color-primary)" }}>📊 탑승 통계</span> 탭
+              </div>
+            </div>
+          ) : (
+            <div style={{ textAlign: "center", padding: 16, color: "var(--color-label-mute)", fontSize: 12, background: "var(--color-bg-soft)", borderRadius: 8 }}>
+              {boardingsLoaded ? "오늘 탑승 기록이 없습니다" : "조회 중..."}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── 섹션 C2(Phase 1.4): 공지 발송 ───────────────── */}
+      <div style={{ background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 10, overflow: "hidden" }}>
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--color-line-soft)", fontSize: 12, fontWeight: 700, color: "var(--color-label)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span>📢 공지 발송</span>
+          <span style={{ fontSize: 10, fontWeight: 600, color: noticeRemaining === 0 ? "var(--color-destructive)" : "var(--color-label-alt)" }}>
+            {noticeRemaining === null ? "" : `시간당 남은 발송 ${noticeRemaining}/${PARTNER_NOTICE_LIMIT_PER_HOUR}건`}
+          </span>
+        </div>
+        <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* 제목 */}
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "var(--color-label-mute)" }}>제목</label>
+              <span style={{ fontSize: 10, color: noticeTitleLen > PARTNER_NOTICE_TITLE_MAX ? "var(--color-destructive)" : "var(--color-label-alt)" }}>
+                {noticeTitleLen}/{PARTNER_NOTICE_TITLE_MAX}
+              </span>
+            </div>
+            <input
+              type="text"
+              value={noticeTitle}
+              onChange={e => setNoticeTitle(e.target.value)}
+              maxLength={PARTNER_NOTICE_TITLE_MAX}
+              placeholder="예) 내일 정상 운행 안내"
+              disabled={noticeSending}
+              style={{
+                width: "100%", padding: "8px 10px", fontSize: 13,
+                border: "1px solid var(--color-line)", borderRadius: 6,
+                background: "var(--color-bg)", color: "var(--color-label)",
+                fontFamily: "inherit", boxSizing: "border-box",
+              }}
+            />
+          </div>
+          {/* 본문 */}
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "var(--color-label-mute)" }}>본문</label>
+              <span style={{ fontSize: 10, color: noticeBodyLen > PARTNER_NOTICE_BODY_MAX ? "var(--color-destructive)" : "var(--color-label-alt)" }}>
+                {noticeBodyLen}/{PARTNER_NOTICE_BODY_MAX}
+              </span>
+            </div>
+            <textarea
+              value={noticeBody}
+              onChange={e => setNoticeBody(e.target.value)}
+              maxLength={PARTNER_NOTICE_BODY_MAX}
+              placeholder="공지 본문을 입력하세요"
+              rows={4}
+              disabled={noticeSending}
+              style={{
+                width: "100%", padding: "8px 10px", fontSize: 13,
+                border: "1px solid var(--color-line)", borderRadius: 6,
+                background: "var(--color-bg)", color: "var(--color-label)",
+                fontFamily: "inherit", resize: "vertical", boxSizing: "border-box",
+                lineHeight: 1.5,
+              }}
+            />
+          </div>
+          {/* type 라디오 */}
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <label style={{ fontSize: 11, fontWeight: 700, color: "var(--color-label-mute)" }}>구분</label>
+            {[
+              { value: "normal", label: "📢 일반", color: "var(--color-primary)" },
+              { value: "emergency", label: "🚨 긴급", color: "var(--color-destructive)" },
+            ].map(opt => (
+              <label key={opt.value} style={{ display: "flex", alignItems: "center", gap: 4, cursor: noticeSending ? "default" : "pointer" }}>
+                <input
+                  type="radio"
+                  name="partnerNoticeType"
+                  value={opt.value}
+                  checked={noticeType === opt.value}
+                  onChange={() => setNoticeType(opt.value)}
+                  disabled={noticeSending}
+                  style={{ accentColor: opt.color }}
+                />
+                <span style={{ fontSize: 12, fontWeight: 600, color: noticeType === opt.value ? opt.color : "var(--color-label-mute)" }}>
+                  {opt.label}
+                </span>
+              </label>
+            ))}
+          </div>
+          {/* 발송 버튼 / 컨펌 */}
+          {!noticeConfirming ? (
+            <button
+              type="button"
+              onClick={() => setNoticeConfirming(true)}
+              disabled={!canSubmit}
+              style={{
+                padding: "10px 14px", fontSize: 13, fontWeight: 800,
+                background: canSubmit ? "var(--color-primary)" : "var(--color-bg-soft)",
+                color: canSubmit ? "#fff" : "var(--color-label-mute)",
+                border: "none", borderRadius: 8,
+                cursor: canSubmit ? "pointer" : "default",
+                boxShadow: canSubmit ? "0 2px 6px rgba(0,102,255,.25)" : "none",
+                fontFamily: "inherit",
+              }}>
+              {noticeRemaining === 0 ? "이번 시간 발송 한도 초과" : "발송하기"}
+            </button>
+          ) : (
+            <div style={{
+              background: "var(--color-bg-soft)", border: "1px solid var(--color-line)",
+              borderRadius: 8, padding: 12, display: "flex", flexDirection: "column", gap: 8,
+            }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--color-label)" }}>
+                자사 직원에게 공지가 발송됩니다. 발송하시겠습니까?
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={handleNoticeSubmit}
+                  disabled={noticeSending}
+                  style={{
+                    flex: 1, padding: "8px 12px", fontSize: 12, fontWeight: 800,
+                    background: noticeType === "emergency" ? "var(--color-destructive)" : "var(--color-primary)",
+                    color: "#fff", border: "none", borderRadius: 6,
+                    cursor: noticeSending ? "default" : "pointer", fontFamily: "inherit",
+                  }}>
+                  {noticeSending ? "발송 중..." : "확인 — 발송"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNoticeConfirming(false)}
+                  disabled={noticeSending}
+                  style={{
+                    flex: 1, padding: "8px 12px", fontSize: 12, fontWeight: 700,
+                    background: "var(--color-bg)", color: "var(--color-label-mute)",
+                    border: "1px solid var(--color-line)", borderRadius: 6,
+                    cursor: noticeSending ? "default" : "pointer", fontFamily: "inherit",
+                  }}>
+                  취소
+                </button>
+              </div>
+            </div>
+          )}
+          {/* 결과 카드 */}
+          {noticeResult && (
+            <div style={{
+              background: noticeResult.tone === "success" ? "#E8F7EE" : "#FCE5E5",
+              border: `1px solid ${noticeResult.tone === "success" ? "#9FD9B0" : "#F6C9C9"}`,
+              borderRadius: 8, padding: "8px 10px",
+              fontSize: 12, fontWeight: 600,
+              color: noticeResult.tone === "success" ? "#1F7A3C" : "#A81818",
+              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+            }}>
+              <span>{noticeResult.tone === "success" ? "✅" : "⚠️"} {noticeResult.msg}</span>
+              <button
+                type="button"
+                onClick={() => setNoticeResult(null)}
+                style={{
+                  background: "transparent", border: "none", cursor: "pointer",
+                  fontSize: 12, color: "inherit", padding: 0, fontFamily: "inherit",
+                }}>닫기</button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── 섹션 D: 공지 수신함 ─────────────────────────── */}
+      <div style={{ background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 10, overflow: "hidden" }}>
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--color-line-soft)", fontSize: 12, fontWeight: 700, color: "var(--color-label)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span>📢 공지사항</span>
+          <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-label-alt)" }}>최근 {notices.length}건</span>
+        </div>
+        <div style={{ maxHeight: 360, overflowY: "auto", padding: 12 }}>
+          {notices.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 24, color: "var(--color-label-mute)", fontSize: 13 }}>
+              <div style={{ fontSize: 28, marginBottom: 6 }}>📭</div>
+              등록된 공지사항이 없습니다
+            </div>
+          ) : notices.map(n => {
+            const emergency = n.type === "emergency";
+            return (
+              <div key={n.id} style={{
+                background: "var(--color-bg)",
+                border: `1px solid ${emergency ? "#F6C9C9" : "var(--color-line)"}`,
+                borderLeft: `4px solid ${emergency ? "var(--color-destructive)" : "var(--color-primary)"}`,
+                borderRadius: 10, padding: "10px 12px", marginBottom: 8,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                    background: emergency ? "#FCE5E5" : "var(--color-primary-soft)",
+                    color: emergency ? "#A81818" : "var(--color-primary-deep)"
+                  }}>
+                    {emergency ? "🚨 긴급" : "📢 공지"}
+                  </span>
+                  <span style={{ fontSize: 10, color: "var(--color-label-alt)", fontWeight: 600 }}>
+                    {fmtNoticeDate(n)}
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "var(--color-label)", marginBottom: 3, lineHeight: 1.4, wordBreak: "keep-all" }}>
+                  {n.title}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--color-label-mute)", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "keep-all" }}>
+                  {n.body}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

@@ -9,7 +9,9 @@ import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom } from ".
 import { computeStopEstimates, formatDelayLabel, formatPassengerEta, describeEtaSource } from "../lib/stopSchedule";
 import { useSmoothedEta } from "../lib/useSmoothedEta";
 import { useWakeTick } from "../lib/useWakeTick";
+import { useOnlineRecover } from "../lib/useOnlineRecover";
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
+import { resolveCompanyIdForAnon } from "../lib/companyResolver";
 
 // ── 경로 진행 판정 임계값 (작업2, 2026-05-18 — EmployeeApp과 동일 정책) ──
 const OFF_ROUTE_M = 70;       // 버스 투영 수직거리 초과 시 경로 이탈로 보고 직전 진행 유지
@@ -47,7 +49,10 @@ function saveRoute(cid, rid) {
 }
 
 export default function PassengerApp() {
-  const companyId = getParam("c") || "dy001";
+  // Phase 1.1 (2026-05-28): URL param > hostname 매핑 > dy001.
+  // PassengerApp 의 localStorage 키 `buslink_passenger_route_{cid}` 는 노선 저장용
+  // (companyId 분리 키 없음 — 키 자체에 cid 가 들어있어 chicken-and-egg). URL+hostname 만.
+  const companyId = resolveCompanyIdForAnon({ urlParam: getParam("c") });
   // 노선 결정 우선순위: ① URL route/r 파라미터(딥링크 — 동작 보존) ② localStorage 기준노선 ③ null(노선 선택 화면)
   const urlRouteId = getParam("route") || getParam("r"); // route=routeId 또는 r=routeId
   const [selectedRouteId, setSelectedRouteId] = useState(
@@ -75,6 +80,9 @@ export default function PassengerApp() {
   // 탭 frozen 후 stale 리스너 살아나는 듯하나 새 doc 변경 못 받음. wakeTick deps로
   // unsub→재구독 → Firestore가 현재 docs 즉시 fire → state 신선화.
   const wakeTick = useWakeTick();
+  // 통신 끊김→복구(online 전이) 시 Firestore reconnect 강제 + onSnapshot 재구독.
+  // wakeTick(visibilitychange)와 별개 트리거 — 탭은 켜진 채 데이터망만 끊겼다 복구한 케이스.
+  const recoverTick = useOnlineRecover({ forceFirestoreReconnect: true });
 
   // 노선 선택 확정 — active 노선 설정 + localStorage 저장(다음 방문 자동) + 재바인딩
   const chooseRoute = (rid) => {
@@ -142,7 +150,8 @@ export default function PassengerApp() {
       if (list.length > 0 && list[0].lat && list[0].lng && !routeId)
         setCenter({ lat: list[0].lat, lng: list[0].lng });
     });
-  }, [companyId, routeId, ready, wakeTick]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, routeId, ready, wakeTick, recoverTick]);
 
   // 오늘 dispatch stopArrivals 구독(routeId 한정) — 정류장 리스트 계획·예상 시간 표시용.
   const [todayDispatch, setTodayDispatch] = useState(null);
@@ -166,7 +175,8 @@ export default function PassengerApp() {
       });
       setTodayDispatch({ stopArrivals: merged });
     }, () => setTodayDispatch(null));
-  }, [companyId, routeId, ready, wakeTick]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, routeId, ready, wakeTick, recoverTick]);
 
   const timeSince = (date) => {
     if (!date) return "";
@@ -338,6 +348,38 @@ export default function PassengerApp() {
   const myStopRawSec = getMyETASec();
   const smoothedMyEtaSec = useSmoothedEta(myStopRawSec);
 
+  // ── ArrivalProximityModal (2026-05-28) ──────────────────────────────────
+  // 내 정류장(myStopIdx) 직전 정류장(myStopIdx-1)이 stopArrivals에 새로 등장(actualAt
+  // 최근 5분 이내)하면 풀스크린 모달로 "곧 도착" 안내. 1회만(dismissed) + 새 routeId
+  // 변경 시 reset. myStopIdx==0이면 직전 없음=비표시. notifyPreArrival CF FCM과 별도
+  // 인-앱 보장 통로(중복 무해 — NoticeForceModal 패턴 준용).
+  const [proximityModal, setProximityModal] = useState(null); // { stopName } | null
+  const proximityDismissedRef = useRef(new Set()); // 이 routeId 안에서 이미 dismiss 한 stopId
+  // route 변경 시 dismissed reset.
+  useEffect(() => {
+    proximityDismissedRef.current = new Set();
+    setProximityModal(null);
+  }, [routeId]);
+  // 직전 정류장 도착 감지.
+  useEffect(() => {
+    if (myStopIdx === null || myStopIdx <= 0 || stops.length === 0) return;
+    const prevStop = stops[myStopIdx - 1];
+    if (!prevStop) return;
+    const sa = todayDispatch?.stopArrivals || {};
+    const arrivedMs = sa[prevStop.id];
+    if (arrivedMs == null) return;
+    // 최근 5분 이내 도착만 트리거(과거 도착으로 모달 갑자기 뜨는 결함 방지).
+    if (Date.now() - arrivedMs > 5 * 60 * 1000) return;
+    if (proximityDismissedRef.current.has(prevStop.id)) return;
+    setProximityModal({ stopName: prevStop.name });
+  }, [myStopIdx, stops, todayDispatch?.stopArrivals]);
+  const closeProximityModal = () => {
+    if (proximityModal && stops[myStopIdx - 1]) {
+      proximityDismissedRef.current.add(stops[myStopIdx - 1].id);
+    }
+    setProximityModal(null);
+  };
+
   if (!ready) return (
     <div style={S.fullCenter}>
       <div style={{ color: "var(--color-primary)", fontSize: 16, fontWeight: 600 }}>로딩 중...</div>
@@ -371,6 +413,10 @@ export default function PassengerApp() {
   const progressPct = (myStopIdx !== null && stops.length > 1)
     ? Math.round((myStopIdx / (stops.length - 1)) * 100)
     : 0;
+
+  // [DIAG-ETA 제거예정] URL ?debug=1 일 때만 노출. prod 영향 0.
+  const diagEnabled = getParam("debug") === "1";
+  // [/DIAG-ETA]
 
   return (
     <div style={S.wrap}>
@@ -481,6 +527,49 @@ export default function PassengerApp() {
             <Icon name="pin" size={14} /> 내 탑승 정류장을 클릭하면 ETA를 확인할 수 있습니다
           </div>
         )}
+
+        {/* [DIAG-ETA 제거예정] PassengerApp 진단 — URL ?debug=1 일 때만.
+            본인 정류장 한정(myStopIdx). prod 영향 0(URL 파라미터 없으면 미렌더). */}
+        {diagEnabled && myStopIdx !== null && stops[myStopIdx] && (() => {
+          const e = estByStopId[stops[myStopIdx].id];
+          if (!e) return null;
+          const delayMin = e.delaySec != null ? Math.round(e.delaySec / 60) : null;
+          const delayLab = delayMin == null ? "—"
+            : delayMin === 0 ? "0분"
+            : delayMin > 0 ? `+${delayMin}분`
+            : `${delayMin}분`;
+          const segProg = (typeof busProgress === "number" && myStopProgress != null && myStopIdx > 0)
+            ? (() => {
+                const prev = stops[myStopIdx - 1];
+                const prevProj = projectToPolyline({ lat: prev.lat, lng: prev.lng }, routePath, routeCum);
+                if (!prevProj) return null;
+                const sa = prevProj.progress, sb = myStopProgress;
+                if (sb <= sa) return null;
+                const ratio = (busProgress - sa) / (sb - sa);
+                return Math.max(0, Math.min(1, ratio));
+              })()
+            : null;
+          return (
+            <div style={{
+              position: "absolute", left: 8, right: 8, top: 60, zIndex: 5,
+              padding: 8, borderRadius: 8,
+              background: "#FFFBEA", border: "1px dashed #C99A2E",
+              fontSize: 10, fontFamily: "monospace", lineHeight: 1.5,
+              color: "#3a2e08",
+            }}>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>[DIAG-ETA] 내 정류장 진단</div>
+              <div>[{myStopIdx}] {stops[myStopIdx].name}</div>
+              <div>plan {e.plannedAt || "—"} | est {e.estimatedAt || "—"} | delay {delayLab}</div>
+              <div>status {e.status} | source {e.source}</div>
+              <div>busProgress={typeof busProgress === "number" ? Math.round(busProgress) + "m" : "—"}
+                {" | "}myStopProgress={myStopProgress != null ? Math.round(myStopProgress) + "m" : "—"}
+                {segProg != null && <> | segProgress={(segProg * 100).toFixed(1)}%</>}
+              </div>
+              <div>speed={mainBus?.speed != null ? mainBus.speed.toFixed(1) + "km/h" : "—"}</div>
+            </div>
+          );
+        })()}
+        {/* [/DIAG-ETA] */}
       </div>
 
       {/* 상단 상태바 카드 (목업: 부유 상단 카드) */}
@@ -718,6 +807,43 @@ export default function PassengerApp() {
           </>
         )}
       </div>
+
+      {/* ── 도착 임박 모달(2026-05-28) — 내 정류장 직전 정류장 도착 시 풀스크린 안내 ── */}
+      {proximityModal && (
+        <div onClick={closeProximityModal}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(11,16,32,0.78)",
+            zIndex: 300, display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center", padding: 24,
+            backdropFilter: "blur(4px)",
+          }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{
+              background: "var(--color-bg)", borderRadius: "var(--radius-24)",
+              padding: "32px 24px 24px", width: "100%", maxWidth: 360,
+              boxShadow: "var(--shadow-heavy)", textAlign: "center",
+            }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>🚌</div>
+            <div style={{ fontSize: 22, fontWeight: 900, color: "var(--color-primary)", marginBottom: 8 }}>
+              곧 도착합니다
+            </div>
+            <div style={{ fontSize: 15, color: "var(--color-label)", lineHeight: 1.55, marginBottom: 20 }}>
+              <span style={{ fontWeight: 800 }}>{proximityModal.stopName}</span>에 버스가 도착했어요.<br/>
+              다음이 <span style={{ fontWeight: 800, color: "var(--color-primary-deep)" }}>내 정류장</span>입니다.<br/>
+              <span style={{ fontSize: 13, color: "var(--color-label-mute)" }}>탑승 준비를 해주세요</span>
+            </div>
+            <button onClick={closeProximityModal}
+              style={{
+                width: "100%", background: "var(--color-primary)", color: "#fff",
+                border: "none", borderRadius: "var(--radius-12)", padding: "14px 16px",
+                fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: "inherit",
+                boxShadow: "var(--shadow-strong)",
+              }}>
+              확인
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 정류장 사진 라이트박스 — 위치 확인용 확대 보기 */}
       {photoView && (

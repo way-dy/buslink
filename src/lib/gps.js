@@ -18,6 +18,10 @@ const WATCH_OPTS = { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000
 
 // watchId → cleanup 매핑 (watchId는 number라 속성 부착 불가 → 모듈 레지스트리 사용)
 const cleanupRegistry = new Map();
+// watchId → 마지막 GPS 좌표 캡쳐(triggerHeartbeat 용 — 통신 복구 시 즉시 1회 sendGPS 트리거).
+// startGPS 컨텍스트(companyId/vehicleId 등)와 마지막 좌표를 함께 보관 — 외부 호출자가
+// 정보 미입력으로 sendGPS 호출하지 않도록 캡슐화.
+const heartbeatRegistry = new Map();
 
 function getDistance(p1, p2) {
   const R = 6371000;
@@ -110,6 +114,20 @@ export function startGPS({ companyId, vehicleId, vehicleNo, driverId, driverName
     lastPos = { lat: pos.lat, lng: pos.lng, speed: pos.speed, accuracy: pos.accuracy };
     lastSentTime = Date.now();
     await sendGPS({ companyId, vehicleId, vehicleNo, driverId, driverName, routeId, routeName, lat: pos.lat, lng: pos.lng, speed: pos.speed, accuracy: pos.accuracy });
+  };
+
+  // ── triggerHeartbeat 캡슐 — 외부(useOnlineRecover 복구 콜백)가 호출 시 마지막
+  //    좌표를 즉시 1회 sendGPS로 발송. 통신 복구 후 watch 자체는 살아있어도
+  //    Firestore가 마커를 신선화하기까지 지연 가능 → 즉시 1회 강제 갱신.
+  const triggerHeartbeatFn = () => {
+    if (!lastPos) return false;
+    sendGPS({
+      companyId, vehicleId, vehicleNo, driverId, driverName, routeId, routeName,
+      lat: lastPos.lat, lng: lastPos.lng,
+      speed: lastPos.speed, accuracy: lastPos.accuracy,
+    }).catch((e) => console.warn("[BusLink] heartbeat 전송 실패:", e.message));
+    lastSentTime = Date.now();
+    return true;
   };
 
   // 정류장 도착 감지 — 콜백마다 호출. 두 경로:
@@ -255,11 +273,22 @@ export function startGPS({ companyId, vehicleId, vehicleNo, driverId, driverName
   cleanupRegistry.set(watchId, () => {
     if (trailingTimer) { clearTimeout(trailingTimer); trailingTimer = null; }
   });
+  // 마지막 좌표 캡쳐 트리거 등록 — 통신 복구 시 즉시 1회 sendGPS 강제.
+  heartbeatRegistry.set(watchId, triggerHeartbeatFn);
   return watchId;
 }
 
 export function stopGPS(watchId) {
   const cleanup = cleanupRegistry.get(watchId);
   if (cleanup) { cleanup(); cleanupRegistry.delete(watchId); }
+  heartbeatRegistry.delete(watchId);
   navigator.geolocation.clearWatch(watchId);
+}
+
+// 통신 복구 시 호출 — 마지막 GPS 좌표로 즉시 1회 sendGPS 트리거. 호출자(useOnlineRecover)는
+// online 전이 감지 후 driving=true인 watchId를 넘김. lastPos 없으면 noop·false 반환.
+export function triggerHeartbeat(watchId) {
+  const fn = heartbeatRegistry.get(watchId);
+  if (typeof fn === "function") return fn();
+  return false;
 }

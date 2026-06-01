@@ -4,11 +4,20 @@
 //   - planTimeForStop: 노선 출발시각(departTime "HH:MM") + 정류장 offsetMin(분)
 //     → 정류장 계획 진입시각("HH:MM" 또는 null).
 //   - computeStopEstimates: 정류장별 status·계획시각·예상시각·지연(초) 산출.
-//     정류장을 order 순서대로 순회하며 estMs를 "단조증가"로 강제(2026-05-22):
-//     chain 우선(직전 actual·estMs + 구간이동시간), plan+delay는 chain 부재 시
-//     fallback. next는 chain·gps 0.7:0.3 가중. (2026-05-27 변경 — 이전엔
-//     plan+delay와 chain 중 max였으나, 누적지연을 모든 미래 정류장에 carry해
-//     "actual 기반 재추정"이라는 사용자 의도와 불일치 → chain 우선으로 전환).
+//     정류장을 order 순서대로 순회하며 estMs를 "단조증가"로 강제(2026-05-22).
+//
+//   2026-05-28 plan-uvert(GPS 0%) 변경:
+//     segTravelMs(a,b)를 "계획 offsetMin 델타 우선"으로 전환. 둘 다 offsetMin
+//     있으면 (offsetB - offsetA)*60*1000 — DWELL 가산 X(offsetMin 자체가 정차/
+//     감속/가속 포함된 진입시각 차이). chain 전파 = actualLast + Σ(plan 델타) =
+//     plannedMs[i] + (actualLast - plannedLast). 즉 "각 정류장 실 도착시간 기준
+//     으로 다음 정류장까지 미리 설정한 offsetMin만큼 더해 도착시간 정밀 예측"이라는
+//     사용자 의도와 수학적 등가. 한쪽 offsetMin 누락 시 geometric(routePath/직선
+//     ÷ 유효속도 + DWELL_SEC) 폴백.
+//     `next` 정류장의 GPS 가중치 완전 제거(0%) — chain 우선·없으면 plan+delay·
+//     없으면 gps 폴백. 이전 0.7:0.3 가중이 터널·GPS 노이즈에서 ETA 튀는 결함을
+//     원천 차단. source enum 4종(actual/plan+delay/gps/fallback) 호환 유지.
+//
 //     estMs[i] >= estMs[i-1]+MIN_STOP_GAP_SEC + estMs[i] >= now+버퍼(과거 금지).
 //     → 도착지·이전 정류장 동일값·역전·과거 시각 표시 결함 원천 차단.
 //     offsetMin 미설정 정류장은 calcETA 폴백.
@@ -40,6 +49,13 @@ const MIN_EFFECTIVE_SPEED_KMH = 20; // 정차/저속 노이즈 하한 — 구간
 // /속도가 아닌, 정차(승하차)+감속+가속 포함이라 segTravelMs에 가산. 근접 정류장
 // (200~500m)의 "지나치게 짧음" 결함을 직접 차단.
 const DWELL_SEC = 30;
+// 2026-05-29 routePath 진척률 안분 — 다음 정류장(next) 한정.
+// busProgress / segmentLength ≥ ARRIVING_PROGRESS_THRESHOLD 면 "거의 도착" → ETA를
+// ARRIVING_BUFFER_SEC(45초) 단순 표시로 고정(점프 차단·"곧 도착" 자연 노출).
+const ARRIVING_BUFFER_SEC = 45;
+const ARRIVING_PROGRESS_THRESHOLD = 0.95;
+// 시작 직후 노이즈 구간(actualProgress ≤ 이 값)에선 진척률 채택 안 함.
+const PROGRESS_NOISE_FLOOR = 0.05;
 
 // "HH:MM" 문자열을 0~24*60 분으로. 형식 불량(빈값/NaN/범위 초과) 시 null.
 function parseHHMM(s) {
@@ -173,9 +189,25 @@ export function computeStopEstimates({
       : null
   );
 
-  // 두 정류장(인덱스 a→b) 간 구간 이동시간(ms). routePath 구간거리가 있으면 그것을,
-  // 없으면 haversine 직선거리를. 유효속도 = max(차량속도, 20km/h)(저속 노이즈 하한).
+  // 두 정류장(인덱스 a→b) 간 구간 이동시간(ms).
+  // 2026-05-28 plan-uvert: 둘 다 offsetMin 설정되어 있으면 계획 offsetMin 델타
+  //   ((offsetB - offsetA) * 60 * 1000)를 그대로 채택. DWELL 별도 가산 X —
+  //   offsetMin 자체가 dwell(정차/감속/가속) 포함된 진입시각 차이라 이중계산 회피.
+  //   chain 전파 결과 = actualLast + Σ(plan 델타) = plannedMs[i] + (actualLast -
+  //   plannedLast) → "각 정류장 실 도착시간 기준 + 계획 offsetMin"의 사용자 의도.
+  // 한쪽 offsetMin 누락 시 geometric 폴백(routePath/직선거리 ÷ 유효속도 + DWELL_SEC).
   const segTravelMs = (a, b) => {
+    // (i) plan 우선 — 둘 다 offsetMin 있을 때
+    const offA = (stops[a] && typeof stops[a].offsetMin === "number" && isFinite(stops[a].offsetMin))
+      ? stops[a].offsetMin : null;
+    const offB = (stops[b] && typeof stops[b].offsetMin === "number" && isFinite(stops[b].offsetMin))
+      ? stops[b].offsetMin : null;
+    if (offA != null && offB != null) {
+      // 계획 델타는 음/0 가능(데이터 오류) → 음수 방지로 0 하한.
+      // DWELL 가산 안 함 — offsetMin 자체가 진입시각 차이라 이중계산 회피.
+      return Math.max(0, (offB - offA) * 60 * 1000);
+    }
+    // (ii) 폴백 — geometric(routePath 구간거리 or haversine 직선) + DWELL.
     let distM = null;
     if (stopProgress[a] != null && stopProgress[b] != null) {
       distM = Math.max(0, stopProgress[b] - stopProgress[a]);
@@ -192,7 +224,7 @@ export function computeStopEstimates({
         ? speed : DEFAULT_SPEED_KMH,
       MIN_EFFECTIVE_SPEED_KMH
     );
-    // 주행시간 + 정차시간(DWELL_SEC) — 실제 정류장 간 도착시간은 정차/감속/가속 포함.
+    // 주행시간 + 정차시간(DWELL_SEC) — geometric 폴백에선 정차/감속/가속 포함.
     return (distM / 1000) / effSpeed * 3600 * 1000 + DWELL_SEC * 1000;
   };
 
@@ -288,35 +320,50 @@ export function computeStopEstimates({
       chainCandidate = chainBase + segTravelMs(i - 1, i);
     }
 
-    // (f) 후보 결합 — 2026-05-27 chain 우선 정책으로 전환.
-    //   변경 배경: 이전 정책(plan+delay와 chain 중 max)은 출발 지연(예: 33분)이
-    //   발생하면 누적지연이 모든 미래 정류장 plannedMs에 그대로 carry되어
-    //   chain(actual+segTravel)이 더 빨라도 plan+delay가 채택 → "33분 지연"이
-    //   모든 미래 정류장에 동일 carry. 사용자 의도 = "실제 정류장 도착시간 기반
-    //   으로 바로 다음 정류장 도착예정시간 추정" → chain 우선이 맞음. 지연 라벨이
-    //   chain 기반 estMs로 자연히 줄어드는(예: 33분 → 20분) 동작은 사용자가 수용.
+    // (f) 후보 결합 — 2026-05-28 plan-uvert(GPS 0%) + 2026-05-29 routePath 진척률
+    //     안분(next 한정).
+    //   변경 배경(2026-05-28): 이전 정책(next에 chain·gps 0.7:0.3 가중)에서 GPS 속도가
+    //   터널·약전계에서 죽거나 30~70km/h로 노이즈하면 gpsCandidate가 출렁여 ETA가
+    //   "갑자기 늘었다 줄어드는" 결함이 직접 노출됨.
+    //   추가 결함(2026-05-29 사용자 실측): chain plan-uvert 후 next 정류장 ETA는
+    //   actualLast+plan 델타로 정류장 통과 시점에만 갱신되므로 정류장 사이에선 정적
+    //   → T_NOW만 흐르며 남은 시간 자연 감소 → 정류장 도착 직전 갱신 시 큰 점프
+    //   → useSmoothedEta가 5분 이상 점프 시 raw 채택 → "갑자기 곧 도착"으로 도약.
+    //   사용자 요구: "노선그린 베이스 기준으로 다음 정류장까지 교통상황 등으로
+    //   늦어진다면 진척에 대한 안분으로 계산해서 예정보다 조금씩 늦어지거나 반대로
+    //   빨라지는 로직".
     //
-    //   - nextIdx 정류장: chain·gps 0.7:0.3 가중(chain 정본, GPS 미세 보정).
-    //   - upcoming 정류장: chain 우선, 없으면 plan+delay fallback.
-    //   - source는 chain 채택 시 'plan+delay' 유지(describeEtaSource 한국어 라벨
-    //     "계획+지연"이 actual 후 추정 = 계획 갱신 형태로 사용자에게 자연스러움).
+    //   해법(next 정류장 한정·routePath 있을 때만):
+    //     actualProgress = (busProgress - stopProgress[i-1]) / segDist
+    //     expectedProgressByTime = elapsedSinceSegmentStart / expectedTotalMs
+    //     slowFactor = max(1, expectedProgressByTime / actualProgress)
+    //                  (빠른 방향은 1로 클램프 — 갑작스러운 "곧 도착" 점프 차단)
+    //     remainingMs = (1 - actualProgress) * expectedTotalMs * slowFactor
+    //     estMs = T_NOW + remainingMs
+    //   actualProgress ≥ 0.95 → ARRIVING_BUFFER_SEC(45초) 표시(거의 도착).
+    //   actualProgress ≤ 0.05 → 노이즈 구간, chain 그대로(분기 안 함).
+    //   진척률 안분은 source='gps'로 표시(사용자가 "GPS 추정" 라벨로 인식).
+    //
+    //   - next/upcoming 모두: chainCandidate 있으면 그대로 채택(source='plan+delay').
+    //   - chain 부재 시 planCandidate 폴백, 그도 없으면 gpsCandidate(상수 보존 — 최후
+    //     안전망), 그도 없으면 null.
+    //   - next 한정 추가 단계: chain 채택 후 routePath+busProgress 있고 i>0이면
+    //     위 진척률 안분으로 estMs 덮어씀(가능할 때만).
+    //   source enum 4종(actual/plan+delay/gps/fallback) 호환 유지.
     let estMs = null;
     let source = "plan+delay";
     if (i === nextIdx) {
-      // next: chain 우선·GPS 미세 보정.
-      if (chainCandidate != null && gpsCandidate != null) {
-        // chain(actual+segTravel)이 정본, GPS 노이즈는 30% 비중 보정.
-        estMs = 0.7 * chainCandidate + 0.3 * gpsCandidate;
-        source = "gps";
-      } else if (chainCandidate != null) {
+      // next: chain 우선·GPS 0%(2026-05-28).
+      if (chainCandidate != null) {
         estMs = chainCandidate;
-        // source 'plan+delay' 유지(chain도 plan과 같은 계열로 사용자 표시).
-      } else if (gpsCandidate != null) {
-        estMs = gpsCandidate;
-        source = "gps";
+        // source 'plan+delay' 유지(chain도 plan과 같은 계열 = actual 후 plan 갱신).
       } else if (planCandidate != null) {
         estMs = planCandidate;
         source = "plan+delay";
+      } else if (gpsCandidate != null) {
+        // 안전망 — 정상 운영에선 도달 안 함(chain 또는 plan 항상 존재).
+        estMs = gpsCandidate;
+        source = "gps";
       }
     } else {
       // upcoming: chain 우선(직전 actual·estMs 기반 전파). plan+delay는 chain 부재 시 fallback.
@@ -330,6 +377,63 @@ export function computeStopEstimates({
       }
     }
     if (estMs == null) estMs = planCandidate; // 최종 폴백(이론상 plannedMs는 항상 존재)
+
+    // (f-1) routePath 진척률 안분 — next 정류장 한정, busProgress·stopProgress 있을 때만.
+    //   2026-05-29 사용자 실측 결함 fix.
+    if (
+      i === nextIdx &&
+      usePath &&
+      busProgress != null &&
+      i > 0 &&
+      stopProgress[i - 1] != null &&
+      stopProgress[i] != null
+    ) {
+      const sa = stopProgress[i - 1];
+      const sb = stopProgress[i];
+      const segDistM = sb - sa;
+      if (segDistM > 0) {
+        const traveledM = Math.max(0, busProgress - sa);
+        const actualProgress = Math.min(1, traveledM / segDistM);
+
+        if (actualProgress >= ARRIVING_PROGRESS_THRESHOLD) {
+          // 거의 도착 — 45초 단순 표시(점프 차단, "곧 도착" 자연 노출).
+          estMs = T_NOW + ARRIVING_BUFFER_SEC * 1000;
+          source = "gps";
+        } else if (actualProgress > PROGRESS_NOISE_FLOOR) {
+          // 정상 진행 중 — 시간 진척률 vs 거리 진척률 비교 안분.
+          // chain 채택값이 estMs(미래 시각)이므로 segmentStartMs = chainBase 로 가정.
+          //   - chainBase = 직전 정류장 actualMs 또는 직전 estMs 또는 T_NOW(노선 시작).
+          //   - expectedTotalMs = segTravelMs(i-1, i)
+          //   - elapsedMs = max(0, T_NOW - segmentStartMs)
+          const segmentStartMs = chainBase; // 위 (e)에서 정의된 직전 기준점
+          const expectedTotalMs = segTravelMs(i - 1, i);
+          if (expectedTotalMs > 0) {
+            const elapsedMs = Math.max(0, T_NOW - segmentStartMs);
+            const expectedProgressByTime = Math.min(1, elapsedMs / expectedTotalMs);
+            // slowFactor = 시간/거리 비. >1=느림(교통체증), <1=빠름.
+            // 빠른 방향은 1로 클램프 — 갑작스러운 "곧 도착" 점프 차단(사용자 호소 #3).
+            const slowFactor = (actualProgress > 0)
+              ? Math.max(1, expectedProgressByTime / actualProgress)
+              : 1;
+            const remainingMs = (1 - actualProgress) * expectedTotalMs * slowFactor;
+            estMs = T_NOW + remainingMs;
+            source = "gps"; // 진척률 기반 표시
+          }
+        }
+        // actualProgress <= 0.05 — 시작 직후 노이즈, chain 그대로(분기 안 함).
+      }
+    }
+
+    // (f-2) delaySec 표시용 raw 후보 — 가드 적용 전 값 보존.
+    //   사용자 신호 #1("정시보다 빨리 와도 지연이 누적") 해결:
+    //   가드 적용된 estMs로 delaySec 계산하면 단조증가(60s)·과거금지(30s)에 의해
+    //   음수(조기) 지연이 양수(지연)로 뒤집힐 수 있음.
+    //   해법 = arrived는 (actualMs - plannedMs) 그대로(불변, 위 (a) 분기), 미통과는
+    //   가드 적용 *전* raw 후보(chain → plan → est 순) 기준으로 delaySec 산출.
+    //   estMs(표시 시각)는 가드 적용해서 단조증가/과거금지 정합 유지.
+    const rawForDelay = (chainCandidate != null) ? chainCandidate
+      : (planCandidate != null) ? planCandidate
+      : estMs;
 
     // (g) 단조증가 강제 — 직전 정류장 estMs보다 최소 MIN_STOP_GAP_SEC 이후.
     //     동일값·역전을 원천 차단(이슈 2·3의 핵심 메커니즘 제거).
@@ -346,8 +450,9 @@ export function computeStopEstimates({
     const estimatedAt = fmtHHMM(
       new Date(estMs).getHours() * 60 + new Date(estMs).getMinutes()
     );
+    // delaySec은 raw(가드 적용 전) 기준 — 음수 지연(조기 도착) 뒤집힘 차단.
     const delaySec = (plannedMs != null)
-      ? Math.round((estMs - plannedMs) / 1000)
+      ? Math.round((rawForDelay - plannedMs) / 1000)
       : (hasDelayRef ? cumulativeDelaySec : null);
     // 가장 최근 알려진 지연 갱신(unplanned 정류장 carry-forward용).
     if (delaySec != null) prevDelaySec = delaySec;

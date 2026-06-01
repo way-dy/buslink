@@ -12,14 +12,14 @@
 - `passengers/{empNo}` (PIN 해시·노선 배정)
 - `boardings/{date}/list/{boardingId}` — `empNo/name/tokenId/companyId/routeId/routeName/vehicleId/vehicleNo/driverId/stopId/stopName/boardedAt` + **`partnerCode`**(null 가능, 2026-05-26 신규 — 직원의 passengers.partnerCode 자동 채움) + **`vehicleLat/vehicleLng/vehicleSpeed`**(null 가능, 2026-05-26 신규 — 탑승 시점 차량 GPS 캡처, 사후 정류장별 매핑용. `gps/{companyId}_{vehicleId}` 1회 getDoc). 둘 다 미수신/권한 오류 시 null, 통계에선 "미지정"/"GPS 없음"으로 분리
 - `fcmTokens/{empNo}` — `token/empNo/companyId/partnerCode/updatedAt` + (선택) **`routeId/stopId/myStopUpdatedAt`**(도착 임박 푸시용 '내 정류장' denormalize, 2026-05-22. EmployeeApp `/p`에서 내 정류장 선택 시 `setDoc` merge, 해제·노선변경 시 null. CF `notifyPreArrival`가 where `routeId`+`stopId`로 대상 직원 검색). (partnerCode: 2026-05-21 추가, EmployeeApp 로그인 시 passengers.partnerCode 자동 sync, 없으면 null. CF 협력사 발송 시 where 필터)
-- `notices/{noticeId}` — `title/body/type/companyId/partnerCode/active/createdAt` (partnerCode 2026-05-21 추가, null=전체)
+- `notices/{noticeId}` — `title/body/type/companyId/partnerCode/active/createdAt` (partnerCode 2026-05-21 추가, null=전체) + (선택, 2026-05-29 Phase 1.4) **`sender:"partner"|undefined`**·**`senderCode:string|undefined`**(PartnerApp `sendPartnerNotice` 발송 분 식별용. admin 발송 분은 미존재 = "관리자". EmployeeApp NoticeTab·NoticesTab·NoticeForceModal·승객앱 공지배너는 옵셔널 필드 미사용 — read 호환 100%)
 
 최상위:
-- `users/{uid}` — **권한 게이트**(`role`+`companyId`). App.js·규칙·Functions가 함께 읽음.
+- `users/{uid}` — **권한 게이트**(`role`+`companyId` + `name?`/`empNo?`/`email?`). App.js·규칙·Functions가 함께 읽음. (선택, 2026-05-29 Phase A) **`allowedPartnerCodes:string[]`** — admin 한정 협력사 권한 범위. `["*"]`=회사 본부(전체), `["code1","code2"]`=특정 협력사 한정. 필드 부재=기존 admin 호환(클라이언트 `?? ["*"]` 폴백·마이그 불필요). `createCompanyAdmin`/`updateCompanyAdminPermissions` 가 write, `listCompanyAdmins` 가 read 정규화. Phase B(AdminApp 협력사 필터 자동 적용) 미도입 — 데이터만 누적.
 - `gps/{companyId}_{vehicleId}` — 실시간 위치(덮어쓰기)
 - `gpsHistory/{companyId}/{vehicleId}/{date}/points/{pointId}`
 - `boardingTokens/{tokenId}` — 5분 만료·1회 소각(`used` 플래그)
-- `partnerCodes/{code}` — 협력사 코드(1년 유효)
+- `partnerCodes/{code}` — 협력사 코드(1년 유효) + (선택, 2026-05-29 Phase 1.4) **`recentNoticeTimestamps:number[]`**(서버 시각 ms 배열, CF `sendPartnerNotice` 가 1시간 5건 rate-limit 용으로 옛 항목 정리 + now 추가. 부재=빈배열로 동작)
 - `fcmQueue/{queueId}` — CF 트리거 큐. `companyId/noticeId/title/body/type/partnerCode/status/totalTokens/successCount/failureCount/error`. status: pending→sent/no_tokens/error. admin은 자기회사 큐 read 가능(2026-05-21, 발송 결과 onSnapshot 구독용)
 
 ## 보안 규칙

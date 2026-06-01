@@ -151,6 +151,19 @@ service cloud.firestore {
       allow delete: if isAdmin(resource.data.companyId);
     }
 
+    // ─── ETA 자동 진단 로깅 (2026-05-29) ─────────────────
+    // 운행 중 DriverApp 이 30초 + stopArrivals 변경 시 자동 누적.
+    // 부모(개발자)가 Firebase Console 로 회수해 정밀 진단.
+    // create=isAuth() (기사 본인 익명/실명 모두 — 운행 진행 보장),
+    // read=admin/superadmin (진단 데이터 보호), update/delete=false (불변 로그).
+    match /etaDiagnostics/{date}/runs/{runId}/points/{pointId} {
+      allow read: if isAuth() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+          in ["admin", "superadmin"];
+      allow create: if isAuth();
+      allow update, delete: if false;
+    }
+
     // ─── FCM 발송 큐 (Cloud Function 트리거용) ───────────
     match /fcmQueue/{queueId} {
       allow create: if isAuth(); // 어드민이 공지 발송 시 생성

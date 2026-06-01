@@ -14,6 +14,7 @@ import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom } from ".
 import { computeStopEstimates, formatDelayLabel, formatPassengerEta, describeEtaSource } from "../lib/stopSchedule";
 import { useSmoothedEta } from "../lib/useSmoothedEta";
 import { useWakeTick } from "../lib/useWakeTick";
+import { useOnlineRecover } from "../lib/useOnlineRecover";
 
 import { validateAndBoard, createPassengerToken } from "../lib/boarding";
 import { hashPin } from "../lib/partner";
@@ -22,6 +23,7 @@ import { BusLinkLogo, StatusDot } from "../components/ui";
 import InstallPrompt, { InstallGuide } from "../components/InstallPrompt";
 import { applyAppManifest } from "../lib/pwaManifest";
 import PermissionGate from "../components/PermissionGate";
+import { resolveCompanyIdForAnon } from "../lib/companyResolver";
 
 // ── 경로 진행 판정 임계값 (작업2, 2026-05-18) ──
 // 버스 투영 수직거리가 이 값 초과면 경로 이탈로 보고 진행거리 갱신·지나온경로 그리기에서 제외
@@ -213,7 +215,10 @@ const TABS = [
 
 // ════════════════════════════════════════════════════════
 export default function EmployeeApp() {
-  const companyId = getParam("c") || "dy001";
+  // Phase 1.1 (2026-05-28): URL param > hostname 매핑 > dy001.
+  // EmployeeApp 의 localStorage `buslink_employee` 는 세션(empNo/name/dept/routeId)
+  // 저장용이라 companyId 분리 키는 없음(과거 단일테넌트 전제) — URL+hostname 만 활용.
+  const companyId = resolveCompanyIdForAnon({ urlParam: getParam("c") });
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState(null);   // { empNo, name, dept, routeId, pinHash }
   const [tab, setTab] = useState("home");
@@ -496,6 +501,9 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
   // 백그라운드 → foreground 복귀 시 onSnapshot 재구독(stale 리스너 신선화).
   // EmployeeApp(/p) 통근버스 사용자는 등하교 전후 장시간 백그라운드 상태가 흔함.
   const wakeTick = useWakeTick();
+  // 통신 끊김→복구(online 전이) 시 Firestore reconnect 강제 + onSnapshot 재구독.
+  // 직원앱이 노선 변경/재시작 없이도 자동 활성화되도록 보강(2026-05-28).
+  const recoverTick = useOnlineRecover({ forceFirestoreReconnect: true });
 
   useEffect(() => {
     const t = setInterval(() => setTick(x => x + 1), 1000);
@@ -594,7 +602,8 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
       setRawBuses(list);
       setLastUpdate(new Date());
     });
-  }, [companyId, activeRouteId, wakeTick]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, activeRouteId, wakeTick, recoverTick]);
 
   // ── 오늘 노선 dispatch 구독(stopArrivals 실 도착시각 수신) ────────
   // 활성 노선의 오늘 dispatch 1건(여러개면 첫 건) — driver 측이 도착 감지 시
@@ -622,7 +631,8 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
       });
       setTodayDispatch({ stopArrivals: merged });
     }, () => setTodayDispatch(null));
-  }, [companyId, activeRouteId, wakeTick]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, activeRouteId, wakeTick, recoverTick]);
 
   const mainBus   = buses[0] || null;
   const myStop    = myStopIdx !== null ? stops[myStopIdx] : null;
@@ -690,6 +700,9 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
   });
   const estByStopId = Object.fromEntries(stopEstimates.map(e => [e.stopId, e]));
   const myStopEst = myStop ? estByStopId[myStop.id] : null;
+  // [DIAG-ETA 제거예정] URL ?debug=1 일 때만 노출. prod 영향 0.
+  const diagEnabled = getParam("debug") === "1";
+  // [/DIAG-ETA]
 
   // ★ 핵심 — routePath 있으면 경로 진행거리 기반, 없으면 노선 순서(기존) 폴백
   // 2026-05-21: 큰 카운트다운 안정화를 위해 분(`eta`)과 초(`etaSec`)를 함께 산출.
@@ -803,6 +816,35 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
     ? 'var(--color-positive)'
     : etaColor;
 
+  // ── ArrivalProximityModal (2026-05-28) ──────────────────────────────────
+  // 내 정류장(myStopIdx) 직전 정류장(myStopIdx-1)이 stopArrivals에 새로 등장(actualAt
+  // 최근 5분 이내)하면 풀스크린 모달로 "곧 도착" 안내. 1회만(dismissed) + activeRouteId
+  // 변경 시 reset. myStopIdx==0이면 직전 없음=비표시. notifyPreArrival CF FCM과 별도
+  // 인-앱 보장 통로(중복 무해 — NoticeForceModal 패턴 준용·OEM 절전 누락 폴백).
+  const [proximityModal, setProximityModal] = useState(null); // { stopName } | null
+  const proximityDismissedRef = useRef(new Set());
+  useEffect(() => {
+    proximityDismissedRef.current = new Set();
+    setProximityModal(null);
+  }, [activeRouteId]);
+  useEffect(() => {
+    if (myStopIdx === null || myStopIdx <= 0 || stops.length === 0) return;
+    const prevStop = stops[myStopIdx - 1];
+    if (!prevStop) return;
+    const sa = todayDispatch?.stopArrivals || {};
+    const arrivedMs = sa[prevStop.id];
+    if (arrivedMs == null) return;
+    if (Date.now() - arrivedMs > 5 * 60 * 1000) return;
+    if (proximityDismissedRef.current.has(prevStop.id)) return;
+    setProximityModal({ stopName: prevStop.name });
+  }, [myStopIdx, stops, todayDispatch?.stopArrivals]);
+  const closeProximityModal = () => {
+    if (proximityModal && myStopIdx > 0 && stops[myStopIdx - 1]) {
+      proximityDismissedRef.current.add(stops[myStopIdx - 1].id);
+    }
+    setProximityModal(null);
+  };
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--color-bg-alt)' }}>
 
@@ -846,6 +888,45 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
           </div>
         )}
       </div>
+
+      {/* [DIAG-ETA 제거예정] EmployeeApp 진단 — URL ?debug=1 일 때만, 내 정류장 한정.
+          prod 영향 0(URL 파라미터 없으면 미렌더). 다음 커밋에 grep "[DIAG-ETA" 통째 제거. */}
+      {diagEnabled && myStopIdx !== null && stops[myStopIdx] && (() => {
+        const e = estByStopId[stops[myStopIdx].id];
+        if (!e) return null;
+        const delayMin = e.delaySec != null ? Math.round(e.delaySec / 60) : null;
+        const delayLab = delayMin == null ? "—"
+          : delayMin === 0 ? "0분"
+          : delayMin > 0 ? `+${delayMin}분`
+          : `${delayMin}분`;
+        let segProg = null;
+        if (usePathProgress && busProgress !== null && myStopProgress != null && myStopIdx > 0) {
+          const prev = stops[myStopIdx - 1];
+          const prevProj = projectToPolyline({ lat: prev.lat, lng: prev.lng }, routePath, routeCum);
+          if (prevProj && myStopProgress > prevProj.progress) {
+            const ratio = (busProgress - prevProj.progress) / (myStopProgress - prevProj.progress);
+            segProg = Math.max(0, Math.min(1, ratio));
+          }
+        }
+        return (
+          <div style={{
+            margin: '6px 12px 0', padding: 8, borderRadius: 8,
+            background: '#FFFBEA', border: '1px dashed #C99A2E',
+            fontSize: 10, fontFamily: 'monospace', lineHeight: 1.5, color: '#3a2e08',
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>[DIAG-ETA] 내 정류장 진단</div>
+            <div>[{myStopIdx}] {stops[myStopIdx].name}</div>
+            <div>plan {e.plannedAt || '—'} | est {e.estimatedAt || '—'} | delay {delayLab}</div>
+            <div>status {e.status} | source {e.source}</div>
+            <div>busProgress={typeof busProgress === 'number' ? Math.round(busProgress) + 'm' : '—'}
+              {' | '}myStopProgress={myStopProgress != null ? Math.round(myStopProgress) + 'm' : '—'}
+              {segProg != null && <> | segProgress={(segProg * 100).toFixed(1)}%</>}
+            </div>
+            <div>speed={mainBus?.speed != null ? mainBus.speed.toFixed(1) + 'km/h' : '—'}</div>
+          </div>
+        );
+      })()}
+      {/* [/DIAG-ETA] */}
 
       {/* ── 지도 (상단 55%) ── */}
       <div style={{ flex: '0 0 55%', minHeight: 0, position: 'relative' }}>
@@ -1255,6 +1336,43 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
                 📍 이 정류장을 내 정류장으로 설정
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 도착 임박 모달(2026-05-28) — 내 정류장 직전 정류장 도착 시 풀스크린 안내 ── */}
+      {proximityModal && (
+        <div onClick={closeProximityModal}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(11,16,32,0.78)',
+            zIndex: 300, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', padding: 24,
+            backdropFilter: 'blur(4px)',
+          }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{
+              background: 'var(--color-bg)', borderRadius: 'var(--radius-24)',
+              padding: '32px 24px 24px', width: '100%', maxWidth: 360,
+              boxShadow: 'var(--shadow-heavy)', textAlign: 'center',
+            }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>🚌</div>
+            <div style={{ fontSize: 22, fontWeight: 900, color: 'var(--color-primary)', marginBottom: 8 }}>
+              곧 도착합니다
+            </div>
+            <div style={{ fontSize: 15, color: 'var(--color-label)', lineHeight: 1.55, marginBottom: 20 }}>
+              <span style={{ fontWeight: 800 }}>{proximityModal.stopName}</span>에 버스가 도착했어요.<br/>
+              다음이 <span style={{ fontWeight: 800, color: 'var(--color-primary-deep)' }}>내 정류장</span>입니다.<br/>
+              <span style={{ fontSize: 13, color: 'var(--color-label-mute)' }}>탑승 준비를 해주세요</span>
+            </div>
+            <button onClick={closeProximityModal}
+              style={{
+                width: '100%', background: 'var(--color-primary)', color: '#fff',
+                border: 'none', borderRadius: 'var(--radius-12)', padding: '14px 16px',
+                fontSize: 15, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit',
+                boxShadow: 'var(--shadow-strong)',
+              }}>
+              확인
+            </button>
           </div>
         </div>
       )}

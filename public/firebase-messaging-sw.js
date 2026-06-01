@@ -44,10 +44,23 @@ messaging.onBackgroundMessage(payload => {
   });
 });
 
+// ── Phase 1.1 (2026-05-28) — SaaS 멀티테넌트 hostname 매핑 ──
+// ⚠ src/lib/companyResolver.js HOSTNAME_TO_COMPANY 와 동기화 필요(SW context 는
+// build-time js import 불가 → 인라인 복제). 신규 회사 도메인 추가 시 양쪽 동시 갱신.
+const SW_HOSTNAME_TO_COMPANY = {
+  "buslink-prod.web.app": "dy001",
+  "buslink-prod.firebaseapp.com": "dy001",
+  "localhost": "dy001",
+  "127.0.0.1": "dy001",
+};
+
 // 알림 클릭 시 앱으로 이동
 self.addEventListener("notificationclick", event => {
   event.notification.close();
-  const companyId = event.notification.data?.companyId || "dy001";
+  // FCM payload data 우선 > hostname 매핑 > dy001 폴백.
+  const payloadCid = event.notification.data?.companyId;
+  const host = (self.location && self.location.hostname) ? self.location.hostname.toLowerCase() : "";
+  const companyId = payloadCid || SW_HOSTNAME_TO_COMPANY[host] || "dy001";
   const targetUrl = "/p?c=" + companyId;
 
   event.waitUntil(
