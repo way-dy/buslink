@@ -23,6 +23,10 @@ import { resolveByHostname } from "../lib/companyResolver";
 // 차단 — Admin SDK 가 rules 우회. region 명시(PartnerApp 패턴 일관).
 const functions = getFunctions(undefined, "us-central1");
 
+// 빌드 식별자 — 진단 JSON 의 appVersion 으로 회수돼 "어느 번들이 실제 폰에서
+// 돌았는지" 확정(설치형 PWA 가 옛 캐시를 돌리는 경우 vs 코드 결함 구분). 배포마다 갱신.
+const DRIVER_BUILD = "2026-06-02-detect-v2";
+
 // 리디자인 2단계(2026-05-16): 라이트 테마 리스킨.
 // ── 로직 100% 불변: state/effect·init(driver/dispatch/stops 로드)·loadDispatch
 //    ·loadStops·Wake Lock·Notification·handleStart/handleStop/refreshToken
@@ -99,6 +103,14 @@ export default function DriverApp({ companyId: propCompanyId }) {
   // 다음 진단 JSON(recordEtaDiagnostic) 에 stopArrivalsLog 로 첨부 → 어느 정류장이
   // 어떻게 기록됐는지(권한 거부·not-found·alreadyExists 등) 추적 가능.
   const stopArrivalsLogRef = useRef([]);
+  // ref 로 최신 노선데이터 노출(2026-06-02) — startGPS 는 호출 시점의 stops/routePath 를
+  // 1회 캡처하는데, 비동기 로드 전이면 빈값에 갇혀 도착 백필이 세션 내내 비활성(2일 연속
+  // 도착 0건의 근인). gps.js 가 매 감지 시 ref.current(최신 state)를 읽도록 getter 주입 →
+  // 로드 타이밍·버튼 게이트 경합과 무관하게 백필 작동. 렌더마다 최신값 동기화.
+  const stopsRef = useRef([]);
+  const routePathRef = useRef([]);
+  stopsRef.current = stops;
+  routePathRef.current = Array.isArray(routePath) ? routePath : [];
   // 오프라인→온라인 복구 시 onSnapshot 재구독 + Firestore reconnect 강제(2026-05-28).
   // 통신 안 좋다가 좋아져도 기사앱이 자동 활성화 안 되던 결함 차단 — DriverApp은 GPS 발신측
   // 이라 useWakeTick 적용 안 했었으나, 장시간 오프라인 후 stale 리스너 가능성 확인되어
@@ -403,6 +415,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
       T_NOW: Date.now(),
       source: triggerSource || "auto",
       stopArrivalsLog,
+      appVersion: DRIVER_BUILD,
     });
   };
 
@@ -480,6 +493,10 @@ export default function DriverApp({ companyId: propCompanyId }) {
       stops,
       // 노선 사전경로 — GPS 복구 시 진행률 기반 정류장 누락 백필(빈배열=직선 폴백).
       routePath: Array.isArray(routePath) ? routePath : [],
+      // 최신 노선데이터 getter(2026-06-02) — startGPS 1회 캡처가 빈값이어도 ref 로 최신값을
+      // 읽어 백필이 항상 작동(로드 타이밍 경합 무관). gps.js 가 매 감지 시 호출.
+      getStops: () => stopsRef.current,
+      getRoutePath: () => routePathRef.current,
       onStopReached: async (stop, dist, viaBackfill) => {
         // 백필이 한 콜백에서 여러 정류장을 순차 호출할 수 있음 → Math.max로 역행 방지
         // (옛 정류장 인덱스가 현재값을 끌어내리지 않도록).

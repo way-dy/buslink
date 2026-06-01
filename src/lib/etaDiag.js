@@ -47,6 +47,7 @@ export async function recordEtaDiagnostic({
   T_NOW = Date.now(),
   source = "auto", // 트리거 출처: 'interval' | 'stopArrivals' | 'auto'
   stopArrivalsLog = null, // 2026-06-01 — Array | null
+  appVersion = null, // 2026-06-02 — 빌드 식별자(옛 캐시 번들 vs 코드결함 구분)
 }) {
   if (!companyId || !runId) return;
   try {
@@ -62,6 +63,7 @@ export async function recordEtaDiagnostic({
       estimates: Array.isArray(estimates) ? estimates.map(slimEstimate) : [],
       source,
     };
+    if (appVersion) payload.appVersion = appVersion;
     // 옵셔널 — 미제공 시 undefined 필드 회피(Firestore 가 undefined 거부).
     if (Array.isArray(stopArrivalsLog) && stopArrivalsLog.length > 0) {
       payload.stopArrivalsLog = stopArrivalsLog;

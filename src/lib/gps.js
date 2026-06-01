@@ -95,7 +95,11 @@ export async function clearGPS({ companyId, vehicleId }) {
 // onGpsError(있을 때만 호출, 하위호환): 측위 실패를 상위(DriverApp)로 전파해 화면 안내.
 // routePath(옵션, [{lat,lng}]): 노선 사전경로. 유효(길이≥2)하면 GPS 신호 복구 시
 //   진행률 기반 백필로 통신장애 중 통과한 정류장을 회복. 없으면 100m 직접 감지만(폴백).
-export function startGPS({ companyId, vehicleId, vehicleNo, driverId, driverName, routeId, routeName, stops = [], routePath = [], onStopReached, onGpsError }) {
+// getStops/getRoutePath(옵션, 2026-06-02): 최신 노선데이터 getter. startGPS 호출 시점에
+//   stops/routePath 가 비동기 로드 전이면 위 인자는 빈배열로 캡처돼 백필이 영영 비활성
+//   (2일 연속 도착 0건의 근인). getter 가 있으면 매 감지 시 최신값을 읽어 로드 타이밍과
+//   무관하게 백필 작동. 미제공 시 위 인자값으로 폴백(하위호환).
+export function startGPS({ companyId, vehicleId, vehicleNo, driverId, driverName, routeId, routeName, stops = [], routePath = [], onStopReached, onGpsError, getStops, getRoutePath }) {
   // 상태 격리: 모듈 전역이 아닌 startGPS 클로저 지역 변수 (다중 watch·해제 시 누수 방지)
   let lastPos = null;
   let lastSentTime = 0;
@@ -110,17 +114,27 @@ export function startGPS({ companyId, vehicleId, vehicleNo, driverId, driverName
   // 해법: routePath 유효 시 버스/정류장을 폴리라인에 투영해 진행률(progress)을 비교.
   //   GPS 복구 후 buthProgress가 어떤 정류장 progress + PASS_MARGIN_M을 넘었는데
   //   visitedStops에 없으면 = 통과 누락 → order 낮은 것부터 순차 onStopReached 호출.
-  const usePath = Array.isArray(routePath) && routePath.length >= 2;
-  const pathCum = usePath ? buildCumulativeLengths(routePath) : null;
-  // 각 정류장 progress 사전 산출 1회 캐시(반복 투영 비용 절감).
-  const stopProg = usePath
-    ? stops.map(s => {
+  // 최신 노선데이터 resolver — getter 우선, 없으면 캡처 인자 폴백.
+  const resolveStops = () => (typeof getStops === "function" ? getStops() : stops) || [];
+  const resolveRoutePath = () => (typeof getRoutePath === "function" ? getRoutePath() : routePath) || [];
+  // routePath/stops 가 늦게 로드될 수 있으므로 1회 캡처 금지 — 매 감지 시 최신값을 읽고
+  // routePath/stops 레퍼런스가 바뀌면 pathCum·stopProg 재계산(메모이즈로 반복 투영 비용 절감).
+  let cachedPath = null, cachedStopsRef = null, cachedCum = null, cachedStopProg = null;
+  const ensurePathData = (curStops, curPath) => {
+    const usePath = Array.isArray(curPath) && curPath.length >= 2;
+    if (!usePath) return { usePath: false, pathCum: null, stopProg: null };
+    if (curPath !== cachedPath || curStops !== cachedStopsRef || !cachedStopProg) {
+      cachedPath = curPath; cachedStopsRef = curStops;
+      cachedCum = buildCumulativeLengths(curPath);
+      cachedStopProg = curStops.map(s => {
         const ll = toLatLng(s);
         if (!ll) return null;
-        const proj = projectToPolyline(ll, routePath, pathCum);
+        const proj = projectToPolyline(ll, curPath, cachedCum);
         return proj ? proj.progress : null;
-      })
-    : null;
+      });
+    }
+    return { usePath: true, pathCum: cachedCum, stopProg: cachedStopProg };
+  };
 
   // 실제 전송 + 상태 갱신 공통 처리
   const flush = async (pos) => {
@@ -151,10 +165,13 @@ export function startGPS({ companyId, vehicleId, vehicleNo, driverId, driverName
   //      복구 후 회복(통신장애 정류장 누락 해결). order 낮은 것부터 순차 호출.
   // onStopReached가 한 콜백에서 여러 번·순차 호출될 수 있음 — 호출측(DriverApp)이 멱등.
   const detectStops = (curr) => {
-    if (stops.length === 0 || !onStopReached) return;
+    const curStops = resolveStops();
+    if (curStops.length === 0 || !onStopReached) return;
+    const curPath = resolveRoutePath();
+    const { usePath, pathCum, stopProg } = ensurePathData(curStops, curPath);
 
     // ① 100m 직접 감지 (기존 로직 — 폴백·정밀 케이스). viaBackfill=false.
-    stops.forEach(stop => {
+    curStops.forEach(stop => {
       if (visitedStops.has(stop.id)) return;
       const ll = toLatLng(stop);
       if (!ll) return;
@@ -167,12 +184,12 @@ export function startGPS({ companyId, vehicleId, vehicleNo, driverId, driverName
 
     // ② routePath 진행률 백필 — usePath 유효할 때만(미설정이면 skip = 회귀 0).
     if (usePath && stopProg) {
-      const proj = projectToPolyline(curr, routePath, pathCum);
+      const proj = projectToPolyline(curr, curPath, pathCum);
       if (proj) {
         const busProgress = proj.progress;
         // order(=배열) 낮은 정류장부터 순차 — currentStopIdx 역행 방지.
-        for (let i = 0; i < stops.length; i++) {
-          const stop = stops[i];
+        for (let i = 0; i < curStops.length; i++) {
+          const stop = curStops[i];
           if (visitedStops.has(stop.id)) continue;
           const sp = stopProg[i];
           if (sp == null) continue;
