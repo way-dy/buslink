@@ -4,7 +4,7 @@
 
 ## 현재 상태 (2026-06-02 세션 종료)
 > 이 저장소가 작업 정본. **어느 PC든** `git pull` + `.env.local`(↓부트스트랩)이면 빌드·배포 가능.
-> prod 라이브 = **`main.5539a881.js`** + CF 22종 (2026-06-02 hosting 배포). SaaS Phase 1.1~1.4 + 슈퍼관리자 회사/admin 운영 메뉴 + ETA 진척률 안분/자동 진단 로깅/stopArrivals onCall 위임 + **도착 감지 경합·좌표 coercion 수정** 모두 prod 반영. ⚠ 과거 stopArrivals/Phase A 등 항목에 적힌 "배포 절대 금지·미배포" 메모는 **stale** — 실측(functions:list·hosting curl)상 CF 22종 + main.5539a881.js 모두 prod 라이브 확정.
+> prod 라이브 = **`main.08da6948.js`** + CF 22종 (2026-06-02 hosting 배포, ref 기반 도착감지 + 빌드 마커). SaaS Phase 1.1~1.4 + 슈퍼관리자 회사/admin 운영 메뉴 + ETA 진척률 안분/자동 진단 로깅/stopArrivals onCall 위임 + **도착 감지 경합·좌표 coercion 수정** 모두 prod 반영. ⚠ 과거 stopArrivals/Phase A 등 항목에 적힌 "배포 절대 금지·미배포" 메모는 **stale** — 실측(functions:list·hosting curl)상 CF 22종 + main.5539a881.js 모두 prod 라이브 확정.
 
 ### git 원격
 - `origin/master` = 작업 정본. 3월 폐갈래는 `origin/archive/remote-march-2026`(`f63321c`) 영구 백업.
@@ -20,7 +20,7 @@
 4. 회귀 시 가설-재배포 금지 → 콘솔 Hosting 롤백 먼저, 재현은 localhost.
 
 ## 다음 할 일
-- [ ] **🔥🔥 배포 승인 대기 — `main.08da6948.js`(ref 기반 감지 + 빌드 마커)**: 2026-06-02 06:56 2차 운행도 도착 0건 지속(nextIdx 0·recordStopArrival 0건). busProgress 2742→14091 인데 백필 미발화 = usePath=false 확정(startGPS 빈 routePath 캡처 또는 폰 옛 캐시). **2차 수정**: gps.js getStops/getRoutePath getter(ref 최신값) → 로드 타이밍·게이트 경합·재실행 무관 백필 작동 + DRIVER_BUILD 빌드 마커를 진단 appVersion 에 첨부(다음 운행 JSON 으로 빌드 확정). **빌드 완료(미배포 — 분류기 차단, 사용자 명시 승인 필요)**. 승인 시 `firebase deploy --only hosting`. 배포 후 검증: 재운행 JSON `appVersion="2026-06-02-detect-v2"` 있고 nextIdx 증가+stopArrivalsLog ok=true=해결 / appVersion 없으면 폰이 새 번들 미수신(완전 재설치).
+- [ ] **🔥🔥 3차 운행 검증 — `main.08da6948.js`(ref 기반 감지 + 빌드 마커) prod 배포 완료(2026-06-02)**: 2026-06-02 06:56 2차 운행도 도착 0건 지속(nextIdx 0·recordStopArrival 0건). busProgress 2742→14091 인데 백필 미발화 = usePath=false 확정(startGPS 빈 routePath 캡처 또는 폰 옛 캐시). **2차 수정 배포됨**: gps.js getStops/getRoutePath getter(ref 최신값) → 로드 타이밍·게이트 경합·재실행 무관 백필 작동 + DRIVER_BUILD 빌드 마커를 진단 appVersion 에 첨부. **검증 절차**: ⚠ 기사폰 **홈 아이콘 삭제 → 브라우저로 `/driver` 재접속 → 재설치**(단순 재실행으론 옛 번들 잔존 가능) → 운행 → 진단 JSON 회수. **제일 먼저 `appVersion` 필드 확인**: `"2026-06-02-detect-v2"` 있으면 새 빌드 → nextIdx 증가·stopArrivalsLog ok=true·"도착 HH:MM"(녹색) 표시 확인 / appVersion 없으면 폰이 아직 옛 번들(reload 문제·코드결함 아님 — 재설치 재시도).
 - [ ] **(완료·1차) 2026-06-02 아침 운행 테스트(도착 감지 경합·좌표 coercion, `main.5539a881.js` prod 배포)** — 2차 운행서 결함 지속 확인됨(위 항목으로 승계): ⚠ **기사폰 앱 완전 종료 후 재실행**(설치형 PWA 옛 캐시 번들 70e47fc7 유지 함정) → 배차 선택 후 버튼이 "노선 불러오는 중…"→"운행 시작"으로 바뀐 뒤 시작(경합 차단 게이트 동작 확인) → 운행. **검증**: ① 슈퍼관리자 콘솔 → 회사 관리 → ETA 진단 조회 → 오늘 → runId → Points JSON: `nextIdx`가 증가하는지(정류장 통과 인식) + `stopArrivalsLog` 항목 `ok:true`/`alreadyExists:true` ② AdminApp 운행 이력 카드 "✅ N/M 통과" 분수 0→정상 ③ `recordStopArrival` 함수 로그에 호출 발생. 안 잡히면 진단 JSON 의 정류장 좌표 포맷·routePath 존재·정류장↔경로 공간 일치(HistoryTab 반경 시각화) 순으로 정밀 진단. 동시에 9/10 정류장 offsetMin 미설정 → 계획/지연 시각 의미화하려면 정류장 진입 오프셋 입력 보강.
 - [ ] **Phase B — AdminApp 필터 자동 적용**(Phase A 인프라 배포 완료): 8지점 PartnerFilter 가 로그인 admin 의 `users/{uid}.allowedPartnerCodes` 자동 강제(`["*"]`=무제한·그 외=한정). 차량·기사 탭 read-only 분기. rules `isAdmin` 확장은 별도 SaaS 보안 검토.
 - [ ] **사용자 운영 정리**: ① dy001 회사명 "최우석"→"동영관광" 복구(슈퍼관리자 콘솔 회사 카드 ✏️ 편집·회사 이름 필드만 재입력) ② 잘못 만든 신규 회사들 영구 삭제(🗑 운영 메뉴) ③ LoginApp 합성이메일 fix 검증(`wschoi@dybus.co.kr` 사번 필드 입력 시 정상 로그인).
