@@ -25,7 +25,7 @@ const functions = getFunctions(undefined, "us-central1");
 
 // 빌드 식별자 — 진단 JSON 의 appVersion 으로 회수돼 "어느 번들이 실제 폰에서
 // 돌았는지" 확정(설치형 PWA 가 옛 캐시를 돌리는 경우 vs 코드 결함 구분). 배포마다 갱신.
-const DRIVER_BUILD = "2026-06-02-detect-v2";
+const DRIVER_BUILD = "2026-06-04-delay-display";
 
 // 리디자인 2단계(2026-05-16): 라이트 테마 리스킨.
 // ── 로직 100% 불변: state/effect·init(driver/dispatch/stops 로드)·loadDispatch
@@ -319,6 +319,15 @@ export default function DriverApp({ companyId: propCompanyId }) {
     // stale 리스너 신선화). companyId/dispatch.id 외 deps라 정상 흐름엔 영향 0.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, dispatch?.id, recoverTick]);
+
+  // 운행 중 "지연 N분"(현재−계획) 표시를 분 단위로 갱신하는 시계 틱(30초, 2026-06-04).
+  // GPS 콜백 사이 정지 중에도 정류장 카드의 지연이 흐르도록. 미운행 시 타이머 없음.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!driving) return;
+    const id = setInterval(() => setNowTick(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, [driving]);
 
   // 통신 복구(online 전이) + 운행 중 + watchId 보유 시 즉시 1회 heartbeat sendGPS —
   // 승객앱·관제 마커가 옛 좌표에 멈춰있던 결함 차단. recoverTick 증가가 트리거 신호.
@@ -854,14 +863,25 @@ export default function DriverApp({ companyId: propCompanyId }) {
                 const isCurrent = i === currentStopIdx;
                 const isNext = i === currentStopIdx + 1;
                 const est = estByStopId[stop.id];
-                const lab = est ? formatDelayLabel(est.delaySec) : { tone: "mute", label: "" };
+                const arrived = est && est.status === 'arrived';
+                // 표시용 지연(기사앱, 2026-06-04 사용자 결정) — 도착=실측지연(actual−계획) /
+                // 운행 중 미도착이라도 계획시각이 지났으면 (현재−계획)을 누적 표시 → 늦게
+                // 출발해도 "정시"로 보이던 결함 차단(도착 감지와 무관하게 출발 지연 가시화).
+                let dispDelaySec = est ? est.delaySec : null;
+                if (est && !arrived && driving && est.plannedAt) {
+                  const hm = /^(\d{2}):(\d{2})$/.exec(est.plannedAt);
+                  if (hm) {
+                    const pd = new Date(); pd.setHours(+hm[1], +hm[2], 0, 0);
+                    if (nowTick > pd.getTime()) dispDelaySec = Math.round((nowTick - pd.getTime()) / 1000);
+                  }
+                }
+                const lab = est ? formatDelayLabel(dispDelaySec) : { tone: "mute", label: "" };
                 const labColor = lab.tone === 'danger' ? 'var(--color-destructive)'
                   : lab.tone === 'warn' ? 'var(--color-cautionary)'
                   : 'var(--color-positive)';
                 const labBg = lab.tone === 'danger' ? '#FDECEC'
                   : lab.tone === 'warn' ? '#FFF3E0'
                   : '#E6F7EB';
-                const arrived = est && est.status === 'arrived';
                 // 행 배경 — 도착(arrived)=positive 카드, 현재=primary 카드, 그 외=투명
                 const rowBg = arrived ? '#F0FAF4'
                   : isCurrent ? 'var(--color-primary-soft)'
@@ -912,31 +932,35 @@ export default function DriverApp({ companyId: propCompanyId }) {
                       }}>
                         {stop.name}
                       </div>
-                      {/* 계획·실제 시각 — plannedAt 또는 chain-propagated estimatedAt 있는 정류장.
-                          (2026-05-26 보강: offsetMin 미설정 정류장도 chain 전파된 예상시각·지연 표시)
-                          예상/지연은 운행 중 또는 도착 실측이 있을 때만 — 어르신 기사 가독성 위해 크게+칩 형태. */}
-                      {est && (est.plannedAt || est.estimatedAt) && (
-                        <div style={{ fontSize: 16, marginTop: 5, fontWeight: 700, color: "var(--color-label)", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-                          <span style={{ color: "var(--color-label-mute)" }}>
-                            {arrived ? "도착" : est.plannedAt ? "계획" : "예상"}
-                          </span>
-                          <span style={{ color: arrived ? 'var(--color-positive)' : 'var(--color-primary-deep)', fontWeight: 800, fontSize: 18 }}>
-                            {arrived ? est.estimatedAt : (est.plannedAt || est.estimatedAt)}
-                          </span>
-                          {!arrived && driving && est.plannedAt && est.estimatedAt && est.estimatedAt !== est.plannedAt && (
-                            <>
-                              <span style={{ color: "var(--color-label-alt)" }}>·</span>
-                              <span style={{ color: "var(--color-label-mute)" }}>예상</span>
-                              <span style={{ color: 'var(--color-primary-deep)', fontWeight: 800, fontSize: 18 }}>{est.estimatedAt}</span>
-                            </>
-                          )}
-                          {(arrived || driving) && lab.label && lab.tone !== 'mute' && (
-                            <span style={{
-                              background: labBg, color: labColor, fontWeight: 800, fontSize: 15,
-                              padding: "3px 11px", borderRadius: 999, border: `1.5px solid ${labColor}`,
-                            }}>
-                              {lab.label}
-                            </span>
+                      {/* 계획시각 + 지연(크게) — 기사앱은 "계획 대비 지연"이 본질(2026-06-04 사용자 결정).
+                          예상 도착시각은 아래 작게 참고용. 운행 중 도착 전이라도 계획시각이 지나면
+                          dispDelaySec(현재−계획)로 "지연 N분"을 누적 표시(출발 지연 가시화). */}
+                      {est && (est.plannedAt || arrived || (driving && est.estimatedAt)) && (
+                        <div style={{ marginTop: 5 }}>
+                          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, fontSize: 16, fontWeight: 700 }}>
+                            {est.plannedAt && (
+                              <>
+                                <span style={{ color: "var(--color-label-mute)" }}>계획</span>
+                                <span style={{ color: "var(--color-label)", fontWeight: 800, fontSize: 18 }}>{est.plannedAt}</span>
+                              </>
+                            )}
+                            {arrived && est.estimatedAt && (
+                              <span style={{ color: 'var(--color-positive)', fontWeight: 800, fontSize: 16 }}>· 도착 {est.estimatedAt}</span>
+                            )}
+                            {(arrived || driving) && est.plannedAt && lab.label && lab.tone !== 'mute' && (
+                              <span style={{
+                                background: labBg, color: labColor, fontWeight: 800, fontSize: 16,
+                                padding: "4px 12px", borderRadius: 999, border: `1.5px solid ${labColor}`,
+                              }}>
+                                {lab.label}
+                              </span>
+                            )}
+                          </div>
+                          {/* 예상 도착시각 — 작게 참고용(기사앱은 지연이 본질, 예상은 보조). */}
+                          {!arrived && driving && est.estimatedAt && (
+                            <div style={{ fontSize: 12, color: "var(--color-label-mute)", marginTop: 3 }}>
+                              예상 도착 {est.estimatedAt} <span style={{ opacity: 0.7 }}>(참고)</span>
+                            </div>
                           )}
                         </div>
                       )}
