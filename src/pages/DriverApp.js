@@ -25,7 +25,7 @@ const functions = getFunctions(undefined, "us-central1");
 
 // 빌드 식별자 — 진단 JSON 의 appVersion 으로 회수돼 "어느 번들이 실제 폰에서
 // 돌았는지" 확정(설치형 PWA 가 옛 캐시를 돌리는 경우 vs 코드 결함 구분). 배포마다 갱신.
-const DRIVER_BUILD = "2026-06-04-delay-display";
+const DRIVER_BUILD = "2026-06-05-badge";
 
 // 리디자인 2단계(2026-05-16): 라이트 테마 리스킨.
 // ── 로직 100% 불변: state/effect·init(driver/dispatch/stops 로드)·loadDispatch
@@ -680,6 +680,11 @@ export default function DriverApp({ companyId: propCompanyId }) {
   return (
     <div style={S.container}>
       <InstallPrompt />
+      {/* 빌드 버전 뱃지(2026-06-05) — 폰이 옛 캐시 번들을 도는지 눈으로 즉시 확인.
+          이 날짜가 최신이 아니면 새 빌드 미수신 → 캐시 정리(앱 삭제·사이트 데이터 삭제) 필요. */}
+      <div style={{ position: "fixed", bottom: 4, right: 6, zIndex: 9999, fontSize: 10, color: "rgba(0,0,0,0.5)", background: "rgba(255,255,255,0.75)", padding: "1px 6px", borderRadius: 8, pointerEvents: "none" }}>
+        v{DRIVER_BUILD}
+      </div>
       <div style={S.card}>
         {/* 헤더 */}
         <div style={S.header}>
