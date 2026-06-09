@@ -8,26 +8,22 @@ import './index.css';
 import './styles/tokens.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
+import { resolveAppIcons } from './lib/appIcons';
 
-// ── PWA manifest 조기 확정 (앱 설치 충돌 방지) ──────────────────────
-// index.html 기본 manifest 는 manifest.json(관제, id/start_url '/?app=admin').
-// EmployeeApp(/p)은 컴포넌트 마운트(익명로그인+데이터 로드 후)에 applyAppManifest 로
-// manifest-employee.json 으로 교체하나, 그 사이 Chrome 이 beforeinstallprompt 를
-// 옛 manifest 로 평가하면 직원앱이 '/'(기사/관제)로 잘못 설치된다(설치 충돌·교차 실행).
-// pathname 으로 즉시 판별 가능한 /p 는 render·BIP 리스너 전에 동기 교체.
-// '/' 의 admin/driver 는 Auth 역할 분기 후라 컴포넌트 마운트 시 applyAppManifest 가 처리.
-// 3 manifest 는 각각 고유 id(/?app=admin · /?app=driver · /p)로 별개 PWA 보장.
+// ── 앱별 아이콘·매니페스트 조기 확정 (favicon·apple-touch·manifest) ──────────
+// 호스트명(서브도메인) 우선 + 경로 폴백으로 현재 앱을 판별해, React render·BIP(설치)
+// 평가 전에 <head> 링크를 그 앱 전용으로 동기 교체. 서브도메인 분리(2026-06)로
+// admin/d/p/partner 가 각각 자기 파비콘·애플터치·매니페스트를 받는다(index.html
+// 기본값=admin). 마운트 useEffect 의 applyAppManifest 보다 먼저 확정해야 Chrome 이
+// 옛 manifest 로 beforeinstallprompt 를 평가하는 교차-설치 결함을 막는다.
 if (typeof document !== "undefined") {
-  const path = window.location.pathname;
-  const link = document.querySelector('link[rel="manifest"]');
+  const ic = resolveAppIcons(window.location.hostname, window.location.pathname);
+  const svgIcon = document.querySelector('link[rel="icon"][type="image/svg+xml"]');
+  const manifest = document.querySelector('link[rel="manifest"]');
   const apple = document.querySelector('link[rel="apple-touch-icon"]');
-  if (path.startsWith("/p") && !path.startsWith("/partner")) {
-    if (link) link.setAttribute("href", "/manifest-employee.json");
-    if (apple) apple.setAttribute("href", "/icons/passenger-1024.png");
-  } else if (path.startsWith("/driver")) {
-    if (link) link.setAttribute("href", "/manifest-driver.json");
-    if (apple) apple.setAttribute("href", "/icons/driver-1024.png");
-  }
+  if (svgIcon) svgIcon.setAttribute("href", ic.favicon);
+  if (manifest) manifest.setAttribute("href", ic.manifest);
+  if (apple) apple.setAttribute("href", ic.apple);
 }
 
 // PWA 설치 가이드 — beforeinstallprompt는 페이지 로드 직후 한 번 발생.

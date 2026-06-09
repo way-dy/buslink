@@ -18,6 +18,8 @@ import { aggregateBoardingsByStop } from "../lib/stopMapping";
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 // 협력사 필터 공통 컴포넌트 — 다수 탭에서 재사용
 import { PartnerFilter } from "../components/PartnerFilter";
+// Phase B(2026-06-08) admin별 협력사 권한 게이팅 헬퍼(순수)
+import { resolveAllowed, isAllAccess, partnerCodeAllowed } from "../lib/partnerAccess";
 // 탭 단위 에러 경계 — 자식 throw 시 흰 화면 방지 + 에러 메시지 가시화
 import { ErrorBoundary } from "../components/ErrorBoundary";
 // 관제도 PWA 설치 자동 안내(2026-05-27) — PC Chrome 에서 "앱 설치" 버튼 노출.
@@ -68,8 +70,12 @@ function timeSince(ts) {
 }
 
 // ═══════════════════════════════════════════════════════
-export default function AdminApp({ user, companyId, role }) {
+export default function AdminApp({ user, companyId, role, allowedPartnerCodes }) {
   const [tab, setTab] = useState(0);
+  // Phase B(2026-06-08): 로그인 admin 의 협력사 권한 범위 정규화.
+  // superadmin·미설정 admin·["*"] = ["*"](무제한, 기존 동작 100% — 회귀 0).
+  // 8지점 PartnerFilter + 각 탭 데이터 필터에 prop 으로 전달.
+  const allowed = resolveAllowed(role, allowedPartnerCodes);
   const [menuOpen, setMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
@@ -239,18 +245,18 @@ export default function AdminApp({ user, companyId, role }) {
           </div>
         )}
 
-        {tab === 0 && <ErrorBoundary label="대시보드"><DashboardTab companyId={activeCompanyId} drivers={drivers} vehicles={vehicles} onNav={setTab} /></ErrorBoundary>}
-        {tab === 1 && <ErrorBoundary label="실시간 관제"><MapTab companyId={activeCompanyId} /></ErrorBoundary>}
-        {tab === 2 && <ErrorBoundary label="배차 관리"><DispatchTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} /></ErrorBoundary>}
-        {tab === 3 && <ErrorBoundary label="배차 일정"><DispatchScheduleTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} /></ErrorBoundary>}
-        {tab === 4 && <ErrorBoundary label="노선 관리"><RoutesTab companyId={activeCompanyId} /></ErrorBoundary>}
+        {tab === 0 && <ErrorBoundary label="대시보드"><DashboardTab companyId={activeCompanyId} drivers={drivers} vehicles={vehicles} onNav={setTab} allowed={allowed} /></ErrorBoundary>}
+        {tab === 1 && <ErrorBoundary label="실시간 관제"><MapTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
+        {tab === 2 && <ErrorBoundary label="배차 관리"><DispatchTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} allowed={allowed} /></ErrorBoundary>}
+        {tab === 3 && <ErrorBoundary label="배차 일정"><DispatchScheduleTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} allowed={allowed} /></ErrorBoundary>}
+        {tab === 4 && <ErrorBoundary label="노선 관리"><RoutesTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
         {tab === 5 && <ErrorBoundary label="기사 관리"><DriverTab companyId={activeCompanyId} vehicles={vehicles} /></ErrorBoundary>}
         {tab === 6 && <ErrorBoundary label="차량 관리"><VehicleTab companyId={activeCompanyId} vehicles={vehicles} /></ErrorBoundary>}
         {tab === 7 && <ErrorBoundary label="시뮬레이터"><SimulatorTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} /></ErrorBoundary>}
-        {tab === 8 && <ErrorBoundary label="운행 이력"><HistoryTab companyId={activeCompanyId} vehicles={vehicles} /></ErrorBoundary>}
-        {tab === 9 && <ErrorBoundary label="탑승 통계"><BoardingStatsTab companyId={activeCompanyId} /></ErrorBoundary>}
-        {tab === 10 && <ErrorBoundary label="협력사 관리"><PartnerTab companyId={activeCompanyId} /></ErrorBoundary>}
-        {tab === 11 && <ErrorBoundary label="공지 발송"><NoticeTab companyId={activeCompanyId} /></ErrorBoundary>}
+        {tab === 8 && <ErrorBoundary label="운행 이력"><HistoryTab companyId={activeCompanyId} vehicles={vehicles} allowed={allowed} /></ErrorBoundary>}
+        {tab === 9 && <ErrorBoundary label="탑승 통계"><BoardingStatsTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
+        {tab === 10 && <ErrorBoundary label="협력사 관리"><PartnerTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
+        {tab === 11 && <ErrorBoundary label="공지 발송"><NoticeTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
         {/* SaaS Phase 1.2 — 슈퍼관리자 전용 회사 관리 탭(인덱스 12). 일반 admin 비표시. */}
         {isSuperAdmin && tab === SUPER_TAB_INDEX && (
           <ErrorBoundary label="회사 관리">
@@ -273,7 +279,7 @@ export default function AdminApp({ user, companyId, role }) {
 // ═══════════════════════════════════════════════════════
 // 탭0: 대시보드
 // ═══════════════════════════════════════════════════════
-function DashboardTab({ companyId, drivers, vehicles, onNav }) {
+function DashboardTab({ companyId, drivers, vehicles, onNav, allowed }) {
   const [dispatches, setDispatches] = useState([]);
   const [gpsVehicles, setGpsVehicles] = useState([]);
   const [boardings, setBoardings] = useState([]);
@@ -306,7 +312,12 @@ function DashboardTab({ companyId, drivers, vehicles, onNav }) {
 
   // 협력사 필터 적용: routeId → partnerCode 매핑
   const routeOf = (id) => routes.find(r => r.id === id);
-  const matchPartner = (rId) => partnerCode === "전체" || routeOf(rId)?.partnerCode === partnerCode;
+  // Phase B: "전체"여도 제한 admin 은 자기 allowed 협력사로 한정(isAllAccess 면 기존대로 전체).
+  const matchPartner = (rId) => {
+    const pc = routeOf(rId)?.partnerCode;
+    if (partnerCode !== "전체") return pc === partnerCode;
+    return isAllAccess(allowed) || partnerCodeAllowed(allowed, pc);
+  };
   const filteredDispatches = dispatches.filter(d => matchPartner(d.routeId));
   const filteredGps = gpsVehicles.filter(v => matchPartner(v.routeId));
   const filteredBoardings = boardings.filter(b => matchPartner(b.routeId));
@@ -335,7 +346,7 @@ function DashboardTab({ companyId, drivers, vehicles, onNav }) {
         </div>
         <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
           <span style={{ fontSize:11, color:"var(--color-label-alt)" }}>거래처:</span>
-          <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} />
+          <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} allowedCodes={allowed} />
           <button style={S.addBtn} onClick={() => onNav(1)}>🗺 실시간 관제 →</button>
         </div>
       </div>
@@ -434,12 +445,12 @@ function DashboardTab({ companyId, drivers, vehicles, onNav }) {
 // ═══════════════════════════════════════════════════════
 // 탭1: 실시간 관제
 // ═══════════════════════════════════════════════════════
-function MapTab({ companyId }) {
+function MapTab({ companyId, allowed }) {
   const [rawVehicles, setRawVehicles] = useState([]);
   const [selected, setSelected] = useState(null);
   const [center, setCenter] = useState({ lat: 37.3894, lng: 126.9522 });
   const [tick, setTick] = useState(0);
-  const vehicles = useAnimatedPositions(rawVehicles);
+  const vehiclesAll = useAnimatedPositions(rawVehicles);
 
   // 노선도 뷰 (2026-05-26 추가): 지도/노선도 토글 + 일자별 배차 타임라인
   const [viewMode, setViewMode] = useState("map"); // "map" | "route"
@@ -494,6 +505,13 @@ function MapTab({ companyId }) {
     ));
     return () => unsubs.forEach(u => u());
   }, [viewMode, companyId, todayDispatches]);
+
+  // Phase B(2026-06-08): 제한 admin 은 자기 allowed 협력사 노선의 차량/배차만.
+  // isAllAccess 면 기존 동작 그대로(회귀 0). gps/dispatch 의 routeId → routes.partnerCode 매핑.
+  const routePartnerOf = (rid) => routes.find(r => r.id === rid)?.partnerCode;
+  const allowMapRow = (rid) => isAllAccess(allowed) || partnerCodeAllowed(allowed, routePartnerOf(rid));
+  const vehicles = isAllAccess(allowed) ? vehiclesAll : vehiclesAll.filter(v => allowMapRow(v.routeId));
+  const visibleDispatches = isAllAccess(allowed) ? todayDispatches : todayDispatches.filter(d => allowMapRow(d.routeId));
 
   // 운행중(좌표 유효) 차량만 카운트 — 실데이터 기반(가짜 KPI 미도입)
   const liveCount = vehicles.filter(v => v.lat && v.lng).length;
@@ -587,7 +605,7 @@ function MapTab({ companyId }) {
           companyId={companyId}
           routes={routes}
           routeStops={routeStops}
-          dispatches={todayDispatches}
+          dispatches={visibleDispatches}
           vehicles={isPastDate ? [] : vehicles}
           tick={tick}
           selectedDate={selectedDate}
@@ -933,7 +951,7 @@ const MS = {
 // ═══════════════════════════════════════════════════════
 // 탭2: 배차 관리
 // ═══════════════════════════════════════════════════════
-function DispatchTab({ companyId, vehicles, drivers }) {
+function DispatchTab({ companyId, vehicles, drivers, allowed }) {
   const [date, setDate] = useState(getToday());
   const [dispatches, setDispatches] = useState([]);
   const [routes, setRoutes] = useState([]);
@@ -1032,11 +1050,11 @@ function DispatchTab({ companyId, vehicles, drivers }) {
   const driverName = (id) => drivers.find(d => d.id === id)?.name ?? id;
   // routeId → route(partnerCode/partnerName) 매핑
   const routeOf = (id) => routes.find(r => r.id === id);
-  // 협력사 필터 적용
+  // 협력사 필터 적용 (Phase B: "전체"여도 제한 admin 은 allowed 협력사로 한정)
   const filteredDispatches = dispatches.filter(d => {
-    if (partnerCode === "전체") return true;
-    const r = routeOf(d.routeId);
-    return r?.partnerCode === partnerCode;
+    const pc = routeOf(d.routeId)?.partnerCode;
+    if (partnerCode !== "전체") return pc === partnerCode;
+    return isAllAccess(allowed) || partnerCodeAllowed(allowed, pc);
   });
 
   return (
@@ -1045,7 +1063,7 @@ function DispatchTab({ companyId, vehicles, drivers }) {
         <span style={{ fontSize:16, fontWeight:700 }}>배차 관리</span>
         <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
           <span style={{ fontSize:11, color:"var(--color-label-alt)" }}>거래처:</span>
-          <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} />
+          <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} allowedCodes={allowed} />
           <input type="date" value={date} onChange={e => { if (e.target.value) setDate(e.target.value); }} style={S.dateInput} />
           <button style={S.addBtn} onClick={openAdd}>+ 배차 등록</button>
           {dispatches.length > 0 && (
@@ -1130,7 +1148,7 @@ const blankScheduleForm = () => ({
   excludeHolidays:true, active:true,
 });
 
-function DispatchScheduleTab({ companyId, vehicles, drivers }) {
+function DispatchScheduleTab({ companyId, vehicles, drivers, allowed }) {
   const [schedules, setSchedules] = useState([]);
   const [routes, setRoutes] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -1306,9 +1324,11 @@ function DispatchScheduleTab({ companyId, vehicles, drivers }) {
   const periodLabel = (s) => `${s.startDate || "–"} ~ ${s.endDate || "무기한"}`;
 
   const routeOf = (id) => routes.find(r => r.id === id);
+  // Phase B: "전체"여도 제한 admin 은 allowed 협력사로 한정.
   const filteredSchedules = schedules.filter(s => {
-    if (partnerCode === "전체") return true;
-    return routeOf(s.routeId)?.partnerCode === partnerCode;
+    const pc = routeOf(s.routeId)?.partnerCode;
+    if (partnerCode !== "전체") return pc === partnerCode;
+    return isAllAccess(allowed) || partnerCodeAllowed(allowed, pc);
   });
 
   return (
@@ -1317,7 +1337,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers }) {
         <span style={{ fontSize:16, fontWeight:700 }}>배차 일정 (반복 패턴)</span>
         <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
           <span style={{ fontSize:11, color:"var(--color-label-alt)" }}>거래처:</span>
-          <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} />
+          <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} allowedCodes={allowed} />
           <span style={{ fontSize:11, color:"var(--color-label-alt)" }}>매일 새벽 00:30 자동 펼침 · 향후 7일치</span>
           <button style={{...S.editBtn, fontSize:12, padding:"6px 10px"}} onClick={handleExpandNow} disabled={loading}>지금 펼치기</button>
           <button style={S.addBtn} onClick={openAdd}>+ 일정 등록</button>
@@ -1492,7 +1512,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers }) {
 
 // 탭4: 노선 관리
 // ═══════════════════════════════════════════════════════
-function RoutesTab({ companyId }) {
+function RoutesTab({ companyId, allowed }) {
   const [routes, setRoutes] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState(null);
@@ -1763,6 +1783,24 @@ function RoutesTab({ companyId }) {
     await updateDoc(doc(db, "companies", companyId, "routes", stopsRoute.id, "stops", newStops[target].id), { order: newStops[idx].order });
   };
 
+  // ── 정류장 진입시각 인라인 저장(2026-06-09) — 목록 행에서 HH:MM 직접 입력 → offsetMin 만
+  //    갱신(폼 왕복 없이 전체 정류장을 보며 위→아래로 입력). 빈값=진입시각 해제. 노선
+  //    departTime 기준 변환·출발시각 이전이면 거부(saveStop 검증과 동일 규칙). 사진/설명/
+  //    좌표 등 다른 필드는 건드리지 않음(부분 update). 저장은 onSnapshot 으로 목록 자동 갱신.
+  const saveStopTime = async (s, hhmm) => {
+    if (!stopsRoute?.id) return;
+    try {
+      if (!hhmm) {
+        await updateDoc(doc(db, "companies", companyId, "routes", stopsRoute.id, "stops", s.id), { offsetMin: null, updatedAt: new Date().toISOString() });
+        return;
+      }
+      if (!stopsRoute?.departTime) return alert("노선 출발시각이 먼저 설정되어야 진입시각을 계산할 수 있습니다(노선 관리에서 출발시각 입력).");
+      const off = offsetMinFromPlanTime(stopsRoute.departTime, hhmm);
+      if (off == null) return alert(`진입시각은 노선 출발시각(${stopsRoute.departTime}) 이후여야 합니다.\n첫 정류장은 출발시각(${stopsRoute.departTime})과 동일하게 입력하세요.`);
+      await updateDoc(doc(db, "companies", companyId, "routes", stopsRoute.id, "stops", s.id), { offsetMin: off, updatedAt: new Date().toISOString() });
+    } catch (e) { alert("진입시각 저장 실패: " + (e?.message || e)); }
+  };
+
   // ─── 노선 경로 그리기 (수동 폴리라인) ────────────────────
   // 정류장 관리와 같은 진입 레벨. 카카오 <Map> 위에서 수동 편집:
   //   지도 클릭=정점 추가 / 마커 드래그=이동 / 마커 클릭=삭제 /
@@ -1832,12 +1870,21 @@ function RoutesTab({ companyId }) {
     setPathLoading(false);
   };
 
+  // Phase B: 제한 admin 은 allowed 협력사 노선만(전체 선택 시에도). isAllAccess 면 기존대로.
   const filtered = routes.filter(r => {
     if (filter !== "전체" && r.type !== filter) return false;
-    if (partnerFilter !== "전체" && r.partnerCode !== partnerFilter) return false;
+    if (partnerFilter !== "전체") {
+      if (r.partnerCode !== partnerFilter) return false;
+    } else if (!isAllAccess(allowed) && !partnerCodeAllowed(allowed, r.partnerCode)) {
+      return false;
+    }
     if (search && !r.name.includes(search) && !r.code?.includes(search)) return false;
     return true;
   });
+  // 거래처 드롭다운 옵션도 제한(allowed 협력사만).
+  const visiblePartners = isAllAccess(allowed)
+    ? partners
+    : partners.filter(p => allowed.includes(p.code));
 
   const shifts = ["주간조","야간조","오전조","오후조"];
 
@@ -1863,8 +1910,8 @@ function RoutesTab({ companyId }) {
         <span style={{ fontSize:11, color:"var(--color-label-alt)", marginLeft:4 }}>거래처:</span>
         <select value={partnerFilter} onChange={e=>setPartnerFilter(e.target.value)}
           style={{ ...S.input, padding:"5px 10px", fontSize:12, width:"auto", minWidth:100, maxWidth:160 }}>
-          <option value="전체">전체</option>
-          {partners.map(p => <option key={p.code} value={p.code}>{p.partnerName}</option>)}
+          <option value="전체">{isAllAccess(allowed) ? "전체" : "내 협력사 전체"}</option>
+          {visiblePartners.map(p => <option key={p.code} value={p.code}>{p.partnerName}</option>)}
         </select>
         <input style={{ ...S.dateInput, marginLeft:"auto" }} placeholder="노선명·코드 검색"
           value={search} onChange={e=>setSearch(e.target.value)} />
@@ -1929,6 +1976,11 @@ function RoutesTab({ companyId }) {
           <div style={{ flex:1, overflowY:"auto", minHeight:0 }}>
           {/* 정류장 목록 */}
           <div style={{ padding:"8px 12px" }}>
+            {stops.length > 0 && (
+              <div style={{ fontSize:11, color:"var(--color-label-mute)", background:"var(--color-primary-soft)", border:"1px solid var(--color-line)", borderRadius:8, padding:"7px 10px", marginBottom:8, lineHeight:1.5 }}>
+                💡 각 정류장의 <b>🕒 진입</b> 칸에 계획 시각을 바로 입력하면 즉시 저장됩니다(아래 폼 왕복 불필요). 첫 정류장은 노선 출발시각({stopsRoute?.departTime || "—"})과 동일하게.
+              </div>
+            )}
             {stops.length === 0 ? (
               <div style={{ color:"var(--color-label-alt)", textAlign:"center", padding:30, fontSize:13 }}>
                 정류장이 없습니다<br/>
@@ -1947,16 +1999,20 @@ function RoutesTab({ companyId }) {
                     <div style={{ fontSize:13, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.name}</div>
                     {s.address && <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.address}</div>}
                     {s.description && <div style={{ fontSize:10, color:"var(--color-label-mute)", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>📝 {s.description}</div>}
-                    {/* 계획 진입시각 — 노선 출발 + 정류장 offsetMin. 미설정은 '—' */}
-                    {(() => {
-                      const plan = planTimeForStop(stopsRoute?.departTime, s.offsetMin);
-                      return (
-                        <div style={{ fontSize:10, color: plan ? "var(--color-primary-deep)" : "var(--color-label-assistive)", marginTop:1, fontWeight: plan ? 600 : 500 }}>
-                          🕒 계획 진입 {plan || "—"}
-                          {typeof s.offsetMin === "number" ? ` (+${s.offsetMin}분)` : ""}
-                        </div>
-                      );
-                    })()}
+                    {/* 계획 진입시각 — 목록 인라인 편집(2026-06-09): 폼 왕복 없이 전체 보며 위→아래 입력. 입력 즉시 저장. */}
+                    <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:3, flexWrap:"wrap" }}>
+                      <span style={{ fontSize:10, color:"var(--color-label-mute)", flexShrink:0 }}>🕒 진입</span>
+                      <input
+                        type="time"
+                        value={planTimeForStop(stopsRoute?.departTime, s.offsetMin) || ""}
+                        onChange={e => saveStopTime(s, e.target.value)}
+                        title="정류장 진입(계획) 시각 — 입력 즉시 저장"
+                        style={{ fontSize:11, padding:"2px 6px", border:"1px solid var(--color-line)", borderRadius:6, fontFamily:"inherit", background:"var(--color-bg)", color:"var(--color-label)" }}
+                      />
+                      {typeof s.offsetMin === "number"
+                        ? <span style={{ fontSize:10, color:"var(--color-primary-deep)", fontWeight:600, flexShrink:0 }}>+{s.offsetMin}분</span>
+                        : <span style={{ fontSize:10, color:"var(--color-label-assistive)", flexShrink:0 }}>미설정</span>}
+                    </div>
                     <div style={{ fontSize:10, color:"var(--color-label-alt)", marginTop:1 }}>{s.lat?.toFixed(5)}, {s.lng?.toFixed(5)}</div>
                   </div>
                   <div style={{ display:"flex", flexDirection:"column", gap:4, flexShrink:0 }}>
@@ -2686,7 +2742,7 @@ function SimulatorTab({ companyId, vehicles, drivers }) {
 // ═══════════════════════════════════════════════════════
 // 탭7: 운행 이력
 // ═══════════════════════════════════════════════════════
-function HistoryTab({ companyId, vehicles }) {
+function HistoryTab({ companyId, vehicles, allowed }) {
   const [date, setDate] = useState(getToday());
   const [vehicleId, setVehicleId] = useState("");
   const [points, setPoints] = useState([]);
@@ -2759,15 +2815,18 @@ function HistoryTab({ companyId, vehicles }) {
     if (!sched) return null;
     return routes.find(r => r.id === sched.routeId)?.partnerCode || null;
   };
+  // Phase B: "전체"여도 제한 admin 은 allowed 협력사로 한정.
   const filteredVehicles = vehicles.filter(v => {
-    if (partnerCode === "전체") return true;
-    return vehiclePartnerOf(v.id) === partnerCode;
+    const pc = vehiclePartnerOf(v.id);
+    if (partnerCode !== "전체") return pc === partnerCode;
+    return isAllAccess(allowed) || partnerCodeAllowed(allowed, pc);
   });
 
   // 협력사 필터 적용된 배차 → 노선별 그룹
   const filteredDispatches = dispatches.filter(d => {
-    if (partnerCode === "전체") return true;
-    return routes.find(r => r.id === d.routeId)?.partnerCode === partnerCode;
+    const pc = routes.find(r => r.id === d.routeId)?.partnerCode;
+    if (partnerCode !== "전체") return pc === partnerCode;
+    return isAllAccess(allowed) || partnerCodeAllowed(allowed, pc);
   });
   // ⚠ 카카오 SDK `Map` import가 native Map 클래스를 shadow → `new Map()` 빌드 시 forwardRef 객체로 변환되어 비-생성자 TypeError.
   //   `window.Map` 으로 native 명시(memory: `Map` shadow 패턴, NoticeTab L3098과 동일 가드).
@@ -2903,7 +2962,7 @@ function HistoryTab({ companyId, vehicles }) {
         <div style={{padding:"14px 16px 10px",display:"flex",flexDirection:"column",gap:10,borderBottom:"1px solid var(--color-line-soft)"}}>
           <div><label style={S.label}>날짜</label><input type="date" style={S.dateInput} value={date} onChange={e=>{ if(e.target.value) { setDate(e.target.value); setSelectedDispatchId(null); setPoints([]); }}}/></div>
           <div><label style={S.label}>거래처</label>
-            <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} compact={false} />
+            <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} compact={false} allowedCodes={allowed} />
           </div>
           {/* 직접 차량 선택 (보조 — 노선별 배차가 없는 날·이전 데이터 조회용) */}
           <details style={{ background:"var(--color-bg-alt)", borderRadius:8, padding:"8px 10px" }}>
@@ -3145,7 +3204,7 @@ function HistoryTab({ companyId, vehicles }) {
 // ═══════════════════════════════════════════════════════
 // boardings/{date}/list/{boardingId} 컬렉션 = QR 탑승 1건. partnerCode 필드는 신규 boarding부터
 // 자동 채움(lib/boarding.js 2026-05-26). 기존 데이터는 partnerCode=undefined → "미지정" 표시.
-function BoardingStatsTab({ companyId }) {
+function BoardingStatsTab({ companyId, allowed }) {
   const [date, setDate] = useState(getToday());
   const [partnerCode, setPartnerCode] = useState("전체");
   const [boardings, setBoardings] = useState([]);
@@ -3200,9 +3259,11 @@ function BoardingStatsTab({ companyId }) {
   }, [companyId, boardings, stopsByRoute]);
 
   // 협력사 필터 + 검색 적용된 탑승 리스트
+  // Phase B: 제한 admin 은 자기 allowed 협력사 탑승만(전체·미지정 선택 시에도).
   const filtered = boardings.filter(b => {
+    const bp = b.partnerCode || null;
+    if (!isAllAccess(allowed) && !partnerCodeAllowed(allowed, bp)) return false;
     if (partnerCode !== "전체") {
-      const bp = b.partnerCode || null;
       if (partnerCode === "_unassigned") {
         if (bp != null) return false;
       } else if (bp !== partnerCode) return false;
@@ -3219,6 +3280,8 @@ function BoardingStatsTab({ companyId }) {
   const byPartner = (() => {
     const m = new window.Map();
     boardings.forEach(b => {
+      // Phase B: 제한 admin 은 자기 allowed 협력사 분포만 집계.
+      if (!isAllAccess(allowed) && !partnerCodeAllowed(allowed, b.partnerCode || null)) return;
       const k = b.partnerCode || "_unassigned";
       m.set(k, (m.get(k) || 0) + 1);
     });
@@ -3267,7 +3330,7 @@ function BoardingStatsTab({ companyId }) {
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <input type="date" value={date} max={getToday()} onChange={e => { if (e.target.value) setDate(e.target.value); }}
             style={S.dateInput} />
-          <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} />
+          <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} allowedCodes={allowed} />
         </div>
       </div>
       <div style={S.tableWrap}>
@@ -3472,7 +3535,7 @@ const panelHead = { padding: "12px 16px", fontWeight: 700, fontSize: 13, color: 
 // ═══════════════════════════════════════════════════════
 // 탭10: 협력사 관리
 // ═══════════════════════════════════════════════════════
-function PartnerTab({ companyId }) {
+function PartnerTab({ companyId, allowed }) {
   const [codes, setCodes] = useState([]);
   const [routes, setRoutes] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -3594,6 +3657,13 @@ function PartnerTab({ companyId }) {
     alert("협력사 포털 URL이 복사되었습니다:\n" + url);
   };
 
+  // Phase B(2026-06-08): 제한 admin 은 자기 allowed 협력사만 목록 표시.
+  // ⚠ 한계 — 제한 admin 이 발급한 신규 협력사는 자기 권한에 자동 추가 안 됨(users self-update 는
+  //   rules 상 superadmin 만). 슈퍼관리자/팀장이 권한 부여해야 본인 목록에 나타남(issues.md 명시).
+  const visibleCodes = isAllAccess(allowed)
+    ? codes
+    : codes.filter(c => allowed.includes(c.code || c.id));
+
   const formatDate = (ts) => {
     if (!ts) return "–";
     const d = ts.toDate ? ts.toDate() : new Date(ts);
@@ -3622,9 +3692,9 @@ function PartnerTab({ companyId }) {
               </tr>
             </thead>
             <tbody>
-              {codes.length === 0 ? (
-                <tr><td colSpan={7} style={{ ...S.td, textAlign: "center", color: "var(--color-label-alt)" }}>발급된 업체코드가 없습니다</td></tr>
-              ) : [...codes].sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0)).map(c => (
+              {visibleCodes.length === 0 ? (
+                <tr><td colSpan={7} style={{ ...S.td, textAlign: "center", color: "var(--color-label-alt)" }}>{codes.length === 0 ? "발급된 업체코드가 없습니다" : "담당 협력사가 없습니다 (슈퍼관리자/팀장이 권한 부여 필요)"}</td></tr>
+              ) : [...visibleCodes].sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0)).map(c => (
                 <tr key={c.id} style={{ ...S.tr, background: selectedCode === c.id ? "var(--color-primary-soft)" : "var(--color-bg)" }}
                   onClick={() => setSelectedCode(selectedCode === c.id ? null : c.id)}>
                   <td style={{ ...S.td, fontWeight: 600 }}>
@@ -3781,7 +3851,7 @@ function PartnerTab({ companyId }) {
 // ═══════════════════════════════════════════════════════
 // 탭9: 공지 발송
 // ═══════════════════════════════════════════════════════
-function NoticeTab({ companyId }) {
+function NoticeTab({ companyId, allowed }) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [type, setType] = useState("normal"); // normal | emergency
@@ -3849,11 +3919,17 @@ function NoticeTab({ companyId }) {
     );
   }, [activeQueueId]);
 
+  // Phase B: 제한 admin 은 자기 allowed 협력사로만 발송 가능.
+  // "전체"(=CF 가 회사 전체로 해석)는 제한 admin 에겐 차단 — 특정 협력사 선택 강제.
+  const noticeRestricted = !isAllAccess(allowed);
+
   // 대상자 수 계산
   // 협력사 선택 시: where partnerCode == X
-  // 전체 선택 시: 모든 토큰(partnerCode null/누락 포함 — CF 와 일관)
+  // 전체 선택 시(무제한 admin): 모든 토큰(partnerCode null/누락 포함 — CF 와 일관)
   const targetCount = partnerCode === "전체"
-    ? tokens.length
+    ? (noticeRestricted
+        ? tokens.filter(t => partnerCodeAllowed(allowed, t.partnerCode || null)).length
+        : tokens.length)
     : tokens.filter(t => t.partnerCode === partnerCode).length;
 
   // 협력사별 토큰 분포(진단)
@@ -3867,6 +3943,8 @@ function NoticeTab({ companyId }) {
     let nullCount = 0;
     for (const t of tokens) {
       const c = t.partnerCode || null;
+      // Phase B: 제한 admin 은 자기 allowed 협력사 분포만(미지정 토큰도 비노출).
+      if (noticeRestricted && !partnerCodeAllowed(allowed, c)) continue;
       if (c === null) nullCount++;
       else map.set(c, (map.get(c) || 0) + 1);
     }
@@ -3878,6 +3956,10 @@ function NoticeTab({ companyId }) {
 
   const handleSend = async () => {
     if (!title.trim() || !body.trim()) return alert("제목과 내용을 입력해주세요");
+    // Phase B: 제한 admin 이 "전체"(회사 전체) 발송 시도 차단 — 특정 협력사 선택 강제.
+    // (sendNotice 는 단일 partnerCode 만 지원 → CF 변경 없이 권한 누수 차단.)
+    if (noticeRestricted && partnerCode === "전체")
+      return alert("담당 협력사를 선택해 발송해주세요.\n회사 전체 발송 권한이 없습니다.");
     if (targetCount === 0 && !window.confirm("발송할 토큰이 0건입니다. 그래도 발송하시겠습니까?\n(공지는 기록되지만 푸시는 전송되지 않습니다)")) return;
     setLoading(true); setResult(null); setActiveQueueId(null); setQueueDoc(null);
     try {
@@ -4032,6 +4114,7 @@ function NoticeTab({ companyId }) {
             onChange={setPartnerCode}
             allLabel="전체 협력사 (회사 전체)"
             compact={false}
+            allowedCodes={allowed}
           />
           <div style={{ marginTop:6, fontSize:12, color: targetCount === 0 ? "#A81818" : "var(--color-primary-deep)", fontWeight:600 }}>
             📡 이 발송으로 알림을 받을 직원: <span style={{ fontSize:14, fontWeight:800 }}>{targetCount}명</span>
@@ -4077,9 +4160,14 @@ function NoticeTab({ companyId }) {
         {/* 발송 이력 */}
         <div style={{ marginTop:8 }}>
           <div style={{ fontSize:13, fontWeight:700, marginBottom:10 }}>발송 이력</div>
-          {notices.length === 0 ? (
+          {(() => {
+          // Phase B: 제한 admin 은 자기 allowed 협력사 공지만 이력 표시(회사 전체/타 협력사 비노출).
+          const visibleNotices = noticeRestricted
+            ? notices.filter(n => partnerCodeAllowed(allowed, n.partnerCode || null))
+            : notices;
+          return visibleNotices.length === 0 ? (
             <div style={{ color:"var(--color-label-alt)", fontSize:13, textAlign:"center", padding:"16px 0" }}>발송된 공지가 없습니다</div>
-          ) : notices.slice(0,10).map(n => (
+          ) : visibleNotices.slice(0,10).map(n => (
             <div key={n.id} style={{ background:"var(--color-bg)", borderRadius:10, padding:"12px 14px", marginBottom:8, border:`1px solid ${n.type==="emergency"?"#F6C9C9":"var(--color-line)"}`, boxShadow:"var(--shadow-emphasize)", opacity: n.active?1:0.5 }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
                 <div style={{ flex:1, minWidth:0 }}>
@@ -4113,7 +4201,8 @@ function NoticeTab({ companyId }) {
                 )}
               </div>
             </div>
-          ))}
+          ));
+          })()}
         </div>
       </div>
     </div>
@@ -4577,6 +4666,7 @@ function SuperCompanyTab({ companies, loading, selectedCompanyId, onSelectCompan
                     cache={adminsByCompany[c.id]}
                     currentUserUid={currentUserUid}
                     onAdd={() => openAdminModal("add", c)}
+                    onEditProfile={(adminRow) => openAdminModal("editProfile", c, adminRow)}
                     onEditPerms={(adminRow) => openAdminModal("editPerms", c, adminRow)}
                     onDeleteAdmin={(adminRow) => openAdminModal("deleteAdmin", c, adminRow)}
                   />
@@ -4588,7 +4678,7 @@ function SuperCompanyTab({ companies, loading, selectedCompanyId, onSelectCompan
       </div>
 
       {modalOpen && (
-        <div style={S.overlay} onClick={(e) => { if (e.target === e.currentTarget && !busy) setModalOpen(false); }}>
+        <div style={S.overlay}>
           <form style={S.modal} onSubmit={submit}>
             <div style={S.modalTitle}>신규 회사 등록</div>
             <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:6 }}>
@@ -4664,6 +4754,14 @@ function SuperCompanyTab({ companies, loading, selectedCompanyId, onSelectCompan
           onDone={handleAdminModalDone}
         />
       )}
+      {adminModal && adminModal.kind === "editProfile" && (
+        <EditAdminProfileModal
+          company={adminModal.company}
+          admin={adminModal.admin}
+          onClose={closeAdminModal}
+          onDone={handleAdminModalDone}
+        />
+      )}
       {adminModal && adminModal.kind === "editPerms" && (
         <EditAdminPermissionsModal
           company={adminModal.company}
@@ -4690,7 +4788,7 @@ function SuperCompanyTab({ companies, loading, selectedCompanyId, onSelectCompan
 // 로딩/에러/빈 상태 + 행별 권한 배지 + 권한변경/삭제 버튼 + "+ 관리자 추가".
 // 자기 자신 행은 권한변경/삭제 비활성(이중 안전망, CF 도 거부).
 // ─────────────────────────────────────────────────────────
-function AdminListSection({ company, cache, currentUserUid, onAdd, onEditPerms, onDeleteAdmin }) {
+function AdminListSection({ company, cache, currentUserUid, onAdd, onEditProfile, onEditPerms, onDeleteAdmin }) {
   const state = cache || { loading: true };
   const admins = state.admins || [];
   return (
@@ -4743,6 +4841,13 @@ function AdminListSection({ company, cache, currentUserUid, onAdd, onEditPerms, 
               fontSize:10, fontWeight:700, padding:"2px 7px", borderRadius:20,
               background: badge.bg, color: badge.color, flexShrink:0,
             }}>{badge.label}</span>
+            <button
+              onClick={() => onEditProfile(a)}
+              title="이름·이메일·비밀번호 수정"
+              style={{
+                ...S.editBtn, marginRight:0, fontSize:10, padding:"3px 7px",
+              }}
+            >✏️ 정보수정</button>
             <button
               onClick={() => onEditPerms(a)}
               disabled={isSelf}
@@ -4888,7 +4993,7 @@ function AddAdminModal({ company, partnerCodes, onClose, onDone }) {
   };
 
   return (
-    <div style={S.overlay} onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+    <div style={S.overlay}>
       <form style={S.modal} onSubmit={submit}>
         <div style={S.modalTitle}>👥 관리자 추가 — {company.name || company.id}</div>
         <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:6 }}>
@@ -4945,6 +5050,118 @@ function AddAdminModal({ company, partnerCodes, onClose, onDone }) {
 // Phase A (2026-05-29) — 기존 관리자의 협력사 권한 변경 모달.
 // allowedPartnerCodes 만 변경(다른 필드 보호).
 // ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────
+// (2026-06-08) — 관리자 로그인 정보(이름/이메일/비밀번호) 수정 모달.
+// 특정 uid 대상(updateCompanyAdminProfile CF) — 변경된 필드만 전송.
+// 배경 클릭으로 닫히지 않음(입력 중 실수 방지·다른 모달과 일관). 취소/적용 버튼만.
+// ─────────────────────────────────────────────────────────
+function EditAdminProfileModal({ company, admin, onClose, onDone }) {
+  const [name, setName] = useState(admin?.name || "");
+  const [email, setEmail] = useState(admin?.email || "");
+  const [password, setPassword] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
+  const [okMsg, setOkMsg] = useState("");
+
+  const origName = admin?.name || "";
+  const origEmail = admin?.email || "";
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErrMsg(""); setOkMsg("");
+
+    // 변경된 필드만 추출(빈 비밀번호 = 변경 안 함).
+    const payload = { uid: admin.uid };
+    const nameTrim = name.trim();
+    const emailTrim = email.trim();
+    if (nameTrim !== origName) {
+      if (!nameTrim || nameTrim.length > 30) { setErrMsg("이름은 1~30자여야 합니다"); return; }
+      payload.name = nameTrim;
+    }
+    if (emailTrim !== origEmail) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) { setErrMsg("이메일 형식이 올바르지 않습니다"); return; }
+      payload.email = emailTrim;
+    }
+    if (password) {
+      if (password.length < 6) { setErrMsg("비밀번호는 최소 6자리여야 합니다"); return; }
+      if (password !== passwordConfirm) { setErrMsg("비밀번호 확인이 일치하지 않습니다"); return; }
+      payload.password = password;
+    }
+
+    if (Object.keys(payload).length <= 1) {
+      setErrMsg("변경된 내용이 없습니다");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const callable = httpsCallable(functions, "updateCompanyAdminProfile");
+      await callable(payload);
+      const parts = [];
+      if (payload.name) parts.push(`이름: ${payload.name}`);
+      if (payload.email) parts.push(`이메일: ${payload.email}`);
+      if (payload.password) parts.push("비밀번호 변경됨");
+      setOkMsg(`정보 수정 완료\n• ${parts.join("\n• ")}`);
+      setTimeout(() => { onDone(); }, 1000);
+    } catch (err) {
+      setErrMsg(err.message || "정보 수정 실패");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={S.overlay}>
+      <form style={S.modal} onSubmit={submit}>
+        <div style={S.modalTitle}>✏️ 정보 수정 — {admin.name || admin.email}</div>
+        <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:6 }}>
+          소속: {company.name || company.id} · 사번: {admin.empNo || "?"}
+        </div>
+
+        <label style={S.label}>이름</label>
+        <input style={S.input} placeholder="홍길동" value={name}
+          onChange={(e) => setName(e.target.value)} />
+
+        <label style={S.label}>이메일 (로그인 ID)</label>
+        <input style={S.input} type="email" placeholder="admin@company.com" value={email}
+          onChange={(e) => setEmail(e.target.value)} />
+        <div style={{ fontSize:11, color:"var(--color-cautionary, #B8860B)", marginTop:2 }}>
+          ⚠ 이메일을 바꾸면 이 관리자의 로그인 ID가 변경됩니다.
+        </div>
+
+        <div style={{ height:1, background:"var(--color-line-soft)", margin:"10px 0 4px" }} />
+        <label style={S.label}>새 비밀번호 (변경 시에만 입력, 6자 이상)</label>
+        <input style={S.input} type="password" placeholder="비워두면 변경 안 함" value={password}
+          onChange={(e) => setPassword(e.target.value)} />
+
+        <label style={S.label}>새 비밀번호 확인</label>
+        <input style={S.input} type="password" placeholder="••••••••" value={passwordConfirm}
+          onChange={(e) => setPasswordConfirm(e.target.value)} />
+
+        {errMsg && (
+          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6 }}>
+            {errMsg}
+          </div>
+        )}
+        {okMsg && (
+          <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6, whiteSpace:"pre-wrap" }}>
+            {okMsg}
+          </div>
+        )}
+
+        <div style={{ display:"flex", gap:8, marginTop:12 }}>
+          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:13 }}
+            disabled={busy} onClick={onClose}>취소</button>
+          <button type="submit" style={{ ...S.addBtn, flex:2, padding:"9px 0" }} disabled={busy}>
+            {busy ? "적용 중..." : "변경 적용"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function EditAdminPermissionsModal({ company, admin, partnerCodes, onClose, onDone }) {
   const [allowed, setAllowed] = useState(
     Array.isArray(admin?.allowedPartnerCodes) && admin.allowedPartnerCodes.length > 0
@@ -4973,7 +5190,7 @@ function EditAdminPermissionsModal({ company, admin, partnerCodes, onClose, onDo
   };
 
   return (
-    <div style={S.overlay} onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+    <div style={S.overlay}>
       <form style={S.modal} onSubmit={submit}>
         <div style={S.modalTitle}>🛡 권한 변경 — {admin.name || admin.email}</div>
         <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:6 }}>
@@ -5032,7 +5249,7 @@ function DeleteAdminModal({ company, admin, onClose, onDone }) {
   };
 
   return (
-    <div style={S.overlay} onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+    <div style={S.overlay}>
       <form style={{ ...S.modal, borderTop:"4px solid var(--color-destructive)" }} onSubmit={submit}>
         <div style={{ ...S.modalTitle, color:"var(--color-destructive)" }}>🗑 관리자 삭제 — {admin.name || admin.email}</div>
         <div style={{
@@ -5147,7 +5364,7 @@ function EditCompanyModal({ company, onClose, onDone }) {
   };
 
   return (
-    <div style={S.overlay} onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+    <div style={S.overlay}>
       <form style={S.modal} onSubmit={submit}>
         <div style={S.modalTitle}>✏️ 회사 편집 — {company.name || company.id}</div>
         <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:6 }}>
@@ -5226,7 +5443,7 @@ function ResetPasswordModal({ company, onClose, onDone }) {
   };
 
   return (
-    <div style={S.overlay} onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+    <div style={S.overlay}>
       <form style={S.modal} onSubmit={submit}>
         <div style={S.modalTitle}>🔑 관리자 비밀번호 초기화 — {company.name || company.id}</div>
         <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:6 }}>
@@ -5303,7 +5520,7 @@ function DeleteCompanyModal({ company, isSelf, onClose, onDone }) {
   };
 
   return (
-    <div style={S.overlay} onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+    <div style={S.overlay}>
       <form style={{ ...S.modal, borderTop:"4px solid var(--color-destructive)" }} onSubmit={submit}>
         <div style={{ ...S.modalTitle, color:"var(--color-destructive)" }}>🗑 회사 영구 삭제 — {company.name || company.id}</div>
         <div style={{

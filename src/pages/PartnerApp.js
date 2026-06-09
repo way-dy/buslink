@@ -8,6 +8,8 @@ import { signInAnonymously } from "firebase/auth";
 import { collection, getDocs, doc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, limit } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { BusLinkLogo, Pill } from "../components/ui";
+import InstallPrompt from "../components/InstallPrompt";
+import { applyAppManifest } from "../lib/pwaManifest";
 import { aggregateBoardingsByStop } from "../lib/stopMapping";
 // Phase 1.3 (2026-05-28): mainTab="ops" 운영 포털 — 실시간 버스 위치 지도.
 // 카카오 SDK import — react-kakao-maps-sdk의 `Map`이 native `Map` 클래스를 shadow하므로
@@ -56,6 +58,11 @@ export default function PartnerApp() {
     signInAnonymously(auth).catch(e => console.warn("[PartnerApp] 익명 인증 실패:", e?.message));
   }, []);
 
+  // 협력사앱 전용 PWA 아이콘/제목(2026-06) — 설치 시 'BusLink 협력사' + partner 아이콘.
+  useEffect(() => {
+    applyAppManifest({ manifestHref: "/manifest-partner.json", appleTouchHref: "/icons/passenger-1024.png", title: "BusLink 협력사" });
+  }, []);
+
   const handleCodeSubmit = async () => {
     if (!code.trim()) return;
     setLoading(true); setError("");
@@ -74,6 +81,7 @@ export default function PartnerApp() {
 
   return (
     <div style={S.wrap}>
+      <InstallPrompt />
       <div style={{ ...S.card, maxWidth:
         step === STEPS.MAIN && mainTab === "ops" ? 760 :
         regMode === REG_MODES.MULTI && step === STEPS.MAIN ? 720 :

@@ -140,6 +140,14 @@ html, body { font-family: var(--font-base); color: var(--color-label); -webkit-f
   100% { transform: scale(1.9); opacity: 0;    }
 }
 
+/* 로딩 화면(components/LoadingScreen.js) — 스피너 회전 + 버스 살짝 떠오름.
+   App.js 초기 로딩 게이트 전역(관제·기사·직원·승객·협력사 공통, 2026-06-08). */
+@keyframes blspin { to { transform: rotate(360deg); } }
+@keyframes blbob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+
 /* Type utility */
 .t-display-1 { font: var(--type-display-1-weight) var(--type-display-1-size)/var(--type-display-1-line) var(--font-base); letter-spacing: var(--type-display-1-track); }
 .t-display-2 { font: var(--type-display-2-weight) var(--type-display-2-size)/var(--type-display-2-line) var(--font-base); letter-spacing: var(--type-display-2-track); }

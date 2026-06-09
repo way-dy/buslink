@@ -15,7 +15,7 @@
 - `notices/{noticeId}` — `title/body/type/companyId/partnerCode/active/createdAt` (partnerCode 2026-05-21 추가, null=전체) + (선택, 2026-05-29 Phase 1.4) **`sender:"partner"|undefined`**·**`senderCode:string|undefined`**(PartnerApp `sendPartnerNotice` 발송 분 식별용. admin 발송 분은 미존재 = "관리자". EmployeeApp NoticeTab·NoticesTab·NoticeForceModal·승객앱 공지배너는 옵셔널 필드 미사용 — read 호환 100%)
 
 최상위:
-- `users/{uid}` — **권한 게이트**(`role`+`companyId` + `name?`/`empNo?`/`email?`). App.js·규칙·Functions가 함께 읽음. (선택, 2026-05-29 Phase A) **`allowedPartnerCodes:string[]`** — admin 한정 협력사 권한 범위. `["*"]`=회사 본부(전체), `["code1","code2"]`=특정 협력사 한정. 필드 부재=기존 admin 호환(클라이언트 `?? ["*"]` 폴백·마이그 불필요). `createCompanyAdmin`/`updateCompanyAdminPermissions` 가 write, `listCompanyAdmins` 가 read 정규화. Phase B(AdminApp 협력사 필터 자동 적용) 미도입 — 데이터만 누적.
+- `users/{uid}` — **권한 게이트**(`role`+`companyId` + `name?`/`empNo?`/`email?`). App.js·규칙·Functions가 함께 읽음. (선택, 2026-05-29 Phase A) **`allowedPartnerCodes:string[]`** — admin 한정 협력사 권한 범위. `["*"]`=회사 본부(전체), `["code1","code2"]`=특정 협력사 한정. 필드 부재=기존 admin 호환(클라이언트 `?? ["*"]` 폴백·마이그 불필요). `createCompanyAdmin`/`updateCompanyAdminPermissions` 가 write, `listCompanyAdmins` 가 read 정규화. **Phase B(2026-06-08) 도입**: App.js→AdminApp prop→`src/lib/partnerAccess.js` 로 AdminApp 8지점이 read/표시 게이팅(클라만·rules 무변경). rules `users` write 는 여전히 superadmin 만 → 제한 admin self-update 불가(신규 발급 코드 자동 권한부여 안 됨·슈퍼관리자 부여 필요). 클라 필터는 우회 가능 → rules isAdmin 협력사 제약은 별도 후속.
 - `gps/{companyId}_{vehicleId}` — 실시간 위치(덮어쓰기)
 - `gpsHistory/{companyId}/{vehicleId}/{date}/points/{pointId}`
 - `boardingTokens/{tokenId}` — 5분 만료·1회 소각(`used` 플래그)

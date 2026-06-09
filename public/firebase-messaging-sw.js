@@ -50,6 +50,11 @@ messaging.onBackgroundMessage(payload => {
 const SW_HOSTNAME_TO_COMPANY = {
   "buslink-prod.web.app": "dy001",
   "buslink-prod.firebaseapp.com": "dy001",
+  // 앱별 서브도메인(2026-06-05) — App.js HOST_APP · companyResolver 와 동기.
+  "admin.buslink.co.kr": "dy001",
+  "d.buslink.co.kr": "dy001",
+  "p.buslink.co.kr": "dy001",
+  "partner.buslink.co.kr": "dy001",
   "localhost": "dy001",
   "127.0.0.1": "dy001",
 };

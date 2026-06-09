@@ -45,6 +45,9 @@ const MIN_STOP_GAP_SEC = 60;       // 정류장 간 최소 시각 간격(초) �
 const MIN_FUTURE_BUFFER_SEC = 30;  // 미통과 정류장 estimate 최소 미래 버퍼(초)
 const DEFAULT_SPEED_KMH = 30;      // routePath/속도 없을 때 구간이동시간 기본 속도
 const MIN_EFFECTIVE_SPEED_KMH = 20; // 정차/저속 노이즈 하한 — 구간이동시간 계산용
+// 2026-06-08 GPS 진척률 통과 안전망 — busProgress 가 정류장 progress 를 이 마진(m)
+// 이상 지났으면 통과로 간주(도착 감지 onStopReached 미발화 시 실위치 기준 앵커).
+const GPS_PASS_MARGIN_M = 40;
 // 정류장당 정차/감속/가속 추가 시간(초). 실제 도착→다음 도착 시간은 단순 주행거리
 // /속도가 아닌, 정차(승하차)+감속+가속 포함이라 segTravelMs에 가산. 근접 정류장
 // (200~500m)의 "지나치게 짧음" 결함을 직접 차단.
@@ -238,6 +241,63 @@ export function computeStopEstimates({
     return { offset, plannedAt, plannedMs };
   });
 
+  // 5.5) ── GPS 진척률 통과 안전망 (2026-06-08) ──────────────────────────────
+  // 근본 문제: "통과" 판정을 actualArrivals(도착 감지 stopArrivals)로만 함 → 감지
+  //   (onStopReached)가 발화 안 하면 출발 정류장이 영원히 'next' 로 남아, 버스가 실제로
+  //   14km 갔어도 "now − 출발계획" 균일 지연(예: 24분)을 전 하류에 carry 하는 아티팩트.
+  // 해법: busProgress(routePath 투영·신뢰 가능)가 정류장 progress 를 지났으면 통과로
+  //   간주. 버스 현재위치의 계획시각을 (lastPassed~next) 보간해 "현재 지연"을 산출하고,
+  //   통과 정류장에 합성 도착(계획+현재지연)을 주입 → 실위치 기준으로 앵커링.
+  // 안전: routePath+vehiclePos 없으면 비활성(회귀 0). 실측 도착(arrivals)이 있으면 우선
+  //   (덮어쓰지 않음). 합성 통과는 source 'gps'(추정)로 구분 — 실측 'actual' 과 구별.
+  // 회귀 가드(복원 금지): ① 실측 arrivals 우선(merged 에서 기존값 보존) ② vehiclePos/
+  //   routePath 부재 시 완전 비활성 ③ source 'gps' 유지(실측 위장 금지).
+  let effArr = arrivals;
+  const gpsPassedIds = new Set();
+  if (usePath && busProgress != null && hasPlanBase) {
+    let lastPassed = -1;
+    for (let i = 0; i < stops.length; i++) {
+      if (stopProgress[i] != null && busProgress > stopProgress[i] + GPS_PASS_MARGIN_M) lastPassed = i;
+    }
+    if (lastPassed >= 0) {
+      const nextI = Math.min(lastPassed + 1, stops.length - 1);
+      const pmA = meta[lastPassed].plannedMs;
+      const pmB = meta[nextI].plannedMs;
+      let schedMs = pmA;
+      if (pmA != null && pmB != null && stopProgress[nextI] != null && stopProgress[lastPassed] != null
+          && stopProgress[nextI] > stopProgress[lastPassed]) {
+        const frac = Math.min(1, Math.max(0,
+          (busProgress - stopProgress[lastPassed]) / (stopProgress[nextI] - stopProgress[lastPassed])));
+        schedMs = pmA + frac * (pmB - pmA);
+      }
+      const gpsDelaySec = (schedMs != null) ? Math.round((T_NOW - schedMs) / 1000) : null;
+      if (gpsDelaySec != null) {
+        const merged = { ...arrivals };
+        let injected = false;
+        for (let i = 0; i <= lastPassed; i++) {
+          const s = stops[i];
+          if (merged[s.id] == null && meta[i].plannedMs != null) {
+            merged[s.id] = meta[i].plannedMs + gpsDelaySec * 1000; // 합성 도착(계획+현재지연)
+            gpsPassedIds.add(s.id);
+            injected = true;
+          }
+        }
+        if (injected) {
+          effArr = merged;
+          // 누적지연·nextIdx 를 effArr 기준으로 재산출(실측 + GPS 추정 통과).
+          let lastIdxWithActual = -1;
+          stops.forEach((s, i) => { if (effArr[s.id] != null) lastIdxWithActual = i; });
+          if (lastIdxWithActual >= 0 && meta[lastIdxWithActual].plannedMs != null) {
+            cumulativeDelaySec = Math.round((effArr[stops[lastIdxWithActual].id] - meta[lastIdxWithActual].plannedMs) / 1000);
+            hasDelayRef = true;
+          }
+          nextIdx = -1;
+          for (let i = 0; i < stops.length; i++) { if (effArr[stops[i].id] == null) { nextIdx = i; break; } }
+        }
+      }
+    }
+  }
+
   // 6) order 순서대로 순회하며 estMs를 단조증가로 누적 산출.
   //    prevEstMs = 직전 정류장의 확정 estMs(arrived는 actualMs, 미통과는 보정된 estMs).
   //    prevEstMs가 null이면(노선 시작 전 기준점 없음) T_NOW를 기준으로 사용.
@@ -252,9 +312,10 @@ export function computeStopEstimates({
     const s = stops[i];
     const { offset, plannedAt, plannedMs } = meta[i];
 
-    // (a) 이미 통과(실 도착 있음) → 실측. prevEstMs를 actualMs로 갱신(체인 기준점).
-    if (arrivals[s.id] != null) {
-      const actualMs = arrivals[s.id];
+    // (a) 이미 통과(실측 도착 OR GPS 진척률 통과) → prevEstMs를 도착시각으로 갱신(체인 기준점).
+    //     GPS 추정 통과(gpsPassedIds)는 source 'gps'(추정)로 구분 — 실측 'actual' 위장 금지.
+    if (effArr[s.id] != null) {
+      const actualMs = effArr[s.id];
       const estimatedAt = fmtHHMM(
         new Date(actualMs).getHours() * 60 + new Date(actualMs).getMinutes()
       );
@@ -264,7 +325,7 @@ export function computeStopEstimates({
       if (delaySec != null) prevDelaySec = delaySec;
       out.push({
         stopId: s.id, plannedAt, estimatedAt, delaySec,
-        status: "arrived", source: "actual",
+        status: "arrived", source: gpsPassedIds.has(s.id) ? "gps" : "actual",
       });
       continue;
     }

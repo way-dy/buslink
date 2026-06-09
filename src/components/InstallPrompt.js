@@ -17,6 +17,7 @@
 // ---------------------------------------------------------------------------
 import React, { useEffect, useState } from "react";
 import { Btn } from "./ui";
+import { resolveAppIcons } from "../lib/appIcons";
 
 const LS_KEY = "buslink_pwa_prompt";
 const SNOOZE_DAYS = 3;
@@ -360,6 +361,12 @@ export default function InstallPrompt() {
   // iOS 는 단계 일러스트 바텀시트 — 한 줄 안내보다 시각적으로 명확.
   const isIosMode = mode === "ios";
 
+  // 현재 앱(호스트명/경로) 전용 아이콘·이름 — logo192(React 기본 로고) 하드코딩 제거.
+  const appIcon = resolveAppIcons(
+    typeof window !== "undefined" ? window.location.hostname : "",
+    typeof window !== "undefined" ? window.location.pathname : ""
+  );
+
   return (
     <div
       role="dialog"
@@ -391,8 +398,8 @@ export default function InstallPrompt() {
       >
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
           <img
-            src="/logo192.png"
-            alt="BusLink"
+            src={appIcon.install}
+            alt={appIcon.title}
             width={44}
             height={44}
             style={{ borderRadius: 10, flexShrink: 0 }}

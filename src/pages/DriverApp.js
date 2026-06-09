@@ -25,7 +25,7 @@ const functions = getFunctions(undefined, "us-central1");
 
 // 빌드 식별자 — 진단 JSON 의 appVersion 으로 회수돼 "어느 번들이 실제 폰에서
 // 돌았는지" 확정(설치형 PWA 가 옛 캐시를 돌리는 경우 vs 코드 결함 구분). 배포마다 갱신.
-const DRIVER_BUILD = "2026-06-05-badge";
+const DRIVER_BUILD = "2026-06-09-livegps";
 
 // 리디자인 2단계(2026-05-16): 라이트 테마 리스킨.
 // ── 로직 100% 불변: state/effect·init(driver/dispatch/stops 로드)·loadDispatch
@@ -103,6 +103,10 @@ export default function DriverApp({ companyId: propCompanyId }) {
   // 다음 진단 JSON(recordEtaDiagnostic) 에 stopArrivalsLog 로 첨부 → 어느 정류장이
   // 어떻게 기록됐는지(권한 거부·not-found·alreadyExists 등) 추적 가능.
   const stopArrivalsLogRef = useRef([]);
+  // 2026-06-08 — busProgress 기반 통과 정류장 기록 중복 방지(이번 운행 세션 단위).
+  // gps.js detectStops(onStopReached) 가 일부 노선에서 발화 안 하는 문제 우회:
+  // DriverApp 이 신뢰 가능한 busProgress 로 직접 통과 판정 → recordStopArrival(실시각).
+  const gpsRecordedRef = useRef(new Set());
   // ref 로 최신 노선데이터 노출(2026-06-02) — startGPS 는 호출 시점의 stops/routePath 를
   // 1회 캡처하는데, 비동기 로드 전이면 빈값에 갇혀 도착 백필이 세션 내내 비활성(2일 연속
   // 도착 0건의 근인). gps.js 가 매 감지 시 ref.current(최신 state)를 읽도록 getter 주입 →
@@ -320,6 +324,75 @@ export default function DriverApp({ companyId: propCompanyId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, dispatch?.id, recoverTick]);
 
+  // ── 본인 차량 GPS 실시간 구독 (2026-06-09) ──────────────────────────────
+  // 이전엔 computeStopEstimates 에 lastVehiclePosRef(flushDiag 30초 주기)를 넘겨 도착
+  // 표시가 ~30초 늦던 문제(사용자 보고) → 자기 gps doc onSnapshot 으로 ~5초(startGPS
+  // throttle) 신선화. driving 중에만 구독(비용 절감). recoverTick 으로 통신복구 재구독.
+  const [liveVehiclePos, setLiveVehiclePos] = useState(null);
+  useEffect(() => {
+    if (!driving || !companyId || !driver?.vehicleId) { setLiveVehiclePos(null); return; }
+    const ref = doc(db, "gps", `${companyId}_${driver.vehicleId}`);
+    return onSnapshot(ref, snap => {
+      if (!snap.exists()) return;
+      const g = snap.data();
+      if (typeof g.lat === "number" && typeof g.lng === "number") {
+        setLiveVehiclePos({ lat: g.lat, lng: g.lng, speed: typeof g.speed === "number" ? g.speed : null });
+      }
+    }, () => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, driver?.vehicleId, driving, recoverTick]);
+
+  // ── busProgress 기반 통과 정류장 도착 기록 (2026-06-09, 실시간 위치 기반) ──
+  // gps.js detectStops(onStopReached)가 일부 노선에서 미발화하는 문제 우회. liveVehiclePos
+  // 갱신마다(~5초) busProgress 로 통과 판정 → recordStopArrival(actualAt=serverTimestamp).
+  // 실 stopArrivals 가 쌓여 기사앱·승객앱 실시각 표시 + 탑승통계/도착임박푸시 정상화.
+  // 세션 중복가드(gpsRecordedRef) + Firestore 기존값 skip + CF 멱등. (이전 flushDiag 30초
+  // 기록기 대체 — 실시간이라 도착 기록 지연도 해소.)
+  useEffect(() => {
+    if (!driving || !companyId || !dispatch?.id || !liveVehiclePos) return;
+    const rp = Array.isArray(routePath) && routePath.length >= 2 ? routePath : null;
+    if (!rp || !Array.isArray(stops) || stops.length === 0) return;
+    let cum, busProg;
+    try {
+      cum = buildCumulativeLengths(rp);
+      const proj = projectToPolyline(liveVehiclePos, rp, cum);
+      if (!proj) return;
+      busProg = proj.progress;
+    } catch { return; }
+    const todayRec = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+    for (let i = 0; i < stops.length; i++) {
+      const s = stops[i];
+      let sp = null;
+      try {
+        if (typeof s.lat === "number" && typeof s.lng === "number") {
+          sp = projectToPolyline({ lat: s.lat, lng: s.lng }, rp, cum)?.progress ?? null;
+        }
+      } catch { sp = null; }
+      if (sp == null || busProg <= sp + 40) continue;              // 아직 미통과
+      if (gpsRecordedRef.current.has(s.id)) continue;              // 이번 세션 이미 기록 시도
+      if (stopArrivals && stopArrivals[s.id] != null) { gpsRecordedRef.current.add(s.id); continue; } // 이미 있음
+      gpsRecordedRef.current.add(s.id);                            // 호출 전 마킹
+      const plannedAtRec = planTimeForStop(dispatch?.departTime, s.offsetMin);
+      let delaySecRec = null;
+      if (plannedAtRec && typeof s.offsetMin === "number") {
+        const mm = plannedAtRec.match(/^(\d{2}):(\d{2})$/);
+        if (mm) { const pd = new Date(); pd.setHours(+mm[1], +mm[2], 0, 0); delaySecRec = Math.round((Date.now() - pd.getTime()) / 1000); }
+      }
+      httpsCallable(functions, "recordStopArrival")({
+        companyId, date: todayRec, dispatchId: dispatch.id, stopId: s.id,
+        plannedAt: plannedAtRec || null, delaySec: delaySecRec, viaBackfill: true,
+      }).then(res => {
+        stopArrivalsLogRef.current.push({ stopId: s.id, ok: true, alreadyExists: !!(res && res.data && res.data.alreadyExists), via: "liveGps", ts: Date.now() });
+        if (stopArrivalsLogRef.current.length > 40) stopArrivalsLogRef.current.shift();
+      }).catch(e => {
+        gpsRecordedRef.current.delete(s.id);                       // 실패 시 다음 갱신 재시도
+        stopArrivalsLogRef.current.push({ stopId: s.id, ok: false, error: e && e.message, code: e && e.code, via: "liveGps", ts: Date.now() });
+        if (stopArrivalsLogRef.current.length > 40) stopArrivalsLogRef.current.shift();
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveVehiclePos, driving, companyId, dispatch?.id]);
+
   // 운행 중 "지연 N분"(현재−계획) 표시를 분 단위로 갱신하는 시계 틱(30초, 2026-06-04).
   // GPS 콜백 사이 정지 중에도 정류장 카드의 지연이 흐르도록. 미운행 시 타이머 없음.
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -359,8 +432,11 @@ export default function DriverApp({ companyId: propCompanyId }) {
     stops,
     departTime: dispatch?.departTime,
     actualArrivals: stopArrivals,
-    vehiclePos: null,
-    speed: null,
+    // 2026-06-09 — 실시간 차량 위치 주입(liveVehiclePos onSnapshot, ~5초). GPS 진척률 통과
+    // 안전망(stopSchedule)이 도착 감지 미발화 시에도 버스 실위치로 통과 정류장 판정 →
+    // 출발지 기준 균일지연 아티팩트 차단 + 도착 표시 지연(~30초→~5초) 해소(사용자 보고).
+    vehiclePos: liveVehiclePos,
+    speed: liveVehiclePos?.speed ?? null,
     routePath: Array.isArray(routePath) && routePath.length >= 2 ? routePath : null,
   });
   const estByStopId = Object.fromEntries(stopEstimates.map(e => [e.stopId, e]));
@@ -389,24 +465,36 @@ export default function DriverApp({ companyId: propCompanyId }) {
       }
     } catch { /* 무해 — null 인 채로 기록 */ }
     // busProgress / nextStopProgress 산출 (routePath 유효 + vehiclePos 있을 때만)
-    let busProgress = null, nextStopProgress = null;
+    let busProgress = null, nextStopProgress = null, allStopProgress = null;
     const validPath = Array.isArray(routePath) && routePath.length >= 2;
-    if (validPath && vehiclePos) {
+    if (validPath) {
       try {
         const cum = buildCumulativeLengths(routePath);
-        const proj = projectToPolyline(vehiclePos, routePath, cum);
-        if (proj) busProgress = proj.progress;
-        // nextIdx = stopEstimates 의 status==='next' 첫 항목 인덱스(stops 배열 기준).
-        const nextStopId = (stopEstimates.find(e => e.status === "next") || {}).stopId;
-        if (nextStopId) {
-          const ns = stops.find(s => s.id === nextStopId);
-          if (ns && typeof ns.lat === "number" && typeof ns.lng === "number") {
-            const sp = projectToPolyline({ lat: ns.lat, lng: ns.lng }, routePath, cum);
-            if (sp) nextStopProgress = sp.progress;
+        // 전 정류장 progress(2026-06-08 진단) — 정류장이 routePath 에 정상 투영되는지
+        // (값들이 단조증가 분포인지 vs 한 점에 뭉치는지) 확인 → 도착 감지 실패 근인 판별.
+        allStopProgress = stops.map(s =>
+          (typeof s.lat === "number" && typeof s.lng === "number")
+            ? (projectToPolyline({ lat: s.lat, lng: s.lng }, routePath, cum)?.progress ?? null)
+            : null
+        );
+        if (vehiclePos) {
+          const proj = projectToPolyline(vehiclePos, routePath, cum);
+          if (proj) busProgress = proj.progress;
+          // nextIdx = stopEstimates 의 status==='next' 첫 항목 인덱스(stops 배열 기준).
+          const nextStopId = (stopEstimates.find(e => e.status === "next") || {}).stopId;
+          if (nextStopId) {
+            const ns = stops.find(s => s.id === nextStopId);
+            if (ns && typeof ns.lat === "number" && typeof ns.lng === "number") {
+              const sp = projectToPolyline({ lat: ns.lat, lng: ns.lng }, routePath, cum);
+              if (sp) nextStopProgress = sp.progress;
+            }
           }
         }
       } catch { /* 무해 */ }
     }
+    // (busProgress 통과 정류장 기록은 2026-06-09 실시간 liveVehiclePos useEffect 로 이전 —
+    //  flushDiag 30초 주기 대신 ~5초 GPS 갱신마다 기록 → 도착 기록 지연 해소.)
+
     // nextIdx 산출 (stops 배열 기준 — etaDiag payload용)
     const nextIdx = stops.findIndex(s => {
       const e = estByStopId[s.id];
@@ -418,7 +506,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
     await recordEtaDiagnostic({
       companyId, runId,
       vehiclePos, vehicleSpeed,
-      busProgress, nextStopProgress,
+      busProgress, nextStopProgress, allStopProgress,
       estimates: stopEstimates,
       nextIdx,
       T_NOW: Date.now(),
@@ -495,6 +583,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
     const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
     // 2026-06-01 — 운행 1회 단위 stopArrivals 기록 로그 초기화(이전 운행 잔존 차단).
     stopArrivalsLogRef.current = [];
+    gpsRecordedRef.current = new Set();
     const id = startGPS({
       companyId, vehicleId: driver.vehicleId, vehicleNo: driver.vehicleNo || "",
       driverId: driver.id, driverName: driver.name || "",
@@ -604,6 +693,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
     lastVehicleSpeedRef.current = null;
     // 2026-06-01 — stopArrivals 기록 로그 정리(다음 운행 시 재초기화 + 누적 차단).
     stopArrivalsLogRef.current = [];
+    gpsRecordedRef.current = new Set();
     setBoardingToken(null);
     setQrUrl(null);
     setActiveTab("운행");

@@ -17,8 +17,11 @@ import { db } from "../firebase";
  * @param {string}  [props.allLabel]    "전체 협력사" 등 라벨 변경
  * @param {Object}  [props.style]       추가 인라인 스타일
  * @param {boolean} [props.compact]     true=mini (필터바용), false=풀폭 (폼용)
+ * @param {string[]} [props.allowedCodes]  Phase B(2026-06-08) — 로그인 admin 의 협력사 권한 범위.
+ *   미지정 또는 ["*"] 포함 = 무제한(기존 동작 100% 동일). 그 외 = 옵션을 그 코드들로만 제한.
+ *   [](빈 배열) = 접근 가능한 협력사 없음(안내 표시).
  */
-export function PartnerFilter({ companyId, value, onChange, activeOnly = true, allLabel = "전체 협력사", style, compact = true }) {
+export function PartnerFilter({ companyId, value, onChange, activeOnly = true, allLabel = "전체 협력사", style, compact = true, allowedCodes }) {
   const [partners, setPartners] = useState([]);
 
   useEffect(() => {
@@ -34,14 +37,33 @@ export function PartnerFilter({ companyId, value, onChange, activeOnly = true, a
     }, err => console.warn("[PartnerFilter] 구독 오류:", err.message));
   }, [companyId, activeOnly]);
 
+  // Phase B 권한 제한. allowedCodes 미지정/["*"] = 무제한(기존 동작 — 회귀 0).
+  const restricted = Array.isArray(allowedCodes) && !allowedCodes.includes("*");
+  const visiblePartners = restricted
+    ? partners.filter(p => allowedCodes.includes(p.code || p.id))
+    : partners;
+
   const base = compact
     ? { background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 8, padding: "5px 10px", color: "var(--color-label)", fontSize: 12, outline: "none", fontFamily: "inherit", width: "auto", minWidth: 110, maxWidth: 180 }
     : { background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 8, padding: "10px 14px", color: "var(--color-label)", fontSize: 14, outline: "none", fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
 
+  // 빈 권한(접근 가능한 협력사 0개) — 드롭다운 대신 안내.
+  if (restricted && allowedCodes.length === 0) {
+    return (
+      <span style={{ fontSize: compact ? 12 : 13, color: "var(--color-label-alt)", fontStyle: "italic" }}>
+        접근 가능한 협력사 없음
+      </span>
+    );
+  }
+
+  // 제한 admin 의 "전체" = 내 협력사 전체(allowedCodes 합집합). 라벨로 의미 명시.
+  // 단일 협력사여도 "전체"(=그 1개) 옵션 유지 — value 일관성·데이터 필터는 호출부가 allowed 로 적용.
+  const allOptionLabel = restricted ? "내 협력사 전체" : allLabel;
+
   return (
     <select value={value || "전체"} onChange={e => onChange(e.target.value)} style={{ ...base, ...(style || {}) }}>
-      <option value="전체">{allLabel}</option>
-      {partners.map(p => (
+      <option value="전체">{allOptionLabel}</option>
+      {visiblePartners.map(p => (
         <option key={p.code || p.id} value={p.code || p.id}>{p.partnerName || p.code}</option>
       ))}
     </select>

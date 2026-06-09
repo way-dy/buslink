@@ -42,7 +42,7 @@ function slimEstimate(e) {
 export async function recordEtaDiagnostic({
   companyId, runId,
   vehiclePos = null, vehicleSpeed = null,
-  busProgress = null, nextStopProgress = null,
+  busProgress = null, nextStopProgress = null, allStopProgress = null,
   estimates = [], nextIdx = -1,
   T_NOW = Date.now(),
   source = "auto", // 트리거 출처: 'interval' | 'stopArrivals' | 'auto'
@@ -68,6 +68,7 @@ export async function recordEtaDiagnostic({
     if (Array.isArray(stopArrivalsLog) && stopArrivalsLog.length > 0) {
       payload.stopArrivalsLog = stopArrivalsLog;
     }
+    if (Array.isArray(allStopProgress)) payload.allStopProgress = allStopProgress; // 2026-06-08 정류장 투영 진단
     await addDoc(
       collection(db, "etaDiagnostics", date, "runs", runId, "points"),
       payload

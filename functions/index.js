@@ -1088,6 +1088,96 @@ exports.updateCompanyAdminPermissions = onCall(async (request) => {
   return { ok: true, uid, allowedPartnerCodes: allowed };
 });
 
+// updateCompanyAdminProfile({uid, name?, email?, password?})
+//   특정 uid 의 admin 로그인 정보(이름/이메일/비밀번호) 수정.
+//   - updateCompanyAdminInfo 는 companyId 기준(회사 첫 admin 타겟)이라 특정 uid 수정엔 부적합 → 본 함수는 uid 기준.
+//   - role/companyId/empNo/allowedPartnerCodes 절대 미변경(권한상승 벡터 차단).
+//   - 대상이 role==="admin" 아니면 거부(superadmin/driver 보호).
+//   - 자기 자신(uid===request.auth.uid)도 허용(슈퍼관리자가 본인 admin 정보 수정 가능).
+exports.updateCompanyAdminProfile = onCall(async (request) => {
+  await assertSuperAdmin(request);
+  const { uid, name, email, password } = request.data || {};
+  if (!uid || typeof uid !== "string") {
+    throw new HttpsError("invalid-argument", "uid가 필요합니다");
+  }
+
+  const hasName = typeof name === "string" && name.trim().length > 0;
+  const hasEmail = typeof email === "string" && email.trim().length > 0;
+  const hasPassword = typeof password === "string" && password.length > 0;
+  if (!hasName && !hasEmail && !hasPassword) {
+    throw new HttpsError("invalid-argument", "이름·이메일·비밀번호 중 최소 1개를 제공해야 합니다");
+  }
+
+  // ── 필드별 검증(제공된 것만) ──
+  const nameTrim = hasName ? name.trim() : null;
+  if (hasName && nameTrim.length > 30) {
+    throw new HttpsError("invalid-argument", "이름은 1~30자여야 합니다");
+  }
+  const emailTrim = hasEmail ? email.trim() : null;
+  if (hasEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
+    throw new HttpsError("invalid-argument", "이메일 형식이 올바르지 않습니다");
+  }
+  if (hasPassword && password.length < 6) {
+    throw new HttpsError("invalid-argument", "비밀번호는 최소 6자리여야 합니다");
+  }
+
+  const db = admin.firestore();
+  const ref = db.collection("users").doc(uid);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    throw new HttpsError("not-found", "사용자를 찾을 수 없습니다");
+  }
+  const data = snap.data() || {};
+  // role==="admin" 아니면 거부(superadmin/driver 보호·권한상승 차단).
+  if (data.role !== "admin") {
+    throw new HttpsError("failed-precondition", "관리자 계정만 정보 수정 가능합니다");
+  }
+
+  // ── 변경 제공된 것만 patch 구성 ──
+  const authPatch = {};
+  const userDocPatch = {};
+  if (hasName) {
+    authPatch.displayName = nameTrim;
+    userDocPatch.name = nameTrim;
+  }
+  if (hasEmail) {
+    authPatch.email = emailTrim;
+    userDocPatch.email = emailTrim;
+  }
+  if (hasPassword) {
+    authPatch.password = password;
+  }
+
+  // ── Auth 정보 변경(rules 우회) ──
+  try {
+    await admin.auth().updateUser(uid, authPatch);
+  } catch (e) {
+    if (e.code === "auth/email-already-exists") {
+      throw new HttpsError("already-exists", "이미 사용 중인 이메일입니다");
+    }
+    throw new HttpsError("internal", `Auth 정보 변경 실패: ${e.message}`);
+  }
+
+  // ── users 도큐먼트 update(name/email 만 — role/companyId/empNo/allowedPartnerCodes 미변경) ──
+  if (Object.keys(userDocPatch).length > 0) {
+    try {
+      await ref.update(userDocPatch);
+    } catch (e) {
+      // Auth 는 이미 변경됨 — 비치명적, 경고만.
+      console.warn(`[관리자정보수정] users 도큐먼트 update 실패 uid=${uid}: ${e.message}`);
+    }
+  }
+
+  console.log(`[관리자정보수정] uid=${uid} cid=${data.companyId || "?"} 변경=${JSON.stringify(Object.keys(authPatch))} 호출자=${request.auth.uid}`);
+  return {
+    ok: true,
+    uid,
+    name: hasName ? nameTrim : null,
+    email: hasEmail ? emailTrim : null,
+    passwordChanged: hasPassword,
+  };
+});
+
 exports.deleteCompanyAdmin = onCall(async (request) => {
   await assertSuperAdmin(request);
   const { uid } = request.data || {};
@@ -1404,6 +1494,10 @@ exports.fetchEtaDiagnostic = onCall(async (request) => {
       nextStopProgress: data.nextStopProgress ?? null,
       nextIdx: typeof data.nextIdx === "number" ? data.nextIdx : -1,
       estimates: Array.isArray(data.estimates) ? data.estimates : [],
+      // 2026-06-08 — 빌드 식별·도착기록 결과 진단에 필수(이전엔 누락돼 깜깜이였음).
+      appVersion: data.appVersion ?? null, // 폰 빌드 확인(옛 캐시 vs 신빌드)
+      stopArrivalsLog: Array.isArray(data.stopArrivalsLog) ? data.stopArrivalsLog : null, // recordStopArrival 호출 ok/error/code
+      allStopProgress: Array.isArray(data.allStopProgress) ? data.allStopProgress : null, // 정류장 routePath 투영값(감지 실패 근인 판별)
     };
   });
 

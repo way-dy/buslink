@@ -1,0 +1,25 @@
+{
+  "short_name": "BusLink 협력사",
+  "name": "BusLink 협력사",
+  "icons": [
+    {
+      "src": "/icons/partner.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/passenger-1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "id": "/partner",
+  "start_url": "/partner",
+  "scope": "/partner",
+  "display": "standalone",
+  "theme_color": "#0FB5AE",
+  "background_color": "#FFFFFF",
+  "orientation": "portrait"
+}
