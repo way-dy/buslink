@@ -72,6 +72,8 @@ function timeSince(ts) {
 // ═══════════════════════════════════════════════════════
 export default function AdminApp({ user, companyId, role, allowedPartnerCodes }) {
   const [tab, setTab] = useState(0);
+  // 대시보드 '거래처별 노선관리' → 노선 관리 탭으로 이동하며 그 거래처로 필터 고정(2026-06-15).
+  const [routesFocusPartner, setRoutesFocusPartner] = useState(null);
   // Phase B(2026-06-08): 로그인 admin 의 협력사 권한 범위 정규화.
   // superadmin·미설정 admin·["*"] = ["*"](무제한, 기존 동작 100% — 회귀 0).
   // 8지점 PartnerFilter + 각 탭 데이터 필터에 prop 으로 전달.
@@ -245,11 +247,11 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
           </div>
         )}
 
-        {tab === 0 && <ErrorBoundary label="대시보드"><DashboardTab companyId={activeCompanyId} drivers={drivers} vehicles={vehicles} onNav={setTab} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
+        {tab === 0 && <ErrorBoundary label="대시보드"><DashboardTab companyId={activeCompanyId} drivers={drivers} vehicles={vehicles} onNav={setTab} onManageRoutes={(pc) => { setRoutesFocusPartner(pc); setTab(4); }} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
         {tab === 1 && <ErrorBoundary label="실시간 관제"><MapTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
         {tab === 2 && <ErrorBoundary label="배차 관리"><DispatchTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} allowed={allowed} /></ErrorBoundary>}
         {tab === 3 && <ErrorBoundary label="배차 일정"><DispatchScheduleTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} allowed={allowed} /></ErrorBoundary>}
-        {tab === 4 && <ErrorBoundary label="노선 관리"><RoutesTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
+        {tab === 4 && <ErrorBoundary label="노선 관리"><RoutesTab companyId={activeCompanyId} allowed={allowed} focusPartnerCode={routesFocusPartner} onFocusConsumed={() => setRoutesFocusPartner(null)} /></ErrorBoundary>}
         {tab === 5 && <ErrorBoundary label="기사 관리"><DriverTab companyId={activeCompanyId} vehicles={vehicles} /></ErrorBoundary>}
         {tab === 6 && <ErrorBoundary label="차량 관리"><VehicleTab companyId={activeCompanyId} vehicles={vehicles} /></ErrorBoundary>}
         {tab === 7 && <ErrorBoundary label="시뮬레이터"><SimulatorTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} /></ErrorBoundary>}
@@ -279,13 +281,16 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
 // ═══════════════════════════════════════════════════════
 // 탭0: 대시보드
 // ═══════════════════════════════════════════════════════
-function DashboardTab({ companyId, drivers, vehicles, onNav, allowed, currentUserUid }) {
+function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, allowed, currentUserUid }) {
   const [dispatches, setDispatches] = useState([]);
   const [gpsVehicles, setGpsVehicles] = useState([]);
   const [boardings, setBoardings] = useState([]);
   const [routes, setRoutes] = useState([]);
   const [partnerCodes, setPartnerCodes] = useState([]); // 거래처 현황·코드 열람용
   const [copiedCode, setCopiedCode] = useState(null);
+  const [showAddPartner, setShowAddPartner] = useState(false); // 거래처 신규 등록 모달
+  const [newPartnerName, setNewPartnerName] = useState("");
+  const [addingPartner, setAddingPartner] = useState(false);
   const [partnerCode, setPartnerCode] = useState("전체"); // 협력사 필터
 
   useEffect(() => {
@@ -368,6 +373,18 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, allowed, currentUse
     navigator.clipboard.writeText(code);
     setCopiedCode(code);
     setTimeout(() => setCopiedCode(null), 1500);
+  };
+  // 거래처(협력사) 신규 등록 — 발급자(createdBy) 본인 계정에서 바로 열람·관리됨.
+  const handleAddPartner = async () => {
+    if (!newPartnerName.trim()) { alert("거래처(업체명)를 입력하세요"); return; }
+    setAddingPartner(true);
+    try {
+      const { createPartnerCode } = await import("../lib/partner");
+      const code = await createPartnerCode({ companyId, partnerName: newPartnerName.trim(), createdBy: currentUserUid || null });
+      setShowAddPartner(false); setNewPartnerName("");
+      alert(`거래처 등록 완료\n업체코드: ${code}\n\n협력사에 코드를 전달하세요. (대시보드·협력사 관리에서 바로 보입니다)`);
+    } catch (e) { alert("오류: " + (e?.message || String(e))); }
+    setAddingPartner(false);
   };
 
   return (
@@ -460,7 +477,10 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, allowed, currentUse
         <div style={{ marginTop:16, background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:12, overflow:"hidden", boxShadow:"var(--shadow-emphasize)" }}>
           <div style={{ padding:"14px 18px", borderBottom:"1px solid var(--color-line)", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
             <span style={{ fontWeight:700, color:"var(--color-label)" }}>🤝 거래처 관리 현황</span>
-            <button style={S.editBtn} onClick={() => onNav(10)}>협력사 관리</button>
+            <div style={{ display:"flex", gap:8 }}>
+              <button style={S.addBtn} onClick={() => setShowAddPartner(true)}>+ 거래처 등록</button>
+              <button style={S.editBtn} onClick={() => onNav(10)}>협력사 관리</button>
+            </div>
           </div>
           {partnerStats.length === 0 ? (
             <div style={S.empty}>{partnerCodes.length === 0 ? "등록된 거래처가 없습니다" : "담당/생성한 거래처가 없습니다"}</div>
@@ -469,7 +489,7 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, allowed, currentUse
               <thead>
                 <tr>
                   <th style={S.th}>거래처</th><th style={S.th}>노선</th><th style={S.th}>오늘 배차</th>
-                  <th style={S.th}>운행중</th><th style={S.th}>오늘 탑승</th><th style={S.th}>업체코드</th>
+                  <th style={S.th}>운행중</th><th style={S.th}>오늘 탑승</th><th style={S.th}>업체코드</th><th style={S.th}>노선 관리</th>
                 </tr>
               </thead>
               <tbody>
@@ -487,6 +507,10 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, allowed, currentUse
                         style={{ ...S.editBtn, marginRight:0, fontSize:11, fontFamily:"monospace" }}>
                         {copiedCode === p.code ? "✓ 복사됨" : `${p.code} 📋`}
                       </button>
+                    </td>
+                    <td style={S.td}>
+                      <button onClick={() => onManageRoutes && onManageRoutes(p.code)} title="이 거래처의 노선 관리로 이동"
+                        style={{ ...S.editBtn, marginRight:0, fontSize:11 }}>🚌 노선 관리</button>
                     </td>
                   </tr>
                 ))}
@@ -509,6 +533,27 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, allowed, currentUse
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {showAddPartner && (
+          <div style={S.overlay}>
+            <form style={S.modal} onSubmit={(e) => { e.preventDefault(); handleAddPartner(); }}>
+              <div style={S.modalTitle}>+ 거래처(협력사) 신규 등록</div>
+              <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:8 }}>
+                업체코드가 발급되고, 발급한 본인 계정에서 바로 열람·관리됩니다. 협력사에 코드를 전달하세요.
+              </div>
+              <label style={S.label}>거래처(업체) 이름</label>
+              <input style={S.input} autoFocus placeholder="예: 한화판교R&D센터" value={newPartnerName}
+                onChange={(e) => setNewPartnerName(e.target.value)} />
+              <div style={{ display:"flex", gap:8, marginTop:12 }}>
+                <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:13 }}
+                  disabled={addingPartner} onClick={() => { setShowAddPartner(false); setNewPartnerName(""); }}>취소</button>
+                <button type="submit" style={{ ...S.addBtn, flex:2, padding:"9px 0" }} disabled={addingPartner}>
+                  {addingPartner ? "발급 중..." : "발급"}
+                </button>
+              </div>
+            </form>
           </div>
         )}
       </div>
@@ -1586,7 +1631,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed }) {
 
 // 탭4: 노선 관리
 // ═══════════════════════════════════════════════════════
-function RoutesTab({ companyId, allowed }) {
+function RoutesTab({ companyId, allowed, focusPartnerCode, onFocusConsumed }) {
   const [routes, setRoutes] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState(null);
@@ -1596,6 +1641,13 @@ function RoutesTab({ companyId, allowed }) {
   const [loading, setLoading] = useState(false);
   const [partners, setPartners] = useState([]); // 협력사 목록
   const [partnerFilter, setPartnerFilter] = useState("전체"); // 거래처 필터
+  // 대시보드 '거래처별 노선관리' 진입 시 해당 거래처로 필터 고정 후 신호 소비(1회, 2026-06-15).
+  useEffect(() => {
+    if (focusPartnerCode) {
+      setPartnerFilter(focusPartnerCode);
+      onFocusConsumed && onFocusConsumed();
+    }
+  }, [focusPartnerCode, onFocusConsumed]);
   // 정류장 관리
   const [stopsRoute, setStopsRoute] = useState(null); // 정류장 관리 중인 노선
   const [stops, setStops] = useState([]);
