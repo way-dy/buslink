@@ -1086,6 +1086,62 @@ const MS = {
 // ═══════════════════════════════════════════════════════
 // 탭2: 배차 관리
 // ═══════════════════════════════════════════════════════
+// 검색형 선택 — 기사/차량/노선이 수백 건일 때 스크롤 대신 타이핑 검색(2026-06-15).
+// options: [{ value, label }]. onChange(value) 직접 전달(기존 native select 핸들러 시그니처 호환).
+function SearchableSelect({ value, onChange, options, placeholder = "선택", disabled }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useRef(null);
+  const selected = options.find(o => o.value === value);
+  const ql = q.trim().toLowerCase();
+  const filtered = ql ? options.filter(o => (o.label || "").toLowerCase().includes(ql)) : options;
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  const pick = (v) => { onChange(v); setOpen(false); setQ(""); };
+  return (
+    <div ref={ref} style={{ position:"relative" }}>
+      <button type="button" disabled={disabled} onClick={() => { setOpen(o => !o); setQ(""); }}
+        style={{ ...S.input, textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center",
+          cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.6 : 1 }}>
+        <span style={{ color: selected ? "var(--color-label)" : "var(--color-label-mute)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+          {selected ? selected.label : placeholder}
+        </span>
+        <span style={{ color:"var(--color-label-mute)", marginLeft:8, flexShrink:0 }}>▾</span>
+      </button>
+      {open && (
+        <div style={{ position:"absolute", zIndex:60, top:"calc(100% + 4px)", left:0, right:0,
+          background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:8,
+          boxShadow:"var(--shadow-emphasize)", maxHeight:260, overflowY:"auto" }}>
+          <div style={{ padding:8, position:"sticky", top:0, background:"var(--color-bg)", borderBottom:"1px solid var(--color-line-soft)" }}>
+            <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 이름·번호 검색"
+              style={{ ...S.input, margin:0, fontSize:13, padding:"7px 10px" }} />
+          </div>
+          <button type="button" onClick={() => pick("")}
+            style={{ display:"block", width:"100%", textAlign:"left", padding:"8px 12px", background:"none",
+              border:"none", cursor:"pointer", fontSize:13, color:"var(--color-label-mute)", fontFamily:"inherit" }}>
+            {placeholder}
+          </button>
+          {filtered.length === 0 ? (
+            <div style={{ padding:"10px 12px", fontSize:12, color:"var(--color-label-mute)" }}>검색 결과 없음</div>
+          ) : filtered.map(o => (
+            <button type="button" key={o.value} onClick={() => pick(o.value)}
+              style={{ display:"block", width:"100%", textAlign:"left", padding:"8px 12px",
+                background: o.value === value ? "var(--color-primary-soft)" : "none", border:"none", cursor:"pointer",
+                fontSize:13, fontFamily:"inherit", color: o.value === value ? "var(--color-primary-deep)" : "var(--color-label)",
+                overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DispatchTab({ companyId, vehicles, drivers, allowed }) {
   const [date, setDate] = useState(getToday());
   const [dispatches, setDispatches] = useState([]);
@@ -1238,15 +1294,13 @@ function DispatchTab({ companyId, vehicles, drivers, allowed }) {
         <div style={S.overlay}><div style={S.modal}>
           <div style={S.modalTitle}>{editItem?"배차 수정":"배차 등록"}</div>
           <label style={S.label}>기사 *</label>
-          <select style={S.input} value={form.driverId} onChange={e=>handleDriverSelect(e.target.value)}>
-            <option value="">기사 선택</option>
-            {drivers.map(d=><option key={d.id} value={d.id}>{d.name} ({d.empNo??d.id})</option>)}
-          </select>
+          <SearchableSelect value={form.driverId} onChange={handleDriverSelect}
+            options={drivers.map(d => ({ value:d.id, label:`${d.name} (${d.empNo ?? d.id})` }))}
+            placeholder="기사 선택 (검색)" />
           <label style={S.label}>노선 선택 *</label>
-          <select style={S.input} value={form.routeId} onChange={e=>handleRouteSelect(e.target.value)}>
-            <option value="">노선 선택 (노선 관리에서 먼저 등록)</option>
-            {routes.map(r=><option key={r.id} value={r.id}>[{r.shift}] {r.name} ({r.departTime})</option>)}
-          </select>
+          <SearchableSelect value={form.routeId} onChange={handleRouteSelect}
+            options={routes.map(r => ({ value:r.id, label:`[${r.shift}] ${r.name} (${r.departTime})` }))}
+            placeholder="노선 선택 (노선 관리에서 먼저 등록)" />
           {!form.routeId && (
             <>
               <label style={S.label}>노선명 직접 입력 (노선 미등록 시)</label>
@@ -1254,10 +1308,9 @@ function DispatchTab({ companyId, vehicles, drivers, allowed }) {
             </>
           )}
           <label style={S.label}>차량 선택</label>
-          <select style={S.input} value={form.vehicleId} onChange={e=>handleVehicleSelect(e.target.value)}>
-            <option value="">차량 선택</option>
-            {vehicles.map(v=><option key={v.id} value={v.id}>{v.plateNo} ({v.model||v.id})</option>)}
-          </select>
+          <SearchableSelect value={form.vehicleId} onChange={handleVehicleSelect}
+            options={vehicles.map(v => ({ value:v.id, label:`${v.plateNo} (${v.model || v.id})` }))}
+            placeholder="차량 선택 (검색)" />
           <label style={S.label}>출발시간 *</label>
           <input style={S.input} type="time" value={form.departTime} onChange={e=>setForm({...form,departTime:e.target.value})} />
           <div style={{display:"flex",gap:8,marginTop:8}}>
@@ -1540,16 +1593,14 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed }) {
           </select>
 
           <label style={S.label}>기사 *</label>
-          <select style={S.input} value={form.driverId} onChange={e=>handleDriverSelect(e.target.value)}>
-            <option value="">기사 선택</option>
-            {drivers.map(d => <option key={d.id} value={d.id}>{d.name} ({d.empNo??d.id})</option>)}
-          </select>
+          <SearchableSelect value={form.driverId} onChange={handleDriverSelect}
+            options={drivers.map(d => ({ value:d.id, label:`${d.name} (${d.empNo ?? d.id})` }))}
+            placeholder="기사 선택 (검색)" />
 
           <label style={S.label}>차량 (선택)</label>
-          <select style={S.input} value={form.vehicleId} onChange={e=>handleVehicleSelect(e.target.value)}>
-            <option value="">차량 선택</option>
-            {vehicles.map(v => <option key={v.id} value={v.id}>{v.plateNo} ({v.model||v.id})</option>)}
-          </select>
+          <SearchableSelect value={form.vehicleId} onChange={handleVehicleSelect}
+            options={vehicles.map(v => ({ value:v.id, label:`${v.plateNo} (${v.model || v.id})` }))}
+            placeholder="차량 선택 (검색)" />
 
           <label style={S.label}>출발 시각 *</label>
           <input style={S.input} type="time" value={form.departTime}
@@ -1735,6 +1786,8 @@ function RoutesTab({ companyId, allowed, focusPartnerCode, onFocusConsumed }) {
         await addDoc(collection(db, "companies", companyId, "routes"), data);
       }
       setShowForm(false);
+      // 저장한 노선이 활성 필터(거래처/구분/검색)에 가려 "안 보인다" 혼란 방지 — 필터 초기화(2026-06-15).
+      setFilter("전체"); setPartnerFilter("전체"); setSearch("");
     } catch (e) { alert("저장 오류: " + e.message); }
     setLoading(false);
   };
@@ -2663,14 +2716,15 @@ function DriverTab({ companyId, vehicles }) {
           <label style={S.label}>이름 *</label>
           <input style={S.input} placeholder="홍길동" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/>
           <label style={S.label}>사번 {editItem?"":"*"}</label>
-          <input style={{...S.input,...(editItem?{opacity:0.6}:{})}} placeholder="10001" value={form.empNo} onChange={e=>setForm({...form,empNo:e.target.value})} readOnly={!!editItem}/>
+          <input style={{...S.input,...(editItem?{opacity:0.6}:{})}} placeholder="예: 10001" value={form.empNo} onChange={e=>setForm({...form,empNo:e.target.value})} readOnly={!!editItem} autoComplete="off" name="driver-empno-noauto"/>
+          {!editItem && <div style={{fontSize:11,color:"var(--color-label-mute)",margin:"-2px 0 2px",lineHeight:1.45}}>기사앱 <b>로그인 ID</b>입니다(숫자·영문, 회사 사번 사용 권장). 기사는 <b>사번 + PIN</b>으로 기사앱에 로그인합니다.</div>}
           <label style={S.label}>{editItem?"비밀번호 변경 (변경 시에만 입력)":"PIN * (최소 6자리)"}</label>
-          <input style={S.input} placeholder={editItem?"변경하지 않으려면 비워두세요":"000000"} type="password" value={form.pin} onChange={e=>setForm({...form,pin:e.target.value})}/>
+          <input style={S.input} placeholder={editItem?"변경하지 않으려면 비워두세요":"예: 000000"} type="password" value={form.pin} onChange={e=>setForm({...form,pin:e.target.value})} autoComplete="new-password" name="driver-pin-noauto"/>
+          {!editItem && <div style={{fontSize:11,color:"var(--color-label-mute)",margin:"-2px 0 2px",lineHeight:1.45}}>기사앱 <b>로그인 비밀번호</b>입니다(숫자 6자리 이상). 기사가 첫 로그인 후 변경하도록 안내하세요.</div>}
           <label style={S.label}>배정 차량</label>
-          <select style={S.input} value={form.vehicleId} onChange={e=>handleVehicleSelect(e.target.value)}>
-            <option value="">차량 선택 (선택사항)</option>
-            {vehicles.map(v=><option key={v.id} value={v.id}>{v.plateNo} ({v.model||v.type||v.id})</option>)}
-          </select>
+          <SearchableSelect value={form.vehicleId} onChange={handleVehicleSelect}
+            options={vehicles.map(v => ({ value:v.id, label:`${v.plateNo} (${v.model || v.type || v.id})` }))}
+            placeholder="차량 선택 (검색·선택사항)" />
           <label style={S.label}>연락처</label>
           <input style={S.input} placeholder="010-0000-0000" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/>
           {error&&<p style={{color:"var(--color-destructive)",fontSize:13,margin:0}}>{error}</p>}
