@@ -1,0 +1,13 @@
+{
+  "name": "buslink-manual",
+  "private": true,
+  "version": "1.0.0",
+  "description": "BusLink(동영관광 통근버스 관제) 사용 매뉴얼 — 관리자/기사/직원 3종 A4 PDF (모노디자인)",
+  "scripts": {
+    "pdf": "node _to_pdf.mjs"
+  },
+  "dependencies": {
+    "marked": "^12.0.0",
+    "playwright-core": "^1.60.0"
+  }
+}
