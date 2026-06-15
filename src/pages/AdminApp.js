@@ -1838,7 +1838,20 @@ function RoutesTab({ companyId, allowed, focusPartnerCode, onFocusConsumed }) {
     setAddrSearching(true);
     setAddrMsg("");
     setAddrResults([]);
+    // 워치독: 카카오 services 콜백이 끝내 안 오는 경우(도메인 미등록·한도초과·네트워크)
+    // "검색 중"에서 영구 정지하지 않도록 8초 후 수동 경로 안내로 강제 종료.
+    let settled = false;
+    const watchdog = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      setAddrSearching(false);
+      setAddrResults([]);
+      setAddrMsg("주소 검색이 응답하지 않습니다 — 지도에서 위치 선택 또는 좌표 직접 입력을 이용하세요");
+    }, 8000);
     const finish = (list, msg) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(watchdog);
       setAddrSearching(false);
       setAddrResults(list);
       setAddrMsg(msg || (list.length ? "" : "검색 결과가 없습니다 — 지도에서 위치 선택 또는 좌표 직접 입력"));
