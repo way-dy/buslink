@@ -4978,7 +4978,7 @@ function AddAdminModal({ company, partnerCodes, onClose, onDone }) {
   const [name, setName] = useState("");
   const [pwd, setPwd] = useState("");
   const [pwd2, setPwd2] = useState("");
-  const [allowed, setAllowed] = useState(["*"]);   // 기본=전체 권한(가장 흔한 케이스)
+  const [allowed, setAllowed] = useState([]);   // 기본=전체 해제(담당 거래처 직접 선택 — 영업담당자 id별 관리 모델). 전체 관리자는 ⭐전체 권한 체크.
   const [busy, setBusy] = useState(false);
   const [errMsg, setErrMsg] = useState("");
   const [okMsg, setOkMsg] = useState("");
