@@ -77,7 +77,12 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
   // Phase B(2026-06-08): 로그인 admin 의 협력사 권한 범위 정규화.
   // superadmin·미설정 admin·["*"] = ["*"](무제한, 기존 동작 100% — 회귀 0).
   // 8지점 PartnerFilter + 각 탭 데이터 필터에 prop 으로 전달.
-  const allowed = resolveAllowed(role, allowedPartnerCodes);
+  const rawAllowed = resolveAllowed(role, allowedPartnerCodes);
+  const allAccess = isAllAccess(rawAllowed);
+  // 2026-06-15: "각자가 생성한 거래처(createdBy===내 uid)는 권한과 무관하게 항상 본다"(사용자 결정).
+  // 대시보드·협력사관리만 allowed∪createdBy 였고 배차관리 등 나머지 게이팅 지점은 allowed 만 봐서
+  // 본인이 등록한 거래처 배차/노선이 안 보이던 누락 → 최상위에서 한 번 합쳐 전 탭에 동일 적용.
+  const [createdPartnerCodes, setCreatedPartnerCodes] = useState([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
@@ -128,6 +133,19 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
       title: "BusLink 관제",
     });
   }, []);
+
+  // 본인이 생성한 거래처(createdBy===uid) 코드 구독 — 무제한 admin 은 불필요(전부 보임).
+  useEffect(() => {
+    if (allAccess || !activeCompanyId || !user?.uid) { setCreatedPartnerCodes([]); return; }
+    const q = query(collection(db, "partnerCodes"), where("companyId", "==", activeCompanyId), where("createdBy", "==", user.uid));
+    return onSnapshot(q,
+      snap => setCreatedPartnerCodes(snap.docs.map(d => d.data().code || d.id)),
+      err => console.warn("[createdBy 거래처] 구독 오류:", err.message));
+  }, [allAccess, activeCompanyId, user?.uid]);
+
+  // 유효 접근 범위 = allowed ∪ 본인 생성 거래처. 무제한이면 그대로 ["*"].
+  // 이 값을 모든 탭에 allowed 로 내려 8지점 게이팅이 본인 생성분을 자동 포함.
+  const allowed = allAccess ? rawAllowed : Array.from(new Set([...rawAllowed, ...createdPartnerCodes]));
 
   return (
     <div style={S.wrap}>
