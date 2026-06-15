@@ -16,7 +16,7 @@ export function generatePartnerCode(companyId, partnerName) {
 }
 
 // ─── 업체코드 저장 ────────────────────────────────────────
-export async function createPartnerCode({ companyId, partnerName, allowedRouteIds, memo }) {
+export async function createPartnerCode({ companyId, partnerName, allowedRouteIds, memo, createdBy }) {
   const code = generatePartnerCode(companyId, partnerName);
   const expiresAt = new Date();
   expiresAt.setFullYear(expiresAt.getFullYear() + 1); // 1년 유효
@@ -27,6 +27,8 @@ export async function createPartnerCode({ companyId, partnerName, allowedRouteId
     memo: memo || "",
     active: true,
     createdAt: serverTimestamp(),
+    // 발급한 admin uid — 제한 admin 이 본인 생성 협력사를 권한 부여 전에도 열람·관리하도록(2026-06-15).
+    createdBy: createdBy || null,
     expiresAt: Timestamp.fromDate(expiresAt),
     uploadCount: 0,
     lastUploadAt: null,

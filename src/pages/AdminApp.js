@@ -245,7 +245,7 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
           </div>
         )}
 
-        {tab === 0 && <ErrorBoundary label="대시보드"><DashboardTab companyId={activeCompanyId} drivers={drivers} vehicles={vehicles} onNav={setTab} allowed={allowed} /></ErrorBoundary>}
+        {tab === 0 && <ErrorBoundary label="대시보드"><DashboardTab companyId={activeCompanyId} drivers={drivers} vehicles={vehicles} onNav={setTab} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
         {tab === 1 && <ErrorBoundary label="실시간 관제"><MapTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
         {tab === 2 && <ErrorBoundary label="배차 관리"><DispatchTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} allowed={allowed} /></ErrorBoundary>}
         {tab === 3 && <ErrorBoundary label="배차 일정"><DispatchScheduleTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} allowed={allowed} /></ErrorBoundary>}
@@ -255,7 +255,7 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
         {tab === 7 && <ErrorBoundary label="시뮬레이터"><SimulatorTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} /></ErrorBoundary>}
         {tab === 8 && <ErrorBoundary label="운행 이력"><HistoryTab companyId={activeCompanyId} vehicles={vehicles} allowed={allowed} /></ErrorBoundary>}
         {tab === 9 && <ErrorBoundary label="탑승 통계"><BoardingStatsTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
-        {tab === 10 && <ErrorBoundary label="협력사 관리"><PartnerTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
+        {tab === 10 && <ErrorBoundary label="협력사 관리"><PartnerTab companyId={activeCompanyId} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
         {tab === 11 && <ErrorBoundary label="공지 발송"><NoticeTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
         {/* SaaS Phase 1.2 — 슈퍼관리자 전용 회사 관리 탭(인덱스 12). 일반 admin 비표시. */}
         {isSuperAdmin && tab === SUPER_TAB_INDEX && (
@@ -279,11 +279,13 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
 // ═══════════════════════════════════════════════════════
 // 탭0: 대시보드
 // ═══════════════════════════════════════════════════════
-function DashboardTab({ companyId, drivers, vehicles, onNav, allowed }) {
+function DashboardTab({ companyId, drivers, vehicles, onNav, allowed, currentUserUid }) {
   const [dispatches, setDispatches] = useState([]);
   const [gpsVehicles, setGpsVehicles] = useState([]);
   const [boardings, setBoardings] = useState([]);
   const [routes, setRoutes] = useState([]);
+  const [partnerCodes, setPartnerCodes] = useState([]); // 거래처 현황·코드 열람용
+  const [copiedCode, setCopiedCode] = useState(null);
   const [partnerCode, setPartnerCode] = useState("전체"); // 협력사 필터
 
   useEffect(() => {
@@ -310,6 +312,12 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, allowed }) {
       snap => setRoutes(snap.docs.map(d => ({ id:d.id, ...d.data() }))));
   }, [companyId]);
 
+  useEffect(() => {
+    if (!companyId) return;
+    return onSnapshot(query(collection(db, "partnerCodes"), where("companyId", "==", companyId)),
+      snap => setPartnerCodes(snap.docs.map(d => ({ id:d.id, ...d.data() }))));
+  }, [companyId]);
+
   // 협력사 필터 적용: routeId → partnerCode 매핑
   const routeOf = (id) => routes.find(r => r.id === id);
   // Phase B: "전체"여도 제한 admin 은 자기 allowed 협력사로 한정(isAllAccess 면 기존대로 전체).
@@ -334,6 +342,33 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, allowed }) {
   ];
 
   const driverName = (id) => drivers.find(d => d.id === id)?.name ?? id;
+
+  // ── 거래처(협력사) 관리 현황 — 거래처 중심 실시간 요약 + 코드 열람 ──
+  // 가시 범위 = 무제한이면 전체 / 제한 admin 은 담당(allowed) + 본인 생성(createdBy) 거래처.
+  const visiblePartners = isAllAccess(allowed)
+    ? partnerCodes
+    : partnerCodes.filter(p => allowed.includes(p.code || p.id) || (currentUserUid && p.createdBy === currentUserUid));
+  const partnerStats = [...visiblePartners]
+    .sort((a, b) => (a.partnerName || a.code || "").localeCompare(b.partnerName || b.code || ""))
+    .map(p => {
+      const code = p.code || p.id;
+      const pRoutes = routes.filter(r => r.partnerCode === code);
+      const routeIdSet = new Set(pRoutes.map(r => r.id));
+      return {
+        code,
+        name: p.partnerName || code,
+        active: p.active !== false,
+        routeCount: pRoutes.length,
+        dispatchCount: dispatches.filter(d => routeIdSet.has(d.routeId)).length,
+        runningCount: gpsVehicles.filter(v => routeIdSet.has(v.routeId)).length,
+        boardingCount: boardings.filter(b => b.partnerCode === code).length,
+      };
+    });
+  const copyPartnerCode = (code) => {
+    navigator.clipboard.writeText(code);
+    setCopiedCode(code);
+    setTimeout(() => setCopiedCode(null), 1500);
+  };
 
   return (
     <div style={S.panel}>
@@ -419,6 +454,45 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, allowed }) {
               </table>
             )}
           </div>
+        </div>
+
+        {/* 거래처(협력사) 관리 현황 — 거래처 중심 실시간 요약 + 업체코드 열람(2026-06-15) */}
+        <div style={{ marginTop:16, background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:12, overflow:"hidden", boxShadow:"var(--shadow-emphasize)" }}>
+          <div style={{ padding:"14px 18px", borderBottom:"1px solid var(--color-line)", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <span style={{ fontWeight:700, color:"var(--color-label)" }}>🤝 거래처 관리 현황</span>
+            <button style={S.editBtn} onClick={() => onNav(10)}>협력사 관리</button>
+          </div>
+          {partnerStats.length === 0 ? (
+            <div style={S.empty}>{partnerCodes.length === 0 ? "등록된 거래처가 없습니다" : "담당/생성한 거래처가 없습니다"}</div>
+          ) : (
+            <table style={S.table}>
+              <thead>
+                <tr>
+                  <th style={S.th}>거래처</th><th style={S.th}>노선</th><th style={S.th}>오늘 배차</th>
+                  <th style={S.th}>운행중</th><th style={S.th}>오늘 탑승</th><th style={S.th}>업체코드</th>
+                </tr>
+              </thead>
+              <tbody>
+                {partnerStats.map(p => (
+                  <tr key={p.code} style={S.tr}>
+                    <td style={{ ...S.td, fontWeight:600 }}>
+                      {p.name}{!p.active && <span style={{ fontSize:10, color:"var(--color-label-mute)", marginLeft:4 }}>· 비활성</span>}
+                    </td>
+                    <td style={S.td}>{p.routeCount}</td>
+                    <td style={S.td}>{p.dispatchCount}</td>
+                    <td style={{ ...S.td, color: p.runningCount > 0 ? "var(--color-positive)" : "var(--color-label-mute)", fontWeight: p.runningCount > 0 ? 700 : 400 }}>{p.runningCount}</td>
+                    <td style={S.td}>{p.boardingCount}</td>
+                    <td style={S.td}>
+                      <button onClick={() => copyPartnerCode(p.code)} title="업체코드 복사"
+                        style={{ ...S.editBtn, marginRight:0, fontSize:11, fontFamily:"monospace" }}>
+                        {copiedCode === p.code ? "✓ 복사됨" : `${p.code} 📋`}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
         {/* GPS 수신 현황 */}
@@ -3535,7 +3609,7 @@ const panelHead = { padding: "12px 16px", fontWeight: 700, fontSize: 13, color: 
 // ═══════════════════════════════════════════════════════
 // 탭10: 협력사 관리
 // ═══════════════════════════════════════════════════════
-function PartnerTab({ companyId, allowed }) {
+function PartnerTab({ companyId, allowed, currentUserUid }) {
   const [codes, setCodes] = useState([]);
   const [routes, setRoutes] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -3578,7 +3652,7 @@ function PartnerTab({ companyId, allowed }) {
     setLoading(true);
     try {
       const { createPartnerCode: create } = await import("../lib/partner");
-      const code = await create({ companyId, partnerName: form.partnerName.trim(), memo: form.memo.trim() });
+      const code = await create({ companyId, partnerName: form.partnerName.trim(), memo: form.memo.trim(), createdBy: currentUserUid || null });
       // boardingMode 'passenger-qr' 인 경우만 추가 setDoc merge (기본값=null=driver-qr 동치, 노이즈 회피).
       if (form.boardingMode === "passenger-qr") {
         await updateDoc(doc(db, "partnerCodes", code), { boardingMode: "passenger-qr" });
@@ -3658,11 +3732,12 @@ function PartnerTab({ companyId, allowed }) {
   };
 
   // Phase B(2026-06-08): 제한 admin 은 자기 allowed 협력사만 목록 표시.
-  // ⚠ 한계 — 제한 admin 이 발급한 신규 협력사는 자기 권한에 자동 추가 안 됨(users self-update 는
-  //   rules 상 superadmin 만). 슈퍼관리자/팀장이 권한 부여해야 본인 목록에 나타남(issues.md 명시).
+  // 2026-06-15: 본인이 발급한 협력사(createdBy===uid)는 권한 부여 전에도 항상 열람·관리 가능
+  //   — users self-update 가 rules 상 superadmin 전용이라 자동 권한추가가 안 되던 한계 우회.
+  //   클라 게이팅 모델 일관(Phase B 와 동일·rules 무변경). createdBy 부재 레거시 코드는 종전대로 allowed 로만.
   const visibleCodes = isAllAccess(allowed)
     ? codes
-    : codes.filter(c => allowed.includes(c.code || c.id));
+    : codes.filter(c => allowed.includes(c.code || c.id) || (currentUserUid && c.createdBy === currentUserUid));
 
   const formatDate = (ts) => {
     if (!ts) return "–";
@@ -4835,53 +4910,45 @@ function AdminListSection({ company, cache, currentUserUid, onAdd, onEditProfile
         const isSelf = a.uid === currentUserUid;
         const isAll = Array.isArray(a.allowedPartnerCodes) && a.allowedPartnerCodes[0] === "*";
         const badge = isAll
-          ? { label: "전체", bg: "#E6F7EB", color: "#007A29" }
-          : { label: `협력사 ${a.allowedPartnerCodes.length}개`, bg: "var(--color-primary-soft)", color: "var(--color-primary-deep)" };
+          ? { label: "전체 권한", bg: "#E6F7EB", color: "#007A29" }
+          : { label: `담당 협력사 ${a.allowedPartnerCodes.length}개`, bg: "var(--color-primary-soft)", color: "var(--color-primary-deep)" };
+        // 게시판형 세로 카드 — 이름이 한 줄을 온전히 차지해 짤리지 않음(2026-06-15).
         return (
           <div key={a.uid} style={{
-            display:"flex", alignItems:"center", justifyContent:"space-between", gap:8,
-            padding:"6px 8px", background:"var(--color-bg)",
-            border:"1px solid var(--color-line)", borderRadius:6,
+            padding:"12px 14px", background:"var(--color-bg)",
+            border:"1px solid var(--color-line)", borderRadius:8,
+            display:"flex", flexDirection:"column", gap:8,
           }}>
-            <div style={{ minWidth:0, flex:1 }}>
-              <div style={{ fontSize:12, fontWeight:700, color:"var(--color-label)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                {a.name || "(이름 없음)"}{isSelf && <span style={{ marginLeft:6, fontSize:10, color:"var(--color-primary)" }}>(나)</span>}
+            {/* 상단: 이름(크게) + 권한 배지 */}
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
+              <div style={{ fontSize:15, fontWeight:700, color:"var(--color-label)" }}>
+                {a.name || "(이름 없음)"}
+                {isSelf && <span style={{ marginLeft:6, fontSize:11, fontWeight:600, color:"var(--color-primary)" }}>(나)</span>}
               </div>
-              <div style={{ fontSize:10, color:"var(--color-label-mute)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                {a.email || "(이메일 없음)"} · {a.empNo || "(사번 없음)"}
-              </div>
+              <span style={{
+                fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:20,
+                background: badge.bg, color: badge.color, flexShrink:0, whiteSpace:"nowrap",
+              }}>{badge.label}</span>
             </div>
-            <span style={{
-              fontSize:10, fontWeight:700, padding:"2px 7px", borderRadius:20,
-              background: badge.bg, color: badge.color, flexShrink:0,
-            }}>{badge.label}</span>
-            <button
-              onClick={() => onEditProfile(a)}
-              title="이름·이메일·비밀번호 수정"
-              style={{
-                ...S.editBtn, marginRight:0, fontSize:10, padding:"3px 7px",
-              }}
-            >✏️ 정보수정</button>
-            <button
-              onClick={() => onEditPerms(a)}
-              disabled={isSelf}
-              title={isSelf ? "자기 자신의 권한은 변경할 수 없습니다" : "협력사 권한 변경"}
-              style={{
-                ...S.editBtn, marginRight:0, fontSize:10, padding:"3px 7px",
-                opacity: isSelf ? 0.4 : 1, cursor: isSelf ? "not-allowed" : "pointer",
-              }}
-            >🛡 권한</button>
-            <button
-              onClick={() => onDeleteAdmin(a)}
-              disabled={isSelf}
-              title={isSelf ? "자기 자신은 삭제할 수 없습니다" : "관리자 삭제"}
-              style={{
-                ...S.editBtn, marginRight:0, fontSize:10, padding:"3px 7px",
-                color: isSelf ? "var(--color-label-mute)" : "var(--color-destructive)",
-                borderColor: isSelf ? "var(--color-line)" : "var(--color-destructive)",
-                opacity: isSelf ? 0.4 : 1, cursor: isSelf ? "not-allowed" : "pointer",
-              }}
-            >🗑</button>
+            {/* 중단: 이메일 · 사번 */}
+            <div style={{ fontSize:12, color:"var(--color-label-mute)", wordBreak:"break-all" }}>
+              {a.email || "(이메일 없음)"} <span style={{ color:"var(--color-line)" }}>·</span> 사번 {a.empNo || "-"}
+            </div>
+            {/* 하단: 관리 버튼(전체 라벨) */}
+            <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+              <button onClick={() => onEditProfile(a)} title="이름·이메일·비밀번호 수정"
+                style={{ ...S.editBtn, marginRight:0, fontSize:12, padding:"6px 12px" }}>✏️ 정보수정</button>
+              <button onClick={() => onEditPerms(a)} disabled={isSelf}
+                title={isSelf ? "자기 자신의 권한은 변경할 수 없습니다" : "협력사 권한 변경"}
+                style={{ ...S.editBtn, marginRight:0, fontSize:12, padding:"6px 12px",
+                  opacity: isSelf ? 0.4 : 1, cursor: isSelf ? "not-allowed" : "pointer" }}>🛡 권한 변경</button>
+              <button onClick={() => onDeleteAdmin(a)} disabled={isSelf}
+                title={isSelf ? "자기 자신은 삭제할 수 없습니다" : "관리자 삭제"}
+                style={{ ...S.editBtn, marginRight:0, fontSize:12, padding:"6px 12px",
+                  color: isSelf ? "var(--color-label-mute)" : "var(--color-destructive)",
+                  borderColor: isSelf ? "var(--color-line)" : "var(--color-destructive)",
+                  opacity: isSelf ? 0.4 : 1, cursor: isSelf ? "not-allowed" : "pointer" }}>🗑 삭제</button>
+            </div>
           </div>
         );
       })}
