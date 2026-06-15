@@ -19,7 +19,7 @@
 - `gps/{companyId}_{vehicleId}` — 실시간 위치(덮어쓰기)
 - `gpsHistory/{companyId}/{vehicleId}/{date}/points/{pointId}`
 - `boardingTokens/{tokenId}` — 5분 만료·1회 소각(`used` 플래그)
-- `partnerCodes/{code}` — 협력사 코드(1년 유효) + (선택, 2026-05-29 Phase 1.4) **`recentNoticeTimestamps:number[]`**(서버 시각 ms 배열, CF `sendPartnerNotice` 가 1시간 5건 rate-limit 용으로 옛 항목 정리 + now 추가. 부재=빈배열로 동작)
+- `partnerCodes/{code}` — 협력사 코드(1년 유효) + (선택, 2026-05-29 Phase 1.4) **`recentNoticeTimestamps:number[]`**(서버 시각 ms 배열, CF `sendPartnerNotice` 가 1시간 5건 rate-limit 용으로 옛 항목 정리 + now 추가. 부재=빈배열로 동작) + (선택, 2026-06-15) **`createdBy:uid`**(발급한 admin uid. `createPartnerCode` 가 기록 → 제한 admin 이 권한 부여 전에도 본인 생성 협력사 열람·관리. AdminApp PartnerTab·대시보드 가시범위 = `isAllAccess ? 전체 : allowed ∪ createdBy`. 부재=레거시, allowed 로만 노출)
 - `fcmQueue/{queueId}` — CF 트리거 큐. `companyId/noticeId/title/body/type/partnerCode/status/totalTokens/successCount/failureCount/error`. status: pending→sent/no_tokens/error. admin은 자기회사 큐 read 가능(2026-05-21, 발송 결과 onSnapshot 구독용)
 
 ## 보안 규칙
