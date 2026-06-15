@@ -1231,8 +1231,10 @@ exports.listCompanyAdmins = onCall(async (request) => {
 
   const admins = snap.docs.map(d => {
     const v = d.data() || {};
-    // 기존 admin 호환: allowedPartnerCodes 부재 = ["*"] (전체).
-    const allowed = Array.isArray(v.allowedPartnerCodes) && v.allowedPartnerCodes.length > 0
+    // 빈 배열([])은 "전체 해제·특정 협력사 0개"인 유효 상태이므로 그대로 보존한다.
+    // ["*"] 폴백은 필드 자체가 부재(레거시 admin)일 때만 — partnerAccess.resolveAllowed 와 동일 규칙.
+    // ⚠ length>0 검사로 []를 ["*"]로 바꾸면 "전체 해제 저장이 안 먹힘" 회귀 발생(2026-06-15 수정).
+    const allowed = Array.isArray(v.allowedPartnerCodes)
       ? v.allowedPartnerCodes
       : ["*"];
     return {

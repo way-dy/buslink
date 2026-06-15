@@ -4487,6 +4487,20 @@ function SuperCompanyTab({ companies, loading, selectedCompanyId, onSelectCompan
     }
   };
 
+  // 자기 소속 회사의 관리자 목록을 진입 시 1회 자동 펼침 + 선로드 —
+  // "매번 목록 클릭해서 활성화 + 로드 대기"하던 불편 제거(2026-06-15). ref 가드로 단 1회.
+  const autoExpandedRef = useRef(false);
+  useEffect(() => {
+    if (autoExpandedRef.current) return;
+    if (!currentUserCompanyId) return;
+    if (!companies.some(c => c.id === currentUserCompanyId)) return;
+    autoExpandedRef.current = true;
+    setExpandedCompanyId(currentUserCompanyId);
+    if (!adminsByCompany[currentUserCompanyId]) {
+      loadAdminsAndPartnerCodes(currentUserCompanyId);
+    }
+  }, [companies, currentUserCompanyId, adminsByCompany, loadAdminsAndPartnerCodes]);
+
   const reloadAdminsFor = async (cid) => {
     // 권한 변경/추가/삭제 후 호출 — 강제 재로드.
     await loadAdminsAndPartnerCodes(cid);
@@ -4944,6 +4958,12 @@ function PartnerPermissionPicker({ partnerCodes, value, onChange }) {
           </span>
         </label>
       ))}
+      {/* 전체 해제 + 0개 선택 = 아무 협력사도 못 보는 상태 안내(저장은 유효하나 의도 확인). */}
+      {!isAll && codeSet.size === 0 && partnerCodes.length > 0 && (
+        <div style={{ fontSize:11, color:"var(--color-destructive)", padding:"2px 0", lineHeight:1.45 }}>
+          ⚠ 선택한 협력사가 없습니다. 이대로 저장하면 이 관리자는 <b>아무 협력사도 볼 수 없습니다</b>. 담당 협력사를 선택하세요.
+        </div>
+      )}
     </div>
   );
 }
@@ -5164,7 +5184,9 @@ function EditAdminProfileModal({ company, admin, onClose, onDone }) {
 
 function EditAdminPermissionsModal({ company, admin, partnerCodes, onClose, onDone }) {
   const [allowed, setAllowed] = useState(
-    Array.isArray(admin?.allowedPartnerCodes) && admin.allowedPartnerCodes.length > 0
+    // 빈 배열([])은 "전체 해제" 유효 상태 → 그대로(전체로 둔갑 금지). 부재만 ["*"] 폴백.
+    // ⚠ length>0 검사 복원 금지 — 전체 해제가 재오픈 시 전체로 되돌아가는 회귀(2026-06-15).
+    Array.isArray(admin?.allowedPartnerCodes)
       ? admin.allowedPartnerCodes
       : ["*"]
   );
