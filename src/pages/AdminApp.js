@@ -291,6 +291,7 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
   const [showAddPartner, setShowAddPartner] = useState(false); // 거래처 신규 등록 모달
   const [newPartnerName, setNewPartnerName] = useState("");
   const [addingPartner, setAddingPartner] = useState(false);
+  const [portalCopied, setPortalCopied] = useState(false);
   const [partnerCode, setPartnerCode] = useState("전체"); // 협력사 필터
 
   useEffect(() => {
@@ -374,6 +375,13 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
     setCopiedCode(code);
     setTimeout(() => setCopiedCode(null), 1500);
   };
+  // 협력사 포털 URL — 발급한 업체코드와 함께 협력사에 전달(협력사 관리 탭의 동일 URL).
+  const portalUrl = `${window.location.origin}/partner`;
+  const copyPortalUrl = () => {
+    navigator.clipboard.writeText(portalUrl);
+    setPortalCopied(true);
+    setTimeout(() => setPortalCopied(false), 1500);
+  };
   // 거래처(협력사) 신규 등록 — 발급자(createdBy) 본인 계정에서 바로 열람·관리됨.
   const handleAddPartner = async () => {
     if (!newPartnerName.trim()) { alert("거래처(업체명)를 입력하세요"); return; }
@@ -382,7 +390,7 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
       const { createPartnerCode } = await import("../lib/partner");
       const code = await createPartnerCode({ companyId, partnerName: newPartnerName.trim(), createdBy: currentUserUid || null });
       setShowAddPartner(false); setNewPartnerName("");
-      alert(`거래처 등록 완료\n업체코드: ${code}\n\n협력사에 코드를 전달하세요. (대시보드·협력사 관리에서 바로 보입니다)`);
+      alert(`거래처 등록 완료\n업체코드: ${code}\n협력사 포털: ${portalUrl}\n\n협력사에 위 코드와 포털 URL을 전달하세요. (대시보드·협력사 관리에서 바로 보입니다)`);
     } catch (e) { alert("오류: " + (e?.message || String(e))); }
     setAddingPartner(false);
   };
@@ -481,6 +489,14 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
               <button style={S.addBtn} onClick={() => setShowAddPartner(true)}>+ 거래처 등록</button>
               <button style={S.editBtn} onClick={() => onNav(10)}>협력사 관리</button>
             </div>
+          </div>
+          <div style={{ padding:"8px 18px", borderBottom:"1px solid var(--color-line)", background:"var(--color-bg-soft)", display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", fontSize:12 }}>
+            <span style={{ color:"var(--color-label-mute)", fontWeight:600 }}>🔗 협력사 포털</span>
+            <span style={{ fontFamily:"monospace", color:"var(--color-primary-deep)", wordBreak:"break-all" }}>{portalUrl}</span>
+            <button onClick={copyPortalUrl} style={{ ...S.editBtn, marginRight:0, fontSize:11, padding:"3px 8px" }}>
+              {portalCopied ? "✓ 복사됨" : "복사"}
+            </button>
+            <span style={{ color:"var(--color-label-mute)" }}>· 발급한 업체코드와 함께 협력사에 전달하세요</span>
           </div>
           {partnerStats.length === 0 ? (
             <div style={S.empty}>{partnerCodes.length === 0 ? "등록된 거래처가 없습니다" : "담당/생성한 거래처가 없습니다"}</div>
