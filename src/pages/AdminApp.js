@@ -269,7 +269,7 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
         {tab === 1 && <ErrorBoundary label="실시간 관제"><MapTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
         {tab === 2 && <ErrorBoundary label="배차 관리"><DispatchTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} allowed={allowed} /></ErrorBoundary>}
         {tab === 3 && <ErrorBoundary label="배차 일정"><DispatchScheduleTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} allowed={allowed} /></ErrorBoundary>}
-        {tab === 4 && <ErrorBoundary label="노선 관리"><RoutesTab companyId={activeCompanyId} allowed={allowed} focusPartnerCode={routesFocusPartner} onFocusConsumed={() => setRoutesFocusPartner(null)} /></ErrorBoundary>}
+        {tab === 4 && <ErrorBoundary label="노선 관리"><RoutesTab companyId={activeCompanyId} allowed={allowed} currentUserUid={user?.uid} focusPartnerCode={routesFocusPartner} onFocusConsumed={() => setRoutesFocusPartner(null)} /></ErrorBoundary>}
         {tab === 5 && <ErrorBoundary label="기사 관리"><DriverTab companyId={activeCompanyId} vehicles={vehicles} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
         {tab === 6 && <ErrorBoundary label="차량 관리"><VehicleTab companyId={activeCompanyId} vehicles={vehicles} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
         {tab === 7 && <ErrorBoundary label="시뮬레이터"><SimulatorTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} /></ErrorBoundary>}
@@ -1716,7 +1716,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed }) {
 
 // 탭4: 노선 관리
 // ═══════════════════════════════════════════════════════
-function RoutesTab({ companyId, allowed, focusPartnerCode, onFocusConsumed }) {
+function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFocusConsumed }) {
   const [routes, setRoutes] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState(null);
@@ -1801,6 +1801,7 @@ function RoutesTab({ companyId, allowed, focusPartnerCode, onFocusConsumed }) {
         await updateDoc(doc(db, "companies", companyId, "routes", editItem.id), data);
       } else {
         data.createdAt = new Date().toISOString();
+        data.createdBy = currentUserUid || null; // 제한 admin 이 거래처 미지정 노선 등록해도 본인은 항상 열람(2026-06-16).
         await addDoc(collection(db, "companies", companyId, "routes"), data);
       }
       setShowForm(false);
@@ -1834,6 +1835,7 @@ function RoutesTab({ companyId, allowed, focusPartnerCode, onFocusConsumed }) {
         partnerName: item.partnerName || "",
         boardingMode: item.boardingMode || "",
         routePath: Array.isArray(item.routePath) ? item.routePath : [], // 수동 경로 폴리라인 보존(plain number 배열)
+        createdBy: currentUserUid || null, // 복사본도 본인 소유로(제한 admin 열람 보장)
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -2150,7 +2152,9 @@ function RoutesTab({ companyId, allowed, focusPartnerCode, onFocusConsumed }) {
     if (filter !== "전체" && r.type !== filter) return false;
     if (partnerFilter !== "전체") {
       if (r.partnerCode !== partnerFilter) return false;
-    } else if (!isAllAccess(allowed) && !partnerCodeAllowed(allowed, r.partnerCode)) {
+    } else if (!isAllAccess(allowed) && !partnerCodeAllowed(allowed, r.partnerCode)
+               && !(currentUserUid && r.createdBy === currentUserUid)) {
+      // 제한 admin: allowed 협력사 노선 OR 본인 생성(createdBy) 노선만(거래처 미지정 자기 노선도 노출, 2026-06-16).
       return false;
     }
     if (search && !r.name.includes(search) && !r.code?.includes(search)) return false;
