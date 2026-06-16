@@ -63,10 +63,11 @@ service cloud.firestore {
       // 기사
       match /drivers/{driverId} {
         allow read: if isAdmin(companyId) || isDriverOf(companyId);
-        // 기사 본인은 status, uid 등 일부 필드 수정 가능
-        allow update: if isDriverOf(companyId) &&
-          request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(["status", "uid", "startedAt", "endedAt"]);
+        // update: 관리자 전체 OR 기사 본인(운행 상태 필드 한정). 정본=루트 firestore.rules(2026-06-16 동기).
+        allow update: if isAdmin(companyId)
+          || (isDriverOf(companyId)
+              && request.resource.data.diff(resource.data).affectedKeys()
+                   .hasOnly(["status", "uid", "startedAt", "endedAt"]));
         allow create, delete: if isAdmin(companyId);
       }
 

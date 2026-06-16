@@ -70,9 +70,14 @@ service cloud.firestore {
 
       match /drivers/{driverId} {
         allow read: if isAdmin(companyId) || isDriverOf(companyId);
-        allow update: if isDriverOf(companyId) &&
-          request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(["status", "uid", "startedAt", "endedAt"]);
+        // update: 관리자 전체 OR 기사 본인(운행 상태 필드 한정). dispatches 룰과 동일 패턴.
+        // ⚠ admin update 누락 시 "기사 정보 수정"/PIN 재설정이 Missing permissions 로 막히고
+        //   그 throw 가 뒤의 PIN/Auth 생성 블록까지 차단 → 기사 로그인 불가(2026-06-16 수정).
+        //   복원 금지: isAdmin(companyId) 경로 제거 시 동일 결함 재발.
+        allow update: if isAdmin(companyId)
+          || (isDriverOf(companyId)
+              && request.resource.data.diff(resource.data).affectedKeys()
+                   .hasOnly(["status", "uid", "startedAt", "endedAt"]));
         allow create, delete: if isAdmin(companyId);
       }
 
