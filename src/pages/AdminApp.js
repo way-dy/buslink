@@ -270,8 +270,8 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
         {tab === 2 && <ErrorBoundary label="배차 관리"><DispatchTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} allowed={allowed} /></ErrorBoundary>}
         {tab === 3 && <ErrorBoundary label="배차 일정"><DispatchScheduleTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} allowed={allowed} /></ErrorBoundary>}
         {tab === 4 && <ErrorBoundary label="노선 관리"><RoutesTab companyId={activeCompanyId} allowed={allowed} focusPartnerCode={routesFocusPartner} onFocusConsumed={() => setRoutesFocusPartner(null)} /></ErrorBoundary>}
-        {tab === 5 && <ErrorBoundary label="기사 관리"><DriverTab companyId={activeCompanyId} vehicles={vehicles} /></ErrorBoundary>}
-        {tab === 6 && <ErrorBoundary label="차량 관리"><VehicleTab companyId={activeCompanyId} vehicles={vehicles} /></ErrorBoundary>}
+        {tab === 5 && <ErrorBoundary label="기사 관리"><DriverTab companyId={activeCompanyId} vehicles={vehicles} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
+        {tab === 6 && <ErrorBoundary label="차량 관리"><VehicleTab companyId={activeCompanyId} vehicles={vehicles} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
         {tab === 7 && <ErrorBoundary label="시뮬레이터"><SimulatorTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} /></ErrorBoundary>}
         {tab === 8 && <ErrorBoundary label="운행 이력"><HistoryTab companyId={activeCompanyId} vehicles={vehicles} allowed={allowed} /></ErrorBoundary>}
         {tab === 9 && <ErrorBoundary label="탑승 통계"><BoardingStatsTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
@@ -2695,13 +2695,19 @@ function RoutesTab({ companyId, allowed, focusPartnerCode, onFocusConsumed }) {
 // 탭4: 기사 관리
 // 탭4: 기사 관리
 // ═══════════════════════════════════════════════════════
-function DriverTab({ companyId, vehicles }) {
+function DriverTab({ companyId, vehicles, allowed, currentUserUid }) {
   const [drivers, setDrivers] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [form, setForm] = useState({ name:"", empNo:"", vehicleId:"", vehicleNo:"", phone:"", pin:"" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // 기사 격리: 전체권한/슈퍼관리자는 전체, 그 외엔 본인 등록(createdBy===uid) 기사만(2026-06-16).
+  const canSeeAll = isAllAccess(allowed);
+  const visibleDrivers = canSeeAll ? drivers : drivers.filter(d => d.createdBy && d.createdBy === currentUserUid);
+  // 폼 배정차량 드롭다운도 동일 격리(본인 차량만 배정).
+  const visibleVehicles = canSeeAll ? vehicles : vehicles.filter(v => v.createdBy && v.createdBy === currentUserUid);
 
   useEffect(() => {
     if (!companyId) return;
@@ -2744,7 +2750,7 @@ function DriverTab({ companyId, vehicles }) {
         try {
           await (httpsCallable(functions,"createDriver"))({companyId,...form});
         } catch {
-          await addDoc(collection(db,"companies",companyId,"drivers"),{name:form.name,empNo:form.empNo,vehicleId:form.vehicleId,vehicleNo:form.vehicleNo,phone:form.phone,status:"대기",createdAt:new Date().toISOString()});
+          await addDoc(collection(db,"companies",companyId,"drivers"),{name:form.name,empNo:form.empNo,vehicleId:form.vehicleId,vehicleNo:form.vehicleNo,phone:form.phone,status:"대기",createdAt:new Date().toISOString(),createdBy:currentUserUid||null});
         }
       }
       setShowForm(false);
@@ -2774,8 +2780,8 @@ function DriverTab({ companyId, vehicles }) {
         <table style={S.table}>
           <thead><tr>{["사번","이름","차량번호","연락처","상태"].map(h=><th key={h} style={S.th}>{h}</th>)}<th style={S.th}>관리</th></tr></thead>
           <tbody>
-            {drivers.length===0?<tr><td colSpan={6} style={{...S.td,textAlign:"center",color:"var(--color-label-alt)"}}>등록된 기사가 없습니다</td></tr>
-            :drivers.map(d=>(
+            {visibleDrivers.length===0?<tr><td colSpan={6} style={{...S.td,textAlign:"center",color:"var(--color-label-alt)"}}>등록된 기사가 없습니다</td></tr>
+            :visibleDrivers.map(d=>(
               <tr key={d.id} style={S.tr}>
                 <td style={S.td}>{d.empNo??d.id}</td>
                 <td style={{...S.td,fontWeight:600}}>{d.name}</td>
@@ -2804,7 +2810,7 @@ function DriverTab({ companyId, vehicles }) {
           {!editItem && <div style={{fontSize:11,color:"var(--color-label-mute)",margin:"-2px 0 2px",lineHeight:1.45}}>기사앱 <b>로그인 비밀번호</b>입니다(숫자 6자리 이상). 기사가 첫 로그인 후 변경하도록 안내하세요.</div>}
           <label style={S.label}>배정 차량</label>
           <SearchableSelect value={form.vehicleId} onChange={handleVehicleSelect}
-            options={vehicles.map(v => ({ value:v.id, label:`${v.plateNo} (${v.model || v.type || v.id})` }))}
+            options={visibleVehicles.map(v => ({ value:v.id, label:`${v.plateNo} (${v.model || v.type || v.id})` }))}
             placeholder="차량 선택 (검색·선택사항)" />
           <label style={S.label}>연락처</label>
           <input style={S.input} placeholder="010-0000-0000" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/>
@@ -2822,11 +2828,15 @@ function DriverTab({ companyId, vehicles }) {
 // ═══════════════════════════════════════════════════════
 // 탭5: 차량 관리
 // ═══════════════════════════════════════════════════════
-function VehicleTab({ companyId, vehicles }) {
+function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [form, setForm] = useState({ plateNo:"", model:"", type:"", seats:"", year:"", memo:"" });
   const [loading, setLoading] = useState(false);
+
+  // 차량 격리: 전체권한/슈퍼관리자는 전체, 그 외엔 본인 등록(createdBy===uid) 차량만(2026-06-16).
+  const canSeeAll = isAllAccess(allowed);
+  const visibleVehicles = canSeeAll ? vehicles : vehicles.filter(v => v.createdBy && v.createdBy === currentUserUid);
 
   const openAdd = () => { setEditItem(null); setForm({plateNo:"",model:"",type:"대형",seats:"45",year:"",memo:""}); setShowForm(true); };
   const openEdit = (item) => { setEditItem(item); setForm({plateNo:item.plateNo||"",model:item.model||"",type:item.type||"대형",seats:item.seats?.toString()||"",year:item.year||"",memo:item.memo||""}); setShowForm(true); };
@@ -2840,6 +2850,7 @@ function VehicleTab({ companyId, vehicles }) {
         await updateDoc(doc(db,"companies",companyId,"vehicles",editItem.id),data);
       } else {
         data.createdAt = new Date().toISOString();
+        data.createdBy = currentUserUid || null;
         await setDoc(doc(db,"companies",companyId,"vehicles",`vehicle_${String(vehicles.length+1).padStart(3,"0")}`),data);
       }
       setShowForm(false);
@@ -2857,7 +2868,7 @@ function VehicleTab({ companyId, vehicles }) {
       <div style={S.panelHeader}>
         <span style={{fontSize:16,fontWeight:700}}>차량 관리</span>
         <div style={{display:"flex",gap:12,alignItems:"center"}}>
-          <span style={{fontSize:13,color:"var(--color-label-mute)"}}>총 {vehicles.length}대</span>
+          <span style={{fontSize:13,color:"var(--color-label-mute)"}}>총 {visibleVehicles.length}대</span>
           <button style={S.addBtn} onClick={openAdd}>+ 차량 등록</button>
         </div>
       </div>
@@ -2865,8 +2876,8 @@ function VehicleTab({ companyId, vehicles }) {
         <table style={S.table}>
           <thead><tr>{["차량ID","차량번호","차종","모델명","좌석수","연식","비고"].map(h=><th key={h} style={S.th}>{h}</th>)}<th style={S.th}>관리</th></tr></thead>
           <tbody>
-            {vehicles.length===0?<tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"var(--color-label-alt)"}}>등록된 차량이 없습니다</td></tr>
-            :vehicles.map(v=>(
+            {visibleVehicles.length===0?<tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"var(--color-label-alt)"}}>등록된 차량이 없습니다</td></tr>
+            :visibleVehicles.map(v=>(
               <tr key={v.id} style={S.tr}>
                 <td style={{...S.td,color:"var(--color-label-mute)",fontSize:12}}>{v.id}</td>
                 <td style={{...S.td,fontWeight:600}}>{v.plateNo}</td>

@@ -1265,6 +1265,7 @@ exports.createDriver = onCall(async (request) => {
       .collection("companies").doc(companyId).collection("drivers").add({
         name, empNo, vehicleId: vehicleId || "", vehicleNo: vehicleNo || "",
         phone: phone || "", uid: userRecord.uid, status: "대기", createdAt: new Date().toISOString(),
+        createdBy: request.auth.uid,
       });
     await admin.firestore().collection("users").doc(userRecord.uid).set({
       role: "driver", companyId, empNo, name,
