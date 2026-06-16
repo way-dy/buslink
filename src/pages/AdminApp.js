@@ -1815,6 +1815,55 @@ function RoutesTab({ companyId, allowed, focusPartnerCode, onFocusConsumed }) {
     await deleteDoc(doc(db, "companies", companyId, "routes", item.id));
   };
 
+  // 노선 복사 — 노선 문서 + 정류장 전체를 새 노선으로 복제(정류장 재입력 수고 경감, 2026-06-16).
+  // 순수 클라이언트(Firestore SDK 직접 write). companies/** write = 해당 회사 admin 룰로 허용됨.
+  const handleCopy = async (item) => {
+    if (!window.confirm(`"${item.name}" 노선을 정류장 정보까지 복사하시겠습니까?`)) return;
+    setLoading(true);
+    try {
+      // ① 노선 문서 복제 — item.id 등 문서 메타 제외, 명시 필드만 나열.
+      const data = {
+        name: `${item.name} (복사본)`,
+        code: item.code || "",
+        type: item.type || "출근",
+        shift: item.shift || "주간조",
+        seats: item.seats ?? null,
+        departTime: item.departTime || "",
+        memo: item.memo || "",
+        partnerCode: item.partnerCode || "",
+        partnerName: item.partnerName || "",
+        boardingMode: item.boardingMode || "",
+        routePath: Array.isArray(item.routePath) ? item.routePath : [], // 수동 경로 폴리라인 보존(plain number 배열)
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      const newRef = await addDoc(collection(db, "companies", companyId, "routes"), data);
+      // ② 정류장 전체 복제 — order 보존, id 제외. 직렬 await 루프.
+      const stopsSnap = await getDocs(query(collection(db, "companies", companyId, "routes", item.id, "stops"), orderBy("order", "asc")));
+      let copied = 0;
+      for (const s of stopsSnap.docs) {
+        const sd = s.data();
+        await addDoc(collection(db, "companies", companyId, "routes", newRef.id, "stops"), {
+          name: sd.name,
+          address: sd.address,
+          lat: sd.lat,
+          lng: sd.lng,
+          order: sd.order,
+          photo: sd.photo || "",
+          description: sd.description || "",
+          offsetMin: sd.offsetMin ?? null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+        copied++;
+      }
+      // 새 노선이 활성 필터(거래처/구분/검색)에 가려 "안 보인다" 혼란 방지 — 필터 초기화(handleSave 패턴).
+      setFilter("전체"); setPartnerFilter("전체"); setSearch("");
+      alert(`"${item.name}" 노선이 정류장 ${copied}개와 함께 복사되었습니다.`);
+    } catch (e) { alert("복사 오류: " + e.message); }
+    setLoading(false);
+  };
+
   // ─── 정류장 CRUD ────────────────────────────────────
   const resetAddrSearch = () => { setAddrQuery(""); setAddrResults([]); setAddrSearching(false); setAddrMsg(""); };
   const openStopAdd = () => {
@@ -2176,6 +2225,7 @@ function RoutesTab({ companyId, allowed, focusPartnerCode, onFocusConsumed }) {
                 </td>
                 <td style={S.td}>
                   <button style={S.editBtn} onClick={()=>openEdit(r)}>수정</button>
+                  <button style={{...S.editBtn, color:"var(--color-primary-deep)"}} onClick={()=>handleCopy(r)}>📋 복사</button>
                   <button style={S.delBtn} onClick={()=>handleDelete(r)}>삭제</button>
                 </td>
               </tr>
