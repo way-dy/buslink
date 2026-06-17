@@ -517,7 +517,10 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
       const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setAllRoutes(all);
       const shown = all.filter(r => r.id === session.routeId || favorites.includes(r.id));
-      setRoutes(shown.length > 0 ? shown : all.slice(0, 3));
+      // 미배정 폴백도 본인 거래처 노선만(타 거래처 노출 차단). partnerCode 미설정 직원은 전체(하위호환).
+      const myPartner = session.partnerCode || null;
+      const fallback = (myPartner ? all.filter(r => (r.partnerCode || null) === myPartner) : all).slice(0, 3);
+      setRoutes(shown.length > 0 ? shown : fallback);
       if (!activeRouteId && shown.length > 0) setActiveRouteId(shown[0].id);
     });
   }, [companyId, session.routeId]);
@@ -549,7 +552,11 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
   };
 
   // 노선 변경 모달 검색 필터 (노선명·구분·코드·거래처)
+  // 거래처 격리(2026-06-17): 직원 본인 거래처(session.partnerCode) 노선만 노출 — 타 거래처/미지정 노선 숨김.
+  //   partnerCode 미설정 직원은 전체 노출(하위호환). 모달 표시 전용이라 현재 노선 해석·홈 로직 무영향.
+  const myPartner = session.partnerCode || null;
   const filteredAllRoutes = allRoutes.filter(r => {
+    if (myPartner && (r.partnerCode || null) !== myPartner) return false;
     const q = routeQuery.trim().toLowerCase();
     if (!q) return true;
     return [r.name, r.type, r.code, r.partnerName].some(v => (v || "").toString().toLowerCase().includes(q));
@@ -1254,7 +1261,7 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
                   ✕
                 </button>
               </div>
-              {allRoutes.length > 6 && (
+              {allRoutes.filter(r => !myPartner || (r.partnerCode || null) === myPartner).length > 6 && (
                 <input style={{ ...S.input, marginTop: 10 }} placeholder="🔍 노선명·구분·코드 검색"
                   value={routeQuery} onChange={e => setRouteQuery(e.target.value)} />
               )}
@@ -1262,7 +1269,7 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
             <div style={{ overflowY: 'auto', padding: '12px 16px 24px', flex: 1 }}>
               {filteredAllRoutes.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: 30, color: 'var(--color-label-alt)', fontSize: 13 }}>
-                  {allRoutes.length === 0 ? '등록된 노선이 없습니다' : '검색 결과가 없습니다'}
+                  {routeQuery.trim() ? '검색 결과가 없습니다' : '등록된 노선이 없습니다'}
                 </div>
               ) : filteredAllRoutes.map(r => {
                 const isCur = activeRouteId === r.id;
