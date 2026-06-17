@@ -267,8 +267,8 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
 
         {tab === 0 && <ErrorBoundary label="대시보드"><DashboardTab companyId={activeCompanyId} drivers={drivers} vehicles={vehicles} onNav={setTab} onManageRoutes={(pc) => { setRoutesFocusPartner(pc); setTab(4); }} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
         {tab === 1 && <ErrorBoundary label="실시간 관제"><MapTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
-        {tab === 2 && <ErrorBoundary label="배차 관리"><DispatchTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} allowed={allowed} /></ErrorBoundary>}
-        {tab === 3 && <ErrorBoundary label="배차 일정"><DispatchScheduleTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} allowed={allowed} /></ErrorBoundary>}
+        {tab === 2 && <ErrorBoundary label="배차 관리"><DispatchTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
+        {tab === 3 && <ErrorBoundary label="배차 일정"><DispatchScheduleTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
         {tab === 4 && <ErrorBoundary label="노선 관리"><RoutesTab companyId={activeCompanyId} allowed={allowed} currentUserUid={user?.uid} focusPartnerCode={routesFocusPartner} onFocusConsumed={() => setRoutesFocusPartner(null)} /></ErrorBoundary>}
         {tab === 5 && <ErrorBoundary label="기사 관리"><DriverTab companyId={activeCompanyId} vehicles={vehicles} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
         {tab === 6 && <ErrorBoundary label="차량 관리"><VehicleTab companyId={activeCompanyId} vehicles={vehicles} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
@@ -354,15 +354,16 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
   const filteredGps = gpsVehicles.filter(v => matchPartner(v.routeId));
   const filteredBoardings = boardings.filter(b => matchPartner(b.routeId));
 
-  // 협력사 미선택일 때만 전체 기사 카운트, 협력사 선택 시 의미 없으므로 "전체 기사" 그대로
-  const driving = drivers.filter(d => d.status === "운행중").length;
-  const waiting = drivers.filter(d => d.status !== "운행중").length;
+  // 기사 createdBy 격리(2026-06-17): 제한 admin 은 본인 생성 기사만(전체권한/슈퍼관리자는 전체). DriverTab(2712) 과 동일 정책을 대시보드에도 적용.
+  const visibleDrivers = isAllAccess(allowed) ? drivers : drivers.filter(d => d.createdBy && currentUserUid && d.createdBy === currentUserUid);
+  const driving = visibleDrivers.filter(d => d.status === "운행중").length;
+  const waiting = visibleDrivers.filter(d => d.status !== "운행중").length;
 
   const stats = [
     { label: "오늘 배차 노선", value: filteredDispatches.length, sub: partnerCode === "전체" ? "금일 등록 기준" : "선택 협력사 기준", color: "var(--color-primary)" },
     { label: "운행중 차량", value: filteredGps.length, sub: `기사 운행중 ${driving}명`, color: "var(--color-positive)" },
     { label: "오늘 탑승 인원", value: filteredBoardings.length, sub: "QR 탑승 기준", color: "var(--color-positive)" },
-    { label: "전체 기사", value: drivers.length, sub: `대기 ${waiting}명`, color: "var(--color-primary-deep)" },
+    { label: "전체 기사", value: visibleDrivers.length, sub: `대기 ${waiting}명`, color: "var(--color-primary-deep)" },
   ];
 
   const driverName = (id) => drivers.find(d => d.id === id)?.name ?? id;
@@ -474,7 +475,7 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
               <span style={{ fontWeight:700, color:"var(--color-label)" }}>기사 현황</span>
               <button style={S.editBtn} onClick={() => onNav(5)}>기사 관리</button>
             </div>
-            {drivers.length === 0 ? (
+            {visibleDrivers.length === 0 ? (
               <div style={S.empty}>등록된 기사가 없습니다</div>
             ) : (
               <table style={S.table}>
@@ -482,7 +483,7 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
                   <tr><th style={S.th}>이름</th><th style={S.th}>차량</th><th style={S.th}>상태</th></tr>
                 </thead>
                 <tbody>
-                  {drivers.slice(0, 8).map(d => (
+                  {visibleDrivers.slice(0, 8).map(d => (
                     <tr key={d.id} style={S.tr}>
                       <td style={{ ...S.td, fontWeight:600 }}>{d.name}</td>
                       <td style={{ ...S.td, color:"var(--color-label-mute)", fontSize:12 }}>{d.vehicleNo || "–"}</td>
@@ -1160,7 +1161,7 @@ function SearchableSelect({ value, onChange, options, placeholder = "선택", di
   );
 }
 
-function DispatchTab({ companyId, vehicles, drivers, allowed }) {
+function DispatchTab({ companyId, vehicles, drivers, allowed, currentUserUid }) {
   const [date, setDate] = useState(getToday());
   const [dispatches, setDispatches] = useState([]);
   const [routes, setRoutes] = useState([]);
@@ -1224,7 +1225,7 @@ function DispatchTab({ companyId, vehicles, drivers, allowed }) {
       } else {
         // 신규: 현재 선택된 날짜에 추가
         const ref = collection(db, "companies", companyId, "dispatches", date, "list");
-        await addDoc(ref, { ...form, date });
+        await addDoc(ref, { ...form, date, createdBy: currentUserUid || null });
       }
     } catch (e) {
       alert("저장 오류: " + e.message);
@@ -1239,19 +1240,21 @@ function DispatchTab({ companyId, vehicles, drivers, allowed }) {
 
   // ★ 배차 복사 — 현재 날짜 배차를 다른 날짜로 복사
   const handleCopyDispatches = async () => {
-    if (dispatches.length === 0) return alert("복사할 배차가 없습니다");
+    // createdBy 격리: 제한 admin 은 본인이 볼 수 있는 배차만 복사(타 담당자 배차 오귀속 차단). data 의 createdBy 는 ...data 로 보존.
+    const source = dispatches.filter(canSeeDispatch);
+    if (source.length === 0) return alert("복사할 배차가 없습니다");
     const targetDate = prompt("복사할 대상 날짜를 입력하세요 (예: 2026-03-24)", "");
     if (!targetDate || !/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) return;
     if (targetDate === date) return alert("같은 날짜로는 복사할 수 없습니다");
-    if (!window.confirm(`${date} 배차 ${dispatches.length}건을 ${targetDate}로 복사하시겠습니까?`)) return;
+    if (!window.confirm(`${date} 배차 ${source.length}건을 ${targetDate}로 복사하시겠습니까?`)) return;
     setLoading(true);
     try {
       const ref = collection(db, "companies", companyId, "dispatches", targetDate, "list");
-      for (const d of dispatches) {
+      for (const d of source) {
         const { id: _id, ...data } = d;
         await addDoc(ref, { ...data, date: targetDate });
       }
-      alert(`${dispatches.length}건 복사 완료`);
+      alert(`${source.length}건 복사 완료`);
     } catch (e) { alert("복사 오류: " + e.message); }
     setLoading(false);
   };
@@ -1259,12 +1262,26 @@ function DispatchTab({ companyId, vehicles, drivers, allowed }) {
   const driverName = (id) => drivers.find(d => d.id === id)?.name ?? id;
   // routeId → route(partnerCode/partnerName) 매핑
   const routeOf = (id) => routes.find(r => r.id === id);
-  // 협력사 필터 적용 (Phase B: "전체"여도 제한 admin 은 allowed 협력사로 한정)
+  const canSeeAll = isAllAccess(allowed);
+  // createdBy 격리(2026-06-17): 제한 admin 은 본인 소유 배차만 — ① 노선 partnerCode 가 allowed(담당·본인생성 거래처) ②
+  //   노선 createdBy===uid(거래처 미지정 자기 노선) ③ 배차 createdBy===uid(routeId 없는 수기 배차 포함). 전체권한/슈퍼관리자는 전부.
+  const canSeeDispatch = (d) => {
+    if (canSeeAll) return true;
+    const r = routeOf(d.routeId);
+    return partnerCodeAllowed(allowed, r?.partnerCode)
+      || (!!currentUserUid && r?.createdBy === currentUserUid)
+      || (!!currentUserUid && d.createdBy === currentUserUid);
+  };
+  // createdBy 격리 + 협력사 필터(드롭다운) 동시 적용
   const filteredDispatches = dispatches.filter(d => {
-    const pc = routeOf(d.routeId)?.partnerCode;
-    if (partnerCode !== "전체") return pc === partnerCode;
-    return isAllAccess(allowed) || partnerCodeAllowed(allowed, pc);
+    if (!canSeeDispatch(d)) return false;
+    if (partnerCode !== "전체") return routeOf(d.routeId)?.partnerCode === partnerCode;
+    return true;
   });
+  // 배차 폼 드롭다운: 제한 admin 은 본인 것만(전체권한/슈퍼관리자는 전체 유지 — 기존 가드 보존). select 값 해석(handleX) 은 전체 배열 유지.
+  const visibleDrivers = canSeeAll ? drivers : drivers.filter(d => !!currentUserUid && d.createdBy === currentUserUid);
+  const visibleVehicles = canSeeAll ? vehicles : vehicles.filter(v => !!currentUserUid && v.createdBy === currentUserUid);
+  const visibleRoutes = canSeeAll ? routes : routes.filter(r => (!!currentUserUid && r.createdBy === currentUserUid) || partnerCodeAllowed(allowed, r?.partnerCode));
 
   return (
     <div style={S.panel}>
@@ -1313,11 +1330,11 @@ function DispatchTab({ companyId, vehicles, drivers, allowed }) {
           <div style={S.modalTitle}>{editItem?"배차 수정":"배차 등록"}</div>
           <label style={S.label}>기사 *</label>
           <SearchableSelect value={form.driverId} onChange={handleDriverSelect}
-            options={drivers.map(d => ({ value:d.id, label:`${d.name} (${d.empNo ?? d.id})` }))}
+            options={visibleDrivers.map(d => ({ value:d.id, label:`${d.name} (${d.empNo ?? d.id})` }))}
             placeholder="기사 선택 (검색)" />
           <label style={S.label}>노선 선택 *</label>
           <SearchableSelect value={form.routeId} onChange={handleRouteSelect}
-            options={routes.map(r => ({ value:r.id, label:`[${r.shift}] ${r.name} (${r.departTime})` }))}
+            options={visibleRoutes.map(r => ({ value:r.id, label:`[${r.shift}] ${r.name} (${r.departTime})` }))}
             placeholder="노선 선택 (노선 관리에서 먼저 등록)" />
           {!form.routeId && (
             <>
@@ -1327,7 +1344,7 @@ function DispatchTab({ companyId, vehicles, drivers, allowed }) {
           )}
           <label style={S.label}>차량 선택</label>
           <SearchableSelect value={form.vehicleId} onChange={handleVehicleSelect}
-            options={vehicles.map(v => ({ value:v.id, label:`${v.plateNo} (${v.model || v.id})` }))}
+            options={visibleVehicles.map(v => ({ value:v.id, label:`${v.plateNo} (${v.model || v.id})` }))}
             placeholder="차량 선택 (검색)" />
           <label style={S.label}>출발시간 *</label>
           <input style={S.input} type="time" value={form.departTime} onChange={e=>setForm({...form,departTime:e.target.value})} />
@@ -1354,7 +1371,7 @@ const blankScheduleForm = () => ({
   excludeHolidays:true, active:true,
 });
 
-function DispatchScheduleTab({ companyId, vehicles, drivers, allowed }) {
+function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUserUid }) {
   const [schedules, setSchedules] = useState([]);
   const [routes, setRoutes] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -1476,7 +1493,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed }) {
         await updateDoc(doc(db, "companies", companyId, "dispatchSchedules", editId), payload);
       } else {
         await addDoc(collection(db, "companies", companyId, "dispatchSchedules"), {
-          ...payload, createdAt: new Date().toISOString(),
+          ...payload, createdAt: new Date().toISOString(), createdBy: currentUserUid || null,
         });
       }
       setShowForm(false);
@@ -1530,12 +1547,24 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed }) {
   const periodLabel = (s) => `${s.startDate || "–"} ~ ${s.endDate || "무기한"}`;
 
   const routeOf = (id) => routes.find(r => r.id === id);
-  // Phase B: "전체"여도 제한 admin 은 allowed 협력사로 한정.
+  const canSeeAll = isAllAccess(allowed);
+  // createdBy 격리(2026-06-17): 배차 관리(DispatchTab)와 동일 — 노선 partnerCode∈allowed 또는 노선 createdBy===uid 또는 일정 createdBy===uid.
+  const canSeeSchedule = (s) => {
+    if (canSeeAll) return true;
+    const r = routeOf(s.routeId);
+    return partnerCodeAllowed(allowed, r?.partnerCode)
+      || (!!currentUserUid && r?.createdBy === currentUserUid)
+      || (!!currentUserUid && s.createdBy === currentUserUid);
+  };
   const filteredSchedules = schedules.filter(s => {
-    const pc = routeOf(s.routeId)?.partnerCode;
-    if (partnerCode !== "전체") return pc === partnerCode;
-    return isAllAccess(allowed) || partnerCodeAllowed(allowed, pc);
+    if (!canSeeSchedule(s)) return false;
+    if (partnerCode !== "전체") return routeOf(s.routeId)?.partnerCode === partnerCode;
+    return true;
   });
+  // 폼 드롭다운: 제한 admin 은 본인 것만(전체권한/슈퍼관리자 전체 유지). 선택값 해석(handleX) 은 전체 배열 유지.
+  const visibleDrivers = canSeeAll ? drivers : drivers.filter(d => !!currentUserUid && d.createdBy === currentUserUid);
+  const visibleVehicles = canSeeAll ? vehicles : vehicles.filter(v => !!currentUserUid && v.createdBy === currentUserUid);
+  const visibleRoutes = canSeeAll ? routes : routes.filter(r => (!!currentUserUid && r.createdBy === currentUserUid) || partnerCodeAllowed(allowed, r?.partnerCode));
 
   return (
     <div style={S.panel}>
@@ -1607,17 +1636,17 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed }) {
           <label style={S.label}>노선 *</label>
           <select style={S.input} value={form.routeId} onChange={e=>handleRouteSelect(e.target.value)}>
             <option value="">노선 선택</option>
-            {routes.map(r => <option key={r.id} value={r.id}>[{r.shift}] {r.name} ({r.departTime})</option>)}
+            {visibleRoutes.map(r => <option key={r.id} value={r.id}>[{r.shift}] {r.name} ({r.departTime})</option>)}
           </select>
 
           <label style={S.label}>기사 *</label>
           <SearchableSelect value={form.driverId} onChange={handleDriverSelect}
-            options={drivers.map(d => ({ value:d.id, label:`${d.name} (${d.empNo ?? d.id})` }))}
+            options={visibleDrivers.map(d => ({ value:d.id, label:`${d.name} (${d.empNo ?? d.id})` }))}
             placeholder="기사 선택 (검색)" />
 
           <label style={S.label}>차량 (선택)</label>
           <SearchableSelect value={form.vehicleId} onChange={handleVehicleSelect}
-            options={vehicles.map(v => ({ value:v.id, label:`${v.plateNo} (${v.model || v.id})` }))}
+            options={visibleVehicles.map(v => ({ value:v.id, label:`${v.plateNo} (${v.model || v.id})` }))}
             placeholder="차량 선택 (검색)" />
 
           <label style={S.label}>출발 시각 *</label>

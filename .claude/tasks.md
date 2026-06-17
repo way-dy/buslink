@@ -4,7 +4,8 @@
 
 ## 현재 상태 (2026-06-16 세션 종료)
 > 이 저장소가 작업 정본. **어느 PC든** `git pull`(origin/master) + `.env.local`(↓부트스트랩, 카카오 키 `58bf34`)이면 빌드·배포 가능.
-> prod 라이브 = **`main.8896e8f8.js`** + CF 23종 (2026-06-16 hosting+functions:createDriver 배포). 기사앱 빌드마커 `v2026-06-09-livegps`.
+> prod 라이브 = **`main.2c99171c.js`** + CF 23종 (2026-06-17 hosting 배포). 기사앱 빌드마커 `v2026-06-09-livegps`.
+> **2026-06-17 세션(prod 배포·미커밋)**: 배차관리·배차일정·대시보드 기사현황에 createdBy 격리 확장(누락분) — 제한 admin(dy04)이 배차 안 보이던 것·대시보드에 회사 전체 기사 보이던 것 해소. canSeeDispatch/canSeeSchedule(노선 partnerCode∈allowed OR 노선/배차 createdBy===uid) + 신규/복사 createdBy 기록 + 폼 드롭다운 본인것만(전체권한 전체 유지). 마스터키=partnerCodes.createdBy(거래처에 createdBy만 있으면 전 탭 partnerCode 체인 자동노출). 레거시(채드윅 등) 거래처/기사는 슈퍼관리자 권한체크 or createdBy 백필 필요·신규는 자동. rules/indexes/CF 변경 0. 상세 issues.md `[패턴]`.
 > **2026-06-16 세션 누적(전부 prod 배포·master 커밋)**: ① **정류장 주소검색 무반응** = 카카오 키(`58bf34`) 신규 서브도메인(`admin.buslink.co.kr` 등) 미등록 → 지도+검색 동시 사망. **사용자가 카카오 콘솔 4개 서브도메인 등록 완료(해결)** + 코드측 `handleAddrSearch` 8초 워치독(콜백 미응답 시 "검색 중" 영구정지 차단). ② **본인 등록 거래처 배차가 배차관리에서 안 보임** = createdBy 가시성을 대시보드·협력사관리만 적용했던 누락 → AdminApp 최상위에서 `allowed = rawAllowed∪(createdBy==uid 거래처)` 합쳐 **전 탭 동일 적용**. 사용자 결정 "각자 생성 거래처는 권한 무관 항상 노출". rules/indexes/CF 변경 0. 상세 issues.md `[패턴]` 2건.
 > **2026-06-15 세션 누적(전부 prod 배포·master 커밋)**: ① admin 협력사 권한 "전체 해제" 저장 안 됨 수정(`listCompanyAdmins` CF + `EditAdminPermissionsModal`: 빈배열 `[]`≠`["*"]`, 부재만 폴백) + 회사관리 관리자목록 자동펼침·게시판형 카드 ② 신규 admin 기본 전체권한→전체해제 ③ 대시보드 **거래처 관리 현황**(거래처별 노선/배차/운행/탑승 + 업체코드·포털URL 열람) + `partnerCodes.createdBy` 로 본인 발급분 즉시 열람(가시범위 `allowed∪createdBy`) ④ 대시보드 거래처 등록·거래처별 노선관리 버튼 ⑤ 노선 저장 후 필터 초기화(안보임 해소)·기사 사번/PIN 안내+autofill 차단·**SearchableSelect**(기사/차량/노선 검색, 400+ 대비). **rules/indexes/CF 시그니처 변경 0**(listCompanyAdmins 내부 로직만)·클라 UI 중심. 상세 issues.md `[패턴]` 3건.
 > **이전 2026-06-08~09 세션 누적(전부 prod 배포)**:
