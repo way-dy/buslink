@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { auth, db } from "../firebase";
 import { signOut } from "firebase/auth";
 import { collection, query, where, getDocs, doc, updateDoc, getDoc, onSnapshot, orderBy } from "firebase/firestore";
@@ -164,41 +164,75 @@ export default function DriverApp({ companyId: propCompanyId }) {
     });
   }, []);
 
-  useEffect(() => {
+  // 로그인 직후 init 1회 자동 재시도 가드(transient 흡수). "다시 시도" 버튼은 별도(가드 무관).
+  const autoRetriedRef = useRef(false);
+  // init() 을 재호출 가능한 함수로 추출(2026-06-22) — 로그인 직후 일시적 Firestore/토큰 경합으로
+  // getDocs 가 가끔 throw 하면 종료성 에러화면(로그아웃만)에 갇히던 결함 복구.
+  //   - transient(catch) 1회 한정 ~1.5초 후 자동 재시도(autoRetriedRef 가드·무한루프 차단).
+  //   - 그래도 실패하면 에러 화면의 "다시 시도" 버튼으로 재실행(재로그인 불필요).
+  //   - "기사 정보를 찾을 수 없습니다"(데이터 부재)는 재시도 무의미 → 자동 재시도 대상에서 제외.
+  const init = useCallback(async () => {
     const u = auth.currentUser;
-    if (!u) return;
+    if (!u) {
+      // currentUser 일시 null 엣지(토큰 경합) — 종료성 에러 대신 재시도 가능한 안내.
+      console.warn("[BusLink] init: auth.currentUser 부재(일시적 경합 가능)");
+      setError("로그인 정보를 확인하지 못했습니다.\n잠시 후 다시 시도해주세요.");
+      setLoading(false);
+      return;
+    }
     const cid = propCompanyId || resolveByHostname(window.location.hostname) || "dy001";
     setCompanyId(cid);
-    const init = async () => {
-      try {
-        let snap = await getDocs(query(
+    setError("");
+    setLoading(true);
+    try {
+      let snap = await getDocs(query(
+        collection(db, "companies", cid, "drivers"),
+        where("uid", "==", u.uid)
+      ));
+      if (snap.empty && u.email?.endsWith("@buslink.com")) {
+        const empNo = u.email.replace("@buslink.com", "");
+        snap = await getDocs(query(
           collection(db, "companies", cid, "drivers"),
-          where("uid", "==", u.uid)
+          where("empNo", "==", empNo)
         ));
-        if (snap.empty && u.email?.endsWith("@buslink.com")) {
-          const empNo = u.email.replace("@buslink.com", "");
-          snap = await getDocs(query(
-            collection(db, "companies", cid, "drivers"),
-            where("empNo", "==", empNo)
-          ));
-          if (!snap.empty) {
-            await updateDoc(doc(db, "companies", cid, "drivers", snap.docs[0].id), { uid: u.uid });
-          }
-        }
         if (!snap.empty) {
-          const d = { id: snap.docs[0].id, ...snap.docs[0].data() };
-          setDriver(d);
-          await loadDispatch(d.id, cid);
-        } else {
-          setError("기사 정보를 찾을 수 없습니다.\n관리자에게 문의하세요.");
+          await updateDoc(doc(db, "companies", cid, "drivers", snap.docs[0].id), { uid: u.uid });
         }
-      } catch (e) {
-        setError("데이터 로드 중 오류가 발생했습니다.");
       }
-      setLoading(false);
-    };
-    init();
+      if (!snap.empty) {
+        const d = { id: snap.docs[0].id, ...snap.docs[0].data() };
+        setDriver(d);
+        await loadDispatch(d.id, cid);
+        setError("");
+      } else {
+        // 데이터 부재 — 재시도 무의미(자동 재시도 제외).
+        setError("기사 정보를 찾을 수 없습니다.\n관리자에게 문의하세요.");
+      }
+    } catch (e) {
+      // transient(Firestore/토큰 경합) 가능 — 향후 진단 위해 실제 에러 로그.
+      console.warn("[BusLink] init 실패:", e?.code || "", e?.message || e);
+      if (!autoRetriedRef.current) {
+        // 첫 실패 → ~1.5초 후 1회 자동 재시도(가드로 무한루프 차단).
+        autoRetriedRef.current = true;
+        setTimeout(() => { init(); }, 1500);
+        return; // loading 유지 — 재시도 결과로 갱신
+      }
+      setError("데이터 로드 중 오류가 발생했습니다.\n네트워크 확인 후 다시 시도해주세요.");
+    }
+    setLoading(false);
+    // loadDispatch 는 컴포넌트 내 안정적 함수(상태 의존 없음·인자 기반) — deps 제외.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [propCompanyId]);
+
+  useEffect(() => {
+    // onAuthStateChanged 구독으로 보강 — auth.currentUser 일시 null 엣지(로그인 직후
+    // 토큰 경합) 방어. user 확정 시 init 1회 호출. App.js 가 이미 인증 게이트라 정상
+    // 흐름엔 즉시 발화. unsubscribe 로 정리.
+    const unsub = auth.onAuthStateChanged((u) => {
+      if (u) { autoRetriedRef.current = false; init(); }
+    });
+    return () => unsub();
+  }, [init]);
 
   const loadDispatch = async (driverId, cid) => {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
@@ -766,7 +800,17 @@ export default function DriverApp({ companyId: propCompanyId }) {
     <div style={{ ...S.fullCenter, flexDirection: "column", gap: 16 }}>
       <InstallPrompt />
       <div style={{ color: "var(--color-destructive)", fontSize: 15, textAlign: "center", whiteSpace: "pre-line", fontWeight: 600 }}>{error}</div>
-      <button style={S.outlineBtn} onClick={() => signOut(auth)}>로그아웃</button>
+      {/* 복구형 에러 화면(2026-06-22) — 로그인 직후 일시적 경합으로 init 이 실패해도
+          재로그인 없이 "다시 시도"로 진입 가능. autoRetriedRef 리셋 후 init 재실행. */}
+      <div style={{ display: "flex", gap: 10 }}>
+        <button
+          style={{ ...S.primaryBtn, maxWidth: 160 }}
+          onClick={() => { autoRetriedRef.current = false; init(); }}
+        >
+          다시 시도
+        </button>
+        <button style={S.outlineBtn} onClick={() => signOut(auth)}>로그아웃</button>
+      </div>
     </div>
   );
 

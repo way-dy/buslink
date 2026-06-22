@@ -94,7 +94,7 @@ export default function PartnerApp() {
         {/* Step 진행 표시 */}
         {step !== STEPS.DONE && (
           <div style={S.stepRow}>
-            {[["업체코드 인증", STEPS.CODE], ["직원 등록", STEPS.MAIN]].map(([label, s], i) => {
+            {[["업체코드 인증", STEPS.CODE], ["승객 등록", STEPS.MAIN]].map(([label, s], i) => {
               const done = step === STEPS.MAIN && s === STEPS.CODE;
               const active = step === s;
               return (
@@ -143,7 +143,7 @@ export default function PartnerApp() {
 
             {/* 메인 탭 선택 — 2026-05-28 Phase 1.3 운영 포털 탭 추가 (4번째) */}
             <div style={S.tabBar}>
-              {[["register","📋 직원 등록"],["manage","👥 직원 관리"],["stats","📊 탑승 통계"],["ops","🚌 운영 포털"]].map(([t,label])=>(
+              {[["register","📋 승객 등록"],["manage","👥 승객 관리"],["stats","📊 탑승 통계"],["ops","🚌 운영 포털"]].map(([t,label])=>(
                 <button key={t} onClick={()=>setMainTab(t)}
                   style={{ ...S.tabBtn,
                     background: mainTab===t ? "var(--color-primary)" : "transparent",
@@ -213,7 +213,7 @@ export default function PartnerApp() {
               )}
             </div>
             <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center", lineHeight:1.5 }}>
-              신규 등록 직원의 초기 PIN은 <span style={{ color:"var(--color-cautionary)", fontWeight:800, background:"#FFF1E0", padding:"2px 8px", borderRadius:6 }}>000000</span>입니다
+              신규 등록 승객의 초기 PIN은 <span style={{ color:"var(--color-cautionary)", fontWeight:800, background:"#FFF1E0", padding:"2px 8px", borderRadius:6 }}>000000</span>입니다
             </div>
             <button style={S.btnSecondary} onClick={reset}>추가 등록하기</button>
           </div>
@@ -580,7 +580,7 @@ function EmployeeManageMode({ codeData, code, routes }) {
         <div style={{ textAlign:"center", padding:20, color:"var(--color-label-mute)", fontSize:13 }}>로딩 중...</div>
       ) : filtered.length === 0 ? (
         <div style={{ textAlign:"center", padding:24, color:"var(--color-label-alt)", fontSize:13, background:"var(--color-bg-soft)", borderRadius:10 }}>
-          {search ? "검색 결과가 없습니다" : "등록된 직원이 없습니다"}
+          {search ? "검색 결과가 없습니다" : "등록된 승객이 없습니다"}
         </div>
       ) : (
         <div style={{ display:"flex", flexDirection:"column", gap:8, maxHeight:360, overflowY:"auto" }}>
@@ -618,7 +618,7 @@ function EmployeeManageMode({ codeData, code, routes }) {
       {editEmp && (
         <div style={S.overlay}>
           <div style={S.modal}>
-            <div style={S.modalTitle}>직원 정보 수정</div>
+            <div style={S.modalTitle}>승객 정보 수정</div>
             <div style={{ fontSize:12, color:"var(--color-label-mute)" }}>{editEmp.empNo} · {editEmp.name}</div>
 
             <label style={S.label}>이름 *</label>
@@ -1130,7 +1130,7 @@ function BoardingStatsMode({ codeData, code, routes }) {
           <div style={{ fontSize: 22, fontWeight: 800, color: "var(--color-positive)", fontFamily: "var(--font-brand)" }}>
             {byEmployee.length}
           </div>
-          <div style={{ fontSize: 11, color: "var(--color-label-mute)", fontWeight: 600, marginTop: 2 }}>고유 직원</div>
+          <div style={{ fontSize: 11, color: "var(--color-label-mute)", fontWeight: 600, marginTop: 2 }}>고유 승객</div>
         </div>
         <div style={S.statCard}>
           <div style={{ fontSize: 22, fontWeight: 800, color: "var(--color-cautionary)", fontFamily: "var(--font-brand)" }}>
@@ -1166,7 +1166,7 @@ function BoardingStatsMode({ codeData, code, routes }) {
       {byEmployee.length > 0 && (
         <div style={{ background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 10, overflow: "hidden" }}>
           <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--color-line-soft)", fontSize: 12, fontWeight: 700, color: "var(--color-label)" }}>
-            👤 직원별 탑승 ({byEmployee.length}명)
+            👤 승객별 탑승 ({byEmployee.length}명)
           </div>
           <div style={{ maxHeight: 280, overflowY: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -1260,7 +1260,7 @@ function BoardingStatsMode({ codeData, code, routes }) {
         <div style={{ textAlign: "center", padding: 32, color: "var(--color-label-mute)", fontSize: 13, background: "var(--color-bg-soft)", borderRadius: 10 }}>
           조회 기간 탑승 기록이 없습니다.
           <div style={{ fontSize: 11, color: "var(--color-label-alt)", marginTop: 6 }}>
-            QR로 탑승한 직원이 있으면 여기에 누적됩니다.
+            QR로 탑승한 승객이 있으면 여기에 누적됩니다.
           </div>
         </div>
       )}
@@ -1620,9 +1620,9 @@ function OperationsMode({ codeData, code, routes }) {
           <div style={{ padding: 20, textAlign: "center", color: "var(--color-label-mute)", fontSize: 12 }}>로딩 중...</div>
         ) : myRoutesList.length === 0 ? (
           <div style={{ padding: 24, textAlign: "center", color: "var(--color-label-mute)", fontSize: 13 }}>
-            배정된 직원이 없습니다
+            배정된 승객이 없습니다
             <div style={{ fontSize: 11, color: "var(--color-label-alt)", marginTop: 4 }}>
-              직원 등록 탭에서 노선을 배정하세요
+              승객 등록 탭에서 노선을 배정하세요
             </div>
           </div>
         ) : (
@@ -1750,7 +1750,7 @@ function OperationsMode({ codeData, code, routes }) {
               <div style={{ fontSize: 22, fontWeight: 800, color: "var(--color-positive)", fontFamily: "var(--font-brand)" }}>
                 {totalEmployees}
               </div>
-              <div style={{ fontSize: 11, color: "var(--color-label-mute)", fontWeight: 600, marginTop: 2 }}>전체 직원</div>
+              <div style={{ fontSize: 11, color: "var(--color-label-mute)", fontWeight: 600, marginTop: 2 }}>전체 승객</div>
             </div>
             <div style={S.statCard}>
               <div style={{ fontSize: 22, fontWeight: 800, color: "var(--color-cautionary)", fontFamily: "var(--font-brand)" }}>
@@ -1897,7 +1897,7 @@ function OperationsMode({ codeData, code, routes }) {
               borderRadius: 8, padding: 12, display: "flex", flexDirection: "column", gap: 8,
             }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: "var(--color-label)" }}>
-                자사 직원에게 공지가 발송됩니다. 발송하시겠습니까?
+                자사 승객에게 공지가 발송됩니다. 발송하시겠습니까?
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button

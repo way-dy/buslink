@@ -1,6 +1,6 @@
 {
-  "short_name": "BusLink 직원",
-  "name": "BusLink 직원",
+  "short_name": "BusLink 승객",
+  "name": "BusLink 승객",
   "icons": [
     {
       "src": "/icons/passenger.svg",

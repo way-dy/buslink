@@ -9,7 +9,7 @@
 const ICONS = {
   admin:     { favicon: "/icons/admin.svg",     apple: "/icons/admin-1024.png",     manifest: "/manifest.json",          title: "BusLink 관제",   install: "/icons/admin.svg" },
   driver:    { favicon: "/icons/driver.svg",    apple: "/icons/driver-1024.png",    manifest: "/manifest-driver.json",   title: "BusLink 기사",   install: "/icons/driver.svg" },
-  employee:  { favicon: "/icons/passenger.svg", apple: "/icons/passenger-1024.png", manifest: "/manifest-employee.json", title: "BusLink 직원",   install: "/icons/passenger.svg" },
+  employee:  { favicon: "/icons/passenger.svg", apple: "/icons/passenger-1024.png", manifest: "/manifest-employee.json", title: "BusLink 승객",   install: "/icons/passenger.svg" },
   partner:   { favicon: "/icons/partner.svg",   apple: "/icons/passenger-1024.png", manifest: "/manifest-partner.json",  title: "BusLink 협력사", install: "/icons/partner.svg" },
   // 승객앱(/bus, 공용 딥링크) — passenger 아이콘 공유. 별도 매니페스트 없음 → 기본 사용.
   passenger: { favicon: "/icons/passenger.svg", apple: "/icons/passenger-1024.png", manifest: "/manifest.json",          title: "BusLink",        install: "/icons/passenger.svg" },

@@ -2683,7 +2683,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
             {partners.map(p=><option key={p.code} value={p.code}>{p.partnerName}</option>)}
           </select>
           <div style={{ display:"flex", gap:8, marginBottom:4 }}>
-            {["출근","퇴근"].map(t=>(
+            {["출근","퇴근","셔틀"].map(t=>(
               <button key={t} onClick={()=>setForm({...form,type:t})}
                 style={{...S.editBtn,flex:1,padding:"9px",background:form.type===t?"var(--color-primary)":"var(--color-bg-soft)",color:form.type===t?"#fff":"var(--color-label-mute)",border:form.type===t?"none":"1px solid var(--color-line)",cursor:"pointer",fontFamily:"inherit"}}>
                 {t}
@@ -2707,11 +2707,11 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
           <select style={S.input} value={form.boardingMode}
             onChange={e=>setForm({...form, boardingMode:e.target.value})}>
             <option value="">협력사 정책 따름 (기본)</option>
-            <option value="driver-qr">기사 발행 → 직원 스캔 (강제)</option>
-            <option value="passenger-qr">직원 발행 → 기사 스캔 (강제)</option>
+            <option value="driver-qr">기사 발행 → 승객 스캔 (강제)</option>
+            <option value="passenger-qr">승객 발행 → 기사 스캔 (강제)</option>
           </select>
           <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:-2, marginBottom:6, lineHeight:1.4 }}>
-            여러 협력사 직원이 같이 타는 혼승 노선은 "강제"로 한쪽을 명시하세요.
+            여러 협력사 승객이 같이 타는 혼승 노선은 "강제"로 한쪽을 명시하세요.
           </div>
           <label style={S.label}>메모</label>
           <input style={S.input} placeholder="비고 사항" value={form.memo} onChange={e=>setForm({...form,memo:e.target.value})} />
@@ -3667,7 +3667,7 @@ function BoardingStatsTab({ companyId, allowed }) {
               <div style={statSub}>{date}</div>
             </div>
             <div style={statCard}>
-              <div style={statLabel}>고유 직원</div>
+              <div style={statLabel}>고유 승객</div>
               <div style={{ ...statValue, color: "var(--color-positive)" }}>{new window.Set(filtered.map(b => b.empNo)).size}<span style={statUnit}>명</span></div>
               <div style={statSub}>중복 제외</div>
             </div>
@@ -3929,7 +3929,7 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
         boardingMode: modeEditValue,
       });
       setModeEditTarget(null);
-      alert(`'${modeEditTarget.partnerName}' 협력사의 탑승 QR 방향이 변경되었습니다.\n\n해당 협력사 직원들은 다음 로그인부터 새 모드가 적용됩니다.`);
+      alert(`'${modeEditTarget.partnerName}' 협력사의 탑승 QR 방향이 변경되었습니다.\n\n해당 협력사 승객들은 다음 로그인부터 새 모드가 적용됩니다.`);
     } catch (e) {
       alert("오류: " + (e?.message || String(e)));
     }
@@ -3958,7 +3958,7 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
       const total = snap.size;
       const activeCount = snap.docs.filter(d => d.data().active).length;
       const warn = total > 0
-        ? `\n\n⚠ 이 협력사 소속 직원 ${total}명(재직 ${activeCount}명)이 등록되어 있습니다.\n협력사 삭제 시 직원 데이터는 남지만 협력사 연결이 끊깁니다.`
+        ? `\n\n⚠ 이 협력사 소속 승객 ${total}명(재직 ${activeCount}명)이 등록되어 있습니다.\n협력사 삭제 시 승객 데이터는 남지만 협력사 연결이 끊깁니다.`
         : "";
       if (!window.confirm(`${code.partnerName} (${code.code}) 협력사를 영구 삭제하시겠습니까?${warn}\n\n이 작업은 되돌릴 수 없습니다.`)) return;
       await deleteDoc(doc(db, "partnerCodes", code.id));
@@ -4028,7 +4028,7 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
                       {/* boardingMode 배지 — passenger-qr 만 표시(driver-qr=기본·노이즈 회피). 2026-05-27 */}
                       {c.boardingMode === "passenger-qr" && (
                         <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#FFF1E0", color: "#B95300", border: "1px solid #FFE0C2", fontWeight: 700 }}>
-                          직원발행 QR
+                          승객발행 QR
                         </span>
                       )}
                     </div>
@@ -4077,7 +4077,7 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
             <div style={{ marginTop: 20, background: "var(--color-bg-alt)", borderRadius: 12, overflow: "hidden" }}>
               <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--color-line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontWeight: 700, color: "var(--color-primary)" }}>
-                  {codes.find(c => c.id === selectedCode)?.partnerName} 직원 목록
+                  {codes.find(c => c.id === selectedCode)?.partnerName} 승객 목록
                 </span>
                 <div style={{ display: "flex", gap: 10 }}>
                   <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-positive)" }}>재직 {passengers.filter(p => p.active).length}명</span>
@@ -4091,7 +4091,7 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
                   </thead>
                   <tbody>
                     {passengers.length === 0
-                      ? <tr><td colSpan={5} style={{ ...S.td, textAlign: "center", color: "var(--color-label-alt)" }}>등록된 직원이 없습니다</td></tr>
+                      ? <tr><td colSpan={5} style={{ ...S.td, textAlign: "center", color: "var(--color-label-alt)" }}>등록된 승객이 없습니다</td></tr>
                       : passengers.map(p => (
                         <tr key={p.id} style={S.tr}>
                           <td style={{ ...S.td, fontFamily: "monospace", fontSize: 12 }}>{p.empNo}</td>
@@ -4127,8 +4127,8 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
           <label style={S.label}>탑승 QR 방향</label>
           <select style={S.input} value={form.boardingMode}
             onChange={e => setForm({ ...form, boardingMode: e.target.value })}>
-            <option value="driver-qr">기사 발행 → 직원 스캔 (기본)</option>
-            <option value="passenger-qr">직원 발행 → 기사 스캔 (직원 카메라 없을 때)</option>
+            <option value="driver-qr">기사 발행 → 승객 스캔 (기본)</option>
+            <option value="passenger-qr">승객 발행 → 기사 스캔 (승객 카메라 없을 때)</option>
           </select>
           <div style={{ background: "#FFF1E0", border: "1px solid #FFE0C2", borderRadius: 8, padding: "10px 14px", fontSize: 12, fontWeight: 500, color: "#B95300" }}>
             ⓘ 유효기간 1년 · 발급 후 협력사 담당자에게 코드를 전달하세요
@@ -4153,11 +4153,11 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
           </div>
           <label style={S.label}>QR 방향</label>
           <select style={S.input} value={modeEditValue} onChange={e => setModeEditValue(e.target.value)}>
-            <option value="driver-qr">기사 발행 → 직원 스캔 (기본)</option>
-            <option value="passenger-qr">직원 발행 → 기사 스캔 (직원 카메라 없을 때)</option>
+            <option value="driver-qr">기사 발행 → 승객 스캔 (기본)</option>
+            <option value="passenger-qr">승객 발행 → 기사 스캔 (승객 카메라 없을 때)</option>
           </select>
           <div style={{ background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#003A99", lineHeight: 1.55 }}>
-            ⓘ 변경 후, 이 협력사 소속 직원·기사는 <b>다음 로그인부터</b> 새 모드가 적용됩니다.
+            ⓘ 변경 후, 이 협력사 소속 승객·기사는 <b>다음 로그인부터</b> 새 모드가 적용됩니다.
             노선당 한쪽 방향만 동작 — 같은 노선에서 양방향 동시 허용되지 않습니다.
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
@@ -4332,7 +4332,7 @@ function NoticeTab({ companyId, allowed }) {
           {fail > 0 && (
             <div style={{ fontSize:11, color:"#A86500", marginTop:4, fontWeight:500, lineHeight:1.55 }}>
               ※ 실패 토큰은 자동 정리됩니다(만료/무효 토큰).<br/>
-              📌 해당 직원이 EmployeeApp(<code>/p</code>) 재로그인 + 설정 → 🔔 알림 진단 → 재발급 필요
+              📌 해당 승객이 EmployeeApp(<code>/p</code>) 재로그인 + 설정 → 🔔 알림 진단 → 재발급 필요
             </div>
           )}
         </div>
@@ -4341,9 +4341,9 @@ function NoticeTab({ companyId, allowed }) {
     if (s === "no_tokens") {
       return (
         <div style={{ background:"#FFF7E0", border:"1px solid #F6E0A0", borderRadius:8, padding:"10px 14px", fontSize:13, color:"#8A6500", fontWeight:600 }}>
-          ⚠ 발송 대상 토큰이 없습니다 — 직원이 EmployeeApp 에서 알림 권한을 허용해야 합니다
+          ⚠ 발송 대상 토큰이 없습니다 — 승객이 EmployeeApp 에서 알림 권한을 허용해야 합니다
           <div style={{ fontSize:11, color:"#8A6500", marginTop:6, fontWeight:500, lineHeight:1.55 }}>
-            📌 원인: 해당 협력사 직원이 EmployeeApp(<code>/p</code>) → <b>설정</b> 탭 → <b>🔔 알림 진단</b>에서<br/>
+            📌 원인: 해당 협력사 승객이 EmployeeApp(<code>/p</code>) → <b>설정</b> 탭 → <b>🔔 알림 진단</b>에서<br/>
             권한 허용 + 토큰 재발급 필요(이전 토큰이 만료되어 자동 삭제되었을 수 있음)
           </div>
         </div>
@@ -4380,7 +4380,7 @@ function NoticeTab({ companyId, allowed }) {
 
         {/* ── 진단 패널 — 알림 수신 가능 분포 ─────────────── */}
         <div style={{ background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:10, padding:"12px 14px", boxShadow:"var(--shadow-emphasize)" }}>
-          <div style={{ fontSize:12, fontWeight:700, color:"var(--color-label-mute)", marginBottom:8 }}>📊 알림 수신 가능 직원 분포 (fcmTokens)</div>
+          <div style={{ fontSize:12, fontWeight:700, color:"var(--color-label-mute)", marginBottom:8 }}>📊 알림 수신 가능 승객 분포 (fcmTokens)</div>
           <div style={{ display:"flex", flexWrap:"wrap", gap:8, alignItems:"center" }}>
             <span style={{ background:"var(--color-primary-soft)", color:"var(--color-primary-deep)", borderRadius:8, padding:"4px 10px", fontSize:12, fontWeight:700 }}>
               전체 {tokens.length}건
@@ -4403,8 +4403,8 @@ function NoticeTab({ companyId, allowed }) {
           </div>
           {tokens.length === 0 && (
             <div style={{ marginTop:8, fontSize:11, color:"#A86500", lineHeight:1.55 }}>
-              ※ 등록된 FCM 토큰이 0건입니다. 직원이 EmployeeApp 에서 알림 권한을 허용해야 합니다.<br/>
-              📌 토큰이 invalid 상태였다면 발송 시 자동 삭제되어 0건이 됩니다 — 직원 본인이<br/>
+              ※ 등록된 FCM 토큰이 0건입니다. 승객이 EmployeeApp 에서 알림 권한을 허용해야 합니다.<br/>
+              📌 토큰이 invalid 상태였다면 발송 시 자동 삭제되어 0건이 됩니다 — 승객 본인이<br/>
               <code>/p</code> → <b>설정</b> → <b>🔔 알림 진단</b> → <b>재발급</b> 버튼으로 갱신 가능
             </div>
           )}
@@ -4442,12 +4442,12 @@ function NoticeTab({ companyId, allowed }) {
             allowedCodes={allowed}
           />
           <div style={{ marginTop:6, fontSize:12, color: targetCount === 0 ? "#A81818" : "var(--color-primary-deep)", fontWeight:600 }}>
-            📡 이 발송으로 알림을 받을 직원: <span style={{ fontSize:14, fontWeight:800 }}>{targetCount}명</span>
+            📡 이 발송으로 알림을 받을 승객: <span style={{ fontSize:14, fontWeight:800 }}>{targetCount}명</span>
             {partnerCode !== "전체" && <span style={{ color:"var(--color-label-mute)", fontWeight:500 }}> ({partnerNameOf(partnerCode)})</span>}
           </div>
           {targetCount === 0 && (
             <div style={{ marginTop:6, background:"#FFF7E0", border:"1px solid #F6E0A0", borderRadius:8, padding:"8px 12px", fontSize:11, color:"#8A6500", fontWeight:600 }}>
-              ⚠ 발송할 토큰이 없습니다 — 해당 협력사 직원이 EmployeeApp 에서 알림 권한을 허용해야 합니다
+              ⚠ 발송할 토큰이 없습니다 — 해당 협력사 승객이 EmployeeApp 에서 알림 권한을 허용해야 합니다
             </div>
           )}
         </div>

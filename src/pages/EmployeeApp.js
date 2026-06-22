@@ -255,7 +255,7 @@ export default function EmployeeApp() {
     applyAppManifest({
       manifestHref: "/manifest-employee.json",
       appleTouchHref: "/icons/passenger-1024.png",
-      title: "BusLink 직원",
+      title: "BusLink 승객",
     });
   }, []);
 
@@ -458,7 +458,7 @@ function LoginScreen({ companyId, onLogin }) {
     <div style={S.fullCenter}>
       <div style={S.loginCard}>
         <div style={S.header}>
-          <BusLinkLogo size={26} sub="직원 탑승 서비스" />
+          <BusLinkLogo size={26} sub="승객 탑승 서비스" />
         </div>
         <div style={{ fontSize: 20, fontWeight: 800, color: "var(--color-label)", letterSpacing: "-0.02em", marginBottom: 4 }}>로그인</div>
         <div style={{ fontSize: 13, color: "var(--color-label-mute)", marginBottom: 18, lineHeight: 1.55 }}>

@@ -245,6 +245,6 @@ export function downloadSampleExcel() {
   ]);
   ws["!cols"] = [{ wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 16 }];
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "직원명부");
-  XLSX.writeFile(wb, "BusLink_직원명부_양식.xlsx");
+  XLSX.utils.book_append_sheet(wb, ws, "승객명부");
+  XLSX.writeFile(wb, "BusLink_승객명부_양식.xlsx");
 }
