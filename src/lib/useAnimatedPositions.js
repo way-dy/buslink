@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
-const ANIM_DURATION = 1500; // 1.5초 동안 부드럽게 이동
+const ANIM_DURATION = 1500; // 기본/폴백 이동 시간(첫 도착·간격 미기록 시)
+const MIN_DUR = 1200;       // per-vehicle 동적 duration 하한
+const MAX_DUR = 8000;       // per-vehicle 동적 duration 상한
 
 function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-function easeInOutCubic(t) {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
 }
 
 /**
@@ -20,6 +22,8 @@ export function useAnimatedPositions(rawVehicles) {
   const prevPositions = useRef({}); // { vehicleId: { lat, lng } }
   const targetPositions = useRef({}); // { vehicleId: { lat, lng } }
   const animStartTime = useRef({}); // { vehicleId: timestamp }
+  const lastArrivalTime = useRef({}); // { vehicleId: 마지막 타겟 갱신 시각 } — 도착 간격 측정용
+  const durRef = useRef({}); // { vehicleId: 동적 이동 시간(ms) } = 실제 도착 간격(clamp)
   const rafRef = useRef(null);
   const rawRef = useRef(rawVehicles);
 
@@ -51,7 +55,13 @@ export function useAnimatedPositions(rawVehicles) {
         prevPositions.current[id] = { lat: currentDisplay.lat, lng: currentDisplay.lng };
       }
       targetPositions.current[id] = { ...newPos };
-      animStartTime.current[id] = performance.now();
+      const now = performance.now();
+      // per-vehicle 동적 duration = 실제 도착 간격(clamp) — "받은 시간만큼" 이동해 정지 구간 제거.
+      // 첫 도착·기록 없음 = 기본 ANIM_DURATION.
+      const prevArrival = lastArrivalTime.current[id];
+      durRef.current[id] = prevArrival ? clamp(now - prevArrival, MIN_DUR, MAX_DUR) : ANIM_DURATION;
+      lastArrivalTime.current[id] = now;
+      animStartTime.current[id] = now;
     });
   }, [rawVehicles]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -73,8 +83,8 @@ export function useAnimatedPositions(rawVehicles) {
       }
 
       const elapsed = now - startTime;
-      const progress = Math.min(elapsed / ANIM_DURATION, 1);
-      const eased = easeInOutCubic(progress);
+      const progress = Math.min(elapsed / (durRef.current[id] || ANIM_DURATION), 1);
+      const eased = progress; // 선형(등속) — 구간별 감속·가속 제거, 연속 추적
 
       if (progress < 1) hasActiveAnimation = true; // ★ 아직 움직이는 차량 있음
 

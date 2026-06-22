@@ -69,6 +69,20 @@ function timeSince(ts) {
   return `${Math.floor(sec / 3600)}시간 전`;
 }
 
+// gps 문서 신선도 — updatedAt(serverTimestamp, gps.js:77) 이 ~60초 이내면 fresh.
+// null/pending(쓰기 직후 serverTimestamp 미해결) = 0=방금=fresh 취급.
+const GPS_FRESH_MS = 60000;
+function gpsAgeMs(updatedAt) {
+  if (!updatedAt) return 0;
+  if (updatedAt.toMillis) return Date.now() - updatedAt.toMillis();
+  const d = updatedAt.toDate ? updatedAt.toDate() : new Date(updatedAt);
+  const ms = d.getTime();
+  return isNaN(ms) ? 0 : Date.now() - ms;
+}
+function isGpsFresh(updatedAt) {
+  return gpsAgeMs(updatedAt) < GPS_FRESH_MS;
+}
+
 // ═══════════════════════════════════════════════════════
 export default function AdminApp({ user, companyId, role, allowedPartnerCodes }) {
   const [tab, setTab] = useState(0);
@@ -266,7 +280,7 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
         )}
 
         {tab === 0 && <ErrorBoundary label="대시보드"><DashboardTab companyId={activeCompanyId} drivers={drivers} vehicles={vehicles} onNav={setTab} onManageRoutes={(pc) => { setRoutesFocusPartner(pc); setTab(4); }} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
-        {tab === 1 && <ErrorBoundary label="실시간 관제"><MapTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
+        {tab === 1 && <ErrorBoundary label="실시간 관제"><MapTab companyId={activeCompanyId} allowed={allowed} drivers={drivers} /></ErrorBoundary>}
         {tab === 2 && <ErrorBoundary label="배차 관리"><DispatchTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
         {tab === 3 && <ErrorBoundary label="배차 일정"><DispatchScheduleTab companyId={activeCompanyId} vehicles={vehicles} drivers={drivers} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
         {tab === 4 && <ErrorBoundary label="노선 관리"><RoutesTab companyId={activeCompanyId} allowed={allowed} currentUserUid={user?.uid} focusPartnerCode={routesFocusPartner} onFocusConsumed={() => setRoutesFocusPartner(null)} /></ErrorBoundary>}
@@ -359,9 +373,14 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
   const driving = visibleDrivers.filter(d => d.status === "운행중").length;
   const waiting = visibleDrivers.filter(d => d.status !== "운행중").length;
 
+  // GPS 미수신 기사(2026-06-23): status="운행중" 인데 그 차량의 gps 문서가 없거나 stale(>60초).
+  // 신선 GPS 수신중인 vehicleId 집합(좌표 유효 + isGpsFresh). gpsVehicles 전체로 산출(visibleDrivers 와 vehicleId 교차).
+  const liveVehIds = new Set(gpsVehicles.filter(g => g.lat && g.lng && isGpsFresh(g.updatedAt)).map(g => g.vehicleId));
+  const noGpsDrivers = visibleDrivers.filter(d => d.status === "운행중" && !liveVehIds.has(d.vehicleId));
+
   const stats = [
     { label: "오늘 배차 노선", value: filteredDispatches.length, sub: partnerCode === "전체" ? "금일 등록 기준" : "선택 협력사 기준", color: "var(--color-primary)" },
-    { label: "운행중 차량", value: filteredGps.length, sub: `기사 운행중 ${driving}명`, color: "var(--color-positive)" },
+    { label: "운행중 차량", value: filteredGps.length, sub: `기사 운행중 ${driving}명${noGpsDrivers.length > 0 ? ` · GPS 미수신 ${noGpsDrivers.length}` : ""}`, color: "var(--color-positive)" },
     { label: "오늘 탑승 인원", value: filteredBoardings.length, sub: "QR 탑승 기준", color: "var(--color-positive)" },
     { label: "전체 기사", value: visibleDrivers.length, sub: `대기 ${waiting}명`, color: "var(--color-primary-deep)" },
   ];
@@ -483,17 +502,26 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
                   <tr><th style={S.th}>이름</th><th style={S.th}>차량</th><th style={S.th}>상태</th></tr>
                 </thead>
                 <tbody>
-                  {visibleDrivers.slice(0, 8).map(d => (
+                  {visibleDrivers.slice(0, 8).map(d => {
+                    const noGps = d.status === "운행중" && !liveVehIds.has(d.vehicleId);
+                    return (
                     <tr key={d.id} style={S.tr}>
                       <td style={{ ...S.td, fontWeight:600 }}>{d.name}</td>
                       <td style={{ ...S.td, color:"var(--color-label-mute)", fontSize:12 }}>{d.vehicleNo || "–"}</td>
                       <td style={S.td}>
-                        <span style={{ ...S.statusBadge, background:d.status==="운행중"?"#E6F7EB":"var(--color-bg-soft)", color:d.status==="운행중"?"#007A29":"var(--color-label-mute)" }}>
-                          ●{d.status ?? "대기"}
-                        </span>
+                        {noGps ? (
+                          <span style={{ ...S.statusBadge, background:"#FFF4E5", color:"#B26A00" }} title="운행중인데 GPS 위치 신호가 들어오지 않습니다">
+                            ⚠ GPS 미수신
+                          </span>
+                        ) : (
+                          <span style={{ ...S.statusBadge, background:d.status==="운행중"?"#E6F7EB":"var(--color-bg-soft)", color:d.status==="운행중"?"#007A29":"var(--color-label-mute)" }}>
+                            ●{d.status ?? "대기"}
+                          </span>
+                        )}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -554,6 +582,22 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
           )}
         </div>
 
+        {/* ⚠ 운행중인데 GPS 미수신 경고 카드(2026-06-23) — 0명이면 미표시 */}
+        {noGpsDrivers.length > 0 && (
+          <div style={{ background:"#FFF4E5", border:"1px solid #F0C36D", borderRadius:12, padding:"14px 18px", marginTop:16, boxShadow:"var(--shadow-emphasize)" }}>
+            <div style={{ fontWeight:700, marginBottom:10, color:"#B26A00" }}>⚠ 운행중인데 GPS 미수신 ({noGpsDrivers.length}대)</div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:10 }}>
+              {noGpsDrivers.map(d => (
+                <div key={d.id} style={{ background:"#FFFBF4", border:"1px solid #F0C36D", borderRadius:8, padding:"8px 14px", fontSize:12 }}>
+                  <span style={{ fontWeight:700, color:"var(--color-label)" }}>{d.name}</span>
+                  <span style={{ color:"var(--color-label-mute)", marginLeft:8 }}>{d.vehicleNo || "차량 미지정"}</span>
+                  <span style={{ color:"#B26A00", marginLeft:8 }}>위치 신호 없음</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* GPS 수신 현황 */}
         {filteredGps.length > 0 && (
           <div style={{ background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:12, padding:"14px 18px", marginTop:16, boxShadow:"var(--shadow-emphasize)" }}>
@@ -599,7 +643,7 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
 // ═══════════════════════════════════════════════════════
 // 탭1: 실시간 관제
 // ═══════════════════════════════════════════════════════
-function MapTab({ companyId, allowed }) {
+function MapTab({ companyId, allowed, drivers }) {
   const [rawVehicles, setRawVehicles] = useState([]);
   const [selected, setSelected] = useState(null);
   const [center, setCenter] = useState({ lat: 37.3894, lng: 126.9522 });
@@ -669,6 +713,16 @@ function MapTab({ companyId, allowed }) {
 
   // 운행중(좌표 유효) 차량만 카운트 — 실데이터 기반(가짜 KPI 미도입)
   const liveCount = vehicles.filter(v => v.lat && v.lng).length;
+
+  // GPS 미수신(운행중) 기사(2026-06-23): status="운행중" 인데 신선 GPS 없는 기사.
+  // 신선 vehicleId 집합 = rawVehicles(라이브 gps 문서) 중 좌표 유효 + isGpsFresh.
+  // 제한 admin 게이팅: isAllAccess 아니면 오늘 보이는 배차(visibleDispatches) 의 driverId 집합에 든 기사만(타 협력사 기사 노출 차단).
+  const liveSet = new Set(rawVehicles.filter(v => v.lat && v.lng && isGpsFresh(v.updatedAt)).map(v => v.vehicleId));
+  const visibleDriverIds = isAllAccess(allowed) ? null : new Set(visibleDispatches.map(d => d.driverId).filter(Boolean));
+  const noGpsRunning = (drivers || []).filter(d =>
+    d.status === "운행중" && !liveSet.has(d.vehicleId) &&
+    (isAllAccess(allowed) || visibleDriverIds.has(d.id))
+  );
 
   return (
     <div style={MS.wrap}>
@@ -750,6 +804,19 @@ function MapTab({ companyId, allowed }) {
             );
           })}
         </div>
+        {/* ⚠ GPS 미수신(운행중) — 좌표 없어 지도 마커 못 찍음 → 레일 경고로 표기(2026-06-23) */}
+        {noGpsRunning.length > 0 && (
+          <div style={{ borderTop:"1px solid var(--color-line)", padding:"10px 12px", background:"#FFF4E5" }}>
+            <div style={{ fontSize:12, fontWeight:700, color:"#B26A00", marginBottom:8 }}>⚠ GPS 미수신 (운행중) {noGpsRunning.length}</div>
+            {noGpsRunning.map(d => (
+              <div key={d.id} style={{ fontSize:11, color:"var(--color-label)", padding:"3px 0" }}>
+                <span style={{ fontWeight:700 }}>{d.name}</span>
+                <span style={{ color:"var(--color-label-mute)", marginLeft:6 }}>{d.vehicleNo || "차량 미지정"}</span>
+                <span style={{ color:"#B26A00", marginLeft:6 }}>신호 없음</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       )}
 
