@@ -24,6 +24,7 @@ import InstallPrompt, { InstallGuide } from "../components/InstallPrompt";
 import { applyAppManifest } from "../lib/pwaManifest";
 import PermissionGate from "../components/PermissionGate";
 import { resolveCompanyIdForAnon } from "../lib/companyResolver";
+import { useExitConfirm } from "../lib/useExitConfirm";
 
 // ── 경로 진행 판정 임계값 (작업2, 2026-05-18) ──
 // 버스 투영 수직거리가 이 값 초과면 경로 이탈로 보고 진행거리 갱신·지나온경로 그리기에서 제외
@@ -229,6 +230,9 @@ export default function EmployeeApp() {
   // 백그라운드 → foreground 복귀 시 공지 onSnapshot 재구독(stale 리스너 신선화).
   // 통근버스 사용자는 등하교 전후 장시간 백그라운드 상태가 흔함(issues.md useWakeTick 패턴).
   const wakeTick = useWakeTick();
+
+  // 뒤로가기 종료 확인(마운트 시 1회 발판 push, 인증/로딩 분기와 무관).
+  useExitConfirm();
 
   // 익명 인증
   useEffect(() => {

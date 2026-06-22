@@ -1,3 +1,6 @@
+/* 라이트 테마 고정 — OS auto-dark 가 페이지를 어둡게 칠하는 것 차단(2026-06-22, public/index.html meta 와 짝). */
+:root { color-scheme: light; }
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',

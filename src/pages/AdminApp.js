@@ -5,7 +5,7 @@ import { signOut } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import {
   collection, onSnapshot, query, where,
-  doc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, setDoc, orderBy
+  doc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, orderBy
 } from "firebase/firestore";
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { sendGPS } from "../lib/gps";
@@ -2194,7 +2194,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
     ? partners
     : partners.filter(p => allowed.includes(p.code));
 
-  const shifts = ["주간조","야간조","오전조","오후조"];
+  const shifts = ["주간조","야간조","오전조","오후조","등교","하교"];
 
   return (
     <div style={{ ...S.panel, position:"relative" }}>
@@ -2884,7 +2884,10 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
       } else {
         data.createdAt = new Date().toISOString();
         data.createdBy = currentUserUid || null;
-        await setDoc(doc(db,"companies",companyId,"vehicles",`vehicle_${String(vehicles.length+1).padStart(3,"0")}`),data);
+        // 자동 ID(addDoc) — 배열 길이 기반 `vehicle_NNN` 은 삭제 후 재등록·다중 admin 동시
+        // 등록 시 같은 ID 재생성→기존 차량 덮어쓰기(데이터 손실). 기존 vehicle_NNN 차량은
+        // ID 유지(배차/gps 가 vehicleId 값 참조) — 신규만 자동 ID라 무영향(2026-06-22).
+        await addDoc(collection(db,"companies",companyId,"vehicles"),data);
       }
       setShowForm(false);
     } catch (e) { alert("저장 중 오류: "+e.message); }

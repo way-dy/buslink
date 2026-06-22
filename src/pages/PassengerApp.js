@@ -12,6 +12,7 @@ import { useWakeTick } from "../lib/useWakeTick";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 import { resolveCompanyIdForAnon } from "../lib/companyResolver";
+import { useExitConfirm } from "../lib/useExitConfirm";
 
 // ── 경로 진행 판정 임계값 (작업2, 2026-05-18 — EmployeeApp과 동일 정책) ──
 const OFF_ROUTE_M = 70;       // 버스 투영 수직거리 초과 시 경로 이탈로 보고 직전 진행 유지
@@ -49,6 +50,8 @@ function saveRoute(cid, rid) {
 }
 
 export default function PassengerApp() {
+  // 뒤로가기 종료 확인(마운트 시 1회 발판 push, 인증/로딩 분기와 무관).
+  useExitConfirm();
   // Phase 1.1 (2026-05-28): URL param > hostname 매핑 > dy001.
   // PassengerApp 의 localStorage 키 `buslink_passenger_route_{cid}` 는 노선 저장용
   // (companyId 분리 키 없음 — 키 자체에 cid 가 들어있어 chicken-and-egg). URL+hostname 만.

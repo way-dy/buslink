@@ -17,6 +17,7 @@ import InstallPrompt from "../components/InstallPrompt";
 import { applyAppManifest } from "../lib/pwaManifest";
 import PermissionGate from "../components/PermissionGate";
 import { resolveByHostname } from "../lib/companyResolver";
+import { useExitConfirm } from "../lib/useExitConfirm";
 
 // 2026-06-01 — stopArrivals 기록 위임 채널(CF `recordStopArrival`).
 // 클라이언트 직접 updateDoc 이 silent fail(rules 매핑·drivers.uid 누락 등) 하던 결함
@@ -40,6 +41,8 @@ const DRIVER_BUILD = "2026-06-09-livegps";
 //    목업의 가짜 수치(속도 42·GPS ±4m·탑승 38/45·가짜 시간·회차)는 도입 금지 —
 //    실제 dispatch/stops/currentStopIdx 데이터만 리스킨.
 export default function DriverApp({ companyId: propCompanyId }) {
+  // 뒤로가기 종료 확인(마운트 시 1회 발판 push, 인증/로딩 분기와 무관).
+  useExitConfirm();
   const [driver, setDriver] = useState(null);
   // 다중 배차 지원: 같은 기사·날짜에 dispatch 여러 건 가능 → 칩으로 선택.
   // 기존 `dispatch` 단일 참조는 derived 값으로 호환(아래 derived dispatch).
