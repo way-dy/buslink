@@ -82,6 +82,7 @@
 - [ ] (선택) gpsHistory TTL 정책 검토 — Firebase 콘솔에서 ts 필드 기준 90일 자동 삭제(저장 비용 작아도 운영 정리 측면).
 
 ## 백로그 / 검토 후보
+- [ ] 🧹 `.claude/issues.md` 161줄(>150 소프트캡) — 오래된 [해결] 항목(2026-05~06 초반·superseded)을 `issues-log.md`로 아카이브하고 issues.md는 최근/활성 패턴 + 인덱스만 유지(@import 토큰 절감). tasks-log.md 패턴 동일. (retro 2026-06-23 반복 플래그)
 - [ ] 🎯 운행 이력 정류장 반경 시각화 확장: ① 반경 동적 조정 슬라이더(50~300m) — 도착 감지 임계 튜닝 진단 ② routePath(노선 사전 경로) Polyline 보조 표시 — GPS 실 경로 ↔ routePath 일치도 검증 ③ 정류장 마커 클릭 시 stopArrivals 상세(actualAt/plannedAt/delaySec/estimated 백필 여부) 카드 ④ 통과 마커 클릭 시 가장 가까운 GPS 포인트 자동 강조(시각 차이 확인).
 - [ ] 📣 카카오 알림톡/SMS 병행 발송 — callcenter SENS 계정 재사용. 템플릿 심사 + Secret Manager 후 진행.
 - [ ] 🗓 한국 공휴일 정적 갱신 — `functions/holidays.js` + `src/lib/holidays.js` 2028년 말 전 2029~ 추가.
