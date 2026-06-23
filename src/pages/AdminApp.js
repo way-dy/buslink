@@ -647,6 +647,9 @@ function MapTab({ companyId, allowed, drivers }) {
   const [rawVehicles, setRawVehicles] = useState([]);
   const [selected, setSelected] = useState(null);
   const [center, setCenter] = useState({ lat: 37.3894, lng: 126.9522 });
+  // 최초 1회만 첫 차량으로 자동 센터(이후 스냅샷마다 list[0] 로 되돌아가 사용자 패닝·선택이
+  // 풀리던 결함 차단, 2026-06-23). 선택 차량 추적은 아래 별도 effect.
+  const didInitCenter = useRef(false);
   const [tick, setTick] = useState(0);
   const vehiclesAll = useAnimatedPositions(rawVehicles);
 
@@ -669,10 +672,21 @@ function MapTab({ companyId, allowed, drivers }) {
     return onSnapshot(q, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setRawVehicles(list);
-      if (list.length > 0 && list[0].lat && list[0].lng)
+      // 최초 진입 시 1회만 첫 차량으로 센터 — 이후 스냅샷마다 되돌아가지 않음(패닝·선택 보존).
+      if (!didInitCenter.current && list.length > 0 && list[0].lat && list[0].lng) {
         setCenter({ lat: list[0].lat, lng: list[0].lng });
+        didInitCenter.current = true;
+      }
     });
   }, [companyId]);
+
+  // 선택 차량 추적(2026-06-23) — 차량 클릭 시 그 차량 위치로 센터, 이동 시 GPS 갱신마다 따라감.
+  // 선택 해제("전체 보기") 시 자유 패닝(자동 센터 없음 → 사용자가 본 위치 유지).
+  useEffect(() => {
+    if (!selected) return;
+    const v = rawVehicles.find(x => x.id === selected.id);
+    if (v && v.lat && v.lng) setCenter({ lat: v.lat, lng: v.lng });
+  }, [selected, rawVehicles]);
 
   // 노선도 뷰용 — 노선/오늘 배차 구독(항상 로드, 토글 시 즉시 표시).
   useEffect(() => {
@@ -729,7 +743,8 @@ function MapTab({ companyId, allowed, drivers }) {
       {/* 지도 뷰 — 노선도 모드에선 숨김(컴포넌트 마운트 유지로 카카오 SDK 재로딩 회피) */}
       <div style={{ position:"absolute", inset:0, visibility: viewMode === "map" ? "visible" : "hidden" }}>
         <Map center={center} style={MS.map} level={7}>
-          {vehicles.map(v => v.lat && v.lng && (
+          {/* 선택 차량 있으면 그 차량만 표시(클릭 후 그 차량만 보기), 없으면 전체(2026-06-23) */}
+          {(selected ? vehicles.filter(v => v.id === selected.id) : vehicles).map(v => v.lat && v.lng && (
             <MapMarker key={v.id} position={{ lat:v.lat, lng:v.lng }} onClick={() => setSelected(v)} />
           ))}
         </Map>
@@ -774,7 +789,13 @@ function MapTab({ companyId, allowed, drivers }) {
       <div style={MS.leftRail}>
         <div style={MS.railHead}>
           <span style={MS.railTitle}>운행 중인 차량</span>
-          <Pill tone={liveCount > 0 ? "positive" : "neutral"} dot>{liveCount}대</Pill>
+          {selected ? (
+            <button onClick={() => setSelected(null)}
+              style={{ fontSize:11, fontWeight:700, color:"var(--color-primary-deep)", background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:6, padding:"3px 8px", cursor:"pointer", fontFamily:"inherit" }}
+              title="선택 해제 — 전체 차량 보기">✕ 전체 보기</button>
+          ) : (
+            <Pill tone={liveCount > 0 ? "positive" : "neutral"} dot>{liveCount}대</Pill>
+          )}
         </div>
         <div style={MS.railBody}>
           {vehicles.length === 0 ? (
