@@ -1090,8 +1090,6 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
                 const isLast    = i === stops.length - 1;
                 const isBusHere = busStopIdx === i;
                 const isPassed  = myStopIdx !== null && i < myStopIdx && busStopIdx >= 0 && i <= busStopIdx;
-                // 버스가 이 정류장과 다음 정류장 사이에 있는지 (노선도에 버스 아이콘 표시)
-                const showBusBetween = busStopIdx === i && !isBusHere;
 
                 return (
                   <div key={s.id} style={{ display: 'flex', alignItems: 'center' }}>
@@ -1141,12 +1139,9 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
                         background: busStopIdx >= 0 && i < busStopIdx ? 'var(--color-primary)' : 'var(--color-line)',
                         borderRadius: 2, position: 'relative'
                       }}>
-                        {/* 버스가 이 구간(i → i+1) 이동 중 — 키움 + 펄스 */}
+                        {/* 버스가 이 구간(i → i+1) 이동 중 — 점멸 방향 화살표(버스 2대 오인 방지, 2026-06-24 채드윅) */}
                         {busStopIdx === i && mainBus && (
-                          <div style={{ position: 'absolute', top: -10, left: '40%', width: 20, height: 20 }}>
-                            <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'var(--color-primary)', opacity: 0.5, animation: 'buspulse 2s ease-out infinite', pointerEvents: 'none' }} />
-                            <div style={{ position: 'absolute', inset: 0, background: 'var(--color-primary)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: '#fff', boxShadow: '0 0 0 3px rgba(0,102,255,.40)' }}>🚌</div>
-                          </div>
+                          <div style={{ position: 'absolute', top: -11, left: '50%', transform: 'translateX(-50%)', fontSize: 18, fontWeight: 900, color: 'var(--color-primary)', lineHeight: 1, animation: 'busblink 1s ease-in-out infinite', pointerEvents: 'none' }}>›</div>
                         )}
                       </div>
                     )}

@@ -140,6 +140,14 @@ html, body { font-family: var(--font-base); color: var(--color-label); -webkit-f
   100% { transform: scale(1.9); opacity: 0;    }
 }
 
+/* 노선도 스트립 구간 이동 중 점멸 방향 화살표 — EmployeeApp(/p)·PassengerApp(/bus).
+   버스 아이콘 이중 렌더(노드+커넥터)로 "버스 2대" 오인하던 것을 단일 버스 + 점멸 화살표로 분리.
+   2026-06-24 채드윅 요청. */
+@keyframes busblink {
+  0%, 100% { opacity: 1;   }
+  50%      { opacity: 0.2; }
+}
+
 /* 로딩 화면(components/LoadingScreen.js) — 스피너 회전 + 버스 살짝 떠오름.
    App.js 초기 로딩 게이트 전역(관제·기사·직원·승객·협력사 공통, 2026-06-08). */
 @keyframes blspin { to { transform: rotate(360deg); } }
