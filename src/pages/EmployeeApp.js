@@ -465,7 +465,7 @@ function LoginScreen({ companyId, onLogin }) {
           사번과 PIN을 입력하세요<br/>
           <span style={{ color: "var(--color-cautionary)", fontWeight: 600 }}>초기 PIN: 000000 (첫 로그인 후 변경 필요)</span>
         </div>
-        <input style={S.input} type="tel" inputMode="numeric" placeholder="사번"
+        <input style={S.input} type="text" inputMode="text" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="사번"
           value={empNo} onChange={e => setEmpNo(e.target.value)} autoFocus />
         <input style={{ ...S.input, marginTop: 10 }} type="password" inputMode="numeric"
           placeholder="PIN (4~6자리)" maxLength={6}

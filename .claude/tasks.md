@@ -4,7 +4,8 @@
 
 ## 현재 상태 (2026-06-16 세션 종료)
 > 이 저장소가 작업 정본. **어느 PC든** `git pull`(origin/master) + `.env.local`(↓부트스트랩, 카카오 키 `58bf34`)이면 빌드·배포 가능.
-> prod 라이브 = **`main.948fda8e.js`** + CF 23종 (2026-06-17 hosting 배포). 기사앱 빌드마커 `v2026-06-09-livegps`.
+> prod 라이브 = **`main.d60b67d6.js`** + CF 23종 (2026-06-25 hosting 배포). 기사앱 빌드마커 `v2026-06-09-livegps`.
+> **2026-06-25 세션(prod 배포)**: 배시현 점검 2건 — ① 직원앱(`/p`) 로그인 사번칸이 숫자 키보드만 떠 영문 입력 불가(`type="tel" inputMode="numeric"`) → `type="text"` 일반 키보드로 전환(autoCapitalize/Correct off). PIN칸은 숫자 유지. ② 운행시간 아닐 때 첫 정류장 "예상: 현재시간" 표시 → `stopSchedule.computeStopEstimates` 에 `inOperation`(차량위치 OR 실측도착 유무) 판정 추가, 운행 중 아니면 과거금지 클램프 미적용·계획시각 그대로 노출. 운행 중(inOperation=true)=기존 동작 100% 보존(회귀 0·테스트로 입증). 상세 issues.md `[패턴]`.
 > **2026-06-17 세션 추가**: EmployeeApp(`/p`) 노선 변경 모달이 전 거래처 노선 노출 → 직원 partnerCode 필터(모달+홈 폴백). 상세 issues.md `[패턴]`.
 > **2026-06-17 세션(prod 배포)**: 배차관리·배차일정·대시보드 기사현황에 createdBy 격리 확장(누락분) — 제한 admin(dy04)이 배차 안 보이던 것·대시보드에 회사 전체 기사 보이던 것 해소. canSeeDispatch/canSeeSchedule(노선 partnerCode∈allowed OR 노선/배차 createdBy===uid) + 신규/복사 createdBy 기록 + 폼 드롭다운 본인것만(전체권한 전체 유지). 마스터키=partnerCodes.createdBy(거래처에 createdBy만 있으면 전 탭 partnerCode 체인 자동노출). 레거시(채드윅 등) 거래처/기사는 슈퍼관리자 권한체크 or createdBy 백필 필요·신규는 자동. rules/indexes/CF 변경 0. 상세 issues.md `[패턴]`.
 > **2026-06-16 세션 누적(전부 prod 배포·master 커밋)**: ① **정류장 주소검색 무반응** = 카카오 키(`58bf34`) 신규 서브도메인(`admin.buslink.co.kr` 등) 미등록 → 지도+검색 동시 사망. **사용자가 카카오 콘솔 4개 서브도메인 등록 완료(해결)** + 코드측 `handleAddrSearch` 8초 워치독(콜백 미응답 시 "검색 중" 영구정지 차단). ② **본인 등록 거래처 배차가 배차관리에서 안 보임** = createdBy 가시성을 대시보드·협력사관리만 적용했던 누락 → AdminApp 최상위에서 `allowed = rawAllowed∪(createdBy==uid 거래처)` 합쳐 **전 탭 동일 적용**. 사용자 결정 "각자 생성 거래처는 권한 무관 항상 노출". rules/indexes/CF 변경 0. 상세 issues.md `[패턴]` 2건.

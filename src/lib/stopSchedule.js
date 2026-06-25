@@ -171,6 +171,13 @@ export function computeStopEstimates({
     ? vehiclePos : null;
   const spdKmh = (typeof speed === "number" && speed > 5) ? speed : 30;
 
+  // 운행 중 여부 — 차량 실시간 위치 또는 오늘 실측 도착이 하나라도 있으면 운행 중.
+  // 둘 다 없으면 "운행시간 아닐 때"(접속만 함) → 일정(계획시각)을 그대로 예상시각으로
+  // 노출하고, 과거 금지 클램프를 적용하지 않는다(과거 계획시각이 현재시각으로 끌려
+  // 올라가 "예상: 현재시간"으로 보이던 결함 차단, 2026-06-25). 운행 중이면 true 라
+  // 기존 동작 100% 보존(회귀 0).
+  const inOperation = v != null || Object.keys(arrivals).length > 0;
+
   // 차량 progress(routePath 기준) — 다음 1개 정류장 잔여거리 계산용.
   let busProgress = null;
   if (usePath && v) {
@@ -342,13 +349,29 @@ export function computeStopEstimates({
       if (prevEstMs != null) {
         estMs = Math.max(estMs, prevEstMs + MIN_STOP_GAP_SEC * 1000);
       }
-      estMs = Math.max(estMs, T_NOW + MIN_FUTURE_BUFFER_SEC * 1000);
+      // 과거 금지 클램프는 운행 중일 때만 — 운행 전엔 일정 기준 체인값을 그대로 노출
+      // (계획시각으로부터 전파된 시각이 현재로 끌려올라가 "예상: 현재시간" 되는 것 차단).
+      if (inOperation) estMs = Math.max(estMs, T_NOW + MIN_FUTURE_BUFFER_SEC * 1000);
       prevEstMs = estMs;
       out.push({
         stopId: s.id, plannedAt: null, estimatedAt: fmtHHMM(
           new Date(estMs).getHours() * 60 + new Date(estMs).getMinutes()
         ), delaySec: prevDelaySec,
         status: "unplanned", source: "fallback",
+      });
+      continue;
+    }
+
+    // (b-2) 운행 중이 아님(차량 위치·실측 도착 모두 없음) = "운행시간 아닐 때".
+    //   미래 클램프(과거 금지)가 과거 계획시각을 현재시각으로 끌어올려 "예상: 현재시간"
+    //   으로 보이던 결함(사용자 호소 2026-06-25) 차단. 일정(계획시각)을 그대로 예상
+    //   시각으로 표시한다. delaySec=null(운행 전이라 지연 개념 없음 → 라벨 미표시).
+    //   운행 중이면 inOperation=true 라 이 분기 미진입 → 기존 동작 100% 보존.
+    if (!inOperation) {
+      prevEstMs = plannedMs;
+      out.push({
+        stopId: s.id, plannedAt, estimatedAt: plannedAt, delaySec: null,
+        status: i === nextIdx ? "next" : "upcoming", source: "plan+delay",
       });
       continue;
     }
