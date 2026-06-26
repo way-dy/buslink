@@ -9,6 +9,7 @@ import {
 } from "firebase/firestore";
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { sendGPS } from "../lib/gps";
+import { forceReconnect } from "../lib/forceReconnect";
 import { createPartnerCode, getBoardingUrl } from "../lib/partner";
 import { sendNotice } from "../lib/notifications";
 import { compressImageFile } from "../lib/image";
@@ -651,7 +652,18 @@ function MapTab({ companyId, allowed, drivers }) {
   // 풀리던 결함 차단, 2026-06-23). 선택 차량 추적은 아래 별도 effect.
   const didInitCenter = useRef(false);
   const [tick, setTick] = useState(0);
+  const [refreshTick, setRefreshTick] = useState(0); // 노선 새로고침 버튼 → gps 재구독
+  const [refreshing, setRefreshing] = useState(false);
   const vehiclesAll = useAnimatedPositions(rawVehicles);
+
+  // 노선 새로고침(#2) — 기사 GPS 껐다 켜진 뒤 관제 화면에 위치 미반영 시 수동 재연결·재구독.
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    await forceReconnect();
+    setRefreshTick(t => t + 1);
+    setTimeout(() => setRefreshing(false), 600);
+  };
 
   // 노선도 뷰 (2026-05-26 추가): 지도/노선도 토글 + 일자별 배차 타임라인
   const [viewMode, setViewMode] = useState("map"); // "map" | "route"
@@ -678,7 +690,8 @@ function MapTab({ companyId, allowed, drivers }) {
         didInitCenter.current = true;
       }
     });
-  }, [companyId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, refreshTick]);
 
   // 선택 차량 추적(2026-06-23) — 차량 클릭 시 그 차량 위치로 센터, 이동 시 GPS 갱신마다 따라감.
   // 선택 해제("전체 보기") 시 자유 패닝(자동 센터 없음 → 사용자가 본 위치 유지).
@@ -781,6 +794,15 @@ function MapTab({ companyId, allowed, drivers }) {
           <span style={MS.topNow}>
             <StatusDot tone="positive" size={6} pulse /> 실시간 GPS 수신
           </span>
+        )}
+        {/* #2 — 노선 새로고침: 기사 GPS 껐다 켜진 뒤 위치 미반영 시 수동 재연결·재구독 */}
+        {!isPastDate && (
+          <button onClick={handleRefresh} disabled={refreshing}
+            title="GPS 위치를 즉시 다시 불러옵니다"
+            style={{ display:"inline-flex", alignItems:"center", gap:4, padding:"4px 10px", borderRadius:8, border:"1px solid var(--color-line)", background:"var(--color-bg-soft)", color:"var(--color-label-mute)", cursor: refreshing ? "default":"pointer", fontFamily:"inherit", fontSize:12, fontWeight:700, opacity: refreshing ? 0.6:1 }}>
+            <span style={{ display:"inline-block", animation: refreshing ? "blspin 0.8s linear infinite":"none" }}>↻</span>
+            {refreshing ? "새로고침 중" : "새로고침"}
+          </button>
         )}
       </div>
 

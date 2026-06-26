@@ -10,6 +10,7 @@ import { computeStopEstimates, formatDelayLabel, formatPassengerEta, describeEta
 import { useSmoothedEta } from "../lib/useSmoothedEta";
 import { useWakeTick } from "../lib/useWakeTick";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
+import { forceReconnect } from "../lib/forceReconnect";
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 import { resolveCompanyIdForAnon } from "../lib/companyResolver";
 import { useExitConfirm } from "../lib/useExitConfirm";
@@ -86,6 +87,18 @@ export default function PassengerApp() {
   // 통신 끊김→복구(online 전이) 시 Firestore reconnect 강제 + onSnapshot 재구독.
   // wakeTick(visibilitychange)와 별개 트리거 — 탭은 켜진 채 데이터망만 끊겼다 복구한 케이스.
   const recoverTick = useOnlineRecover({ forceFirestoreReconnect: true });
+  const [manualTick, setManualTick] = useState(0);     // 새로고침 버튼 → onSnapshot 재구독
+  const [refreshing, setRefreshing] = useState(false);
+
+  // 노선 새로고침(#2) — Firestore 강제 재연결 + GPS/dispatch onSnapshot 재구독.
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    await forceReconnect();
+    setManualTick(t => t + 1);
+    setLastUpdate(new Date());
+    setTimeout(() => setRefreshing(false), 600);
+  };
 
   // 노선 선택 확정 — active 노선 설정 + localStorage 저장(다음 방문 자동) + 재바인딩
   const chooseRoute = (rid) => {
@@ -154,7 +167,7 @@ export default function PassengerApp() {
         setCenter({ lat: list[0].lat, lng: list[0].lng });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId, routeId, ready, wakeTick, recoverTick]);
+  }, [companyId, routeId, ready, wakeTick, recoverTick, manualTick]);
 
   // 오늘 dispatch stopArrivals 구독(routeId 한정) — 정류장 리스트 계획·예상 시간 표시용.
   const [todayDispatch, setTodayDispatch] = useState(null);
@@ -178,8 +191,9 @@ export default function PassengerApp() {
       });
       setTodayDispatch({ stopArrivals: merged });
     }, () => setTodayDispatch(null));
+    // (manualTick: 노선 새로고침 버튼 재구독)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId, routeId, ready, wakeTick, recoverTick]);
+  }, [companyId, routeId, ready, wakeTick, recoverTick, manualTick]);
 
   const timeSince = (date) => {
     if (!date) return "";
@@ -487,7 +501,8 @@ export default function PassengerApp() {
                   textAlign: "center", lineHeight: 1.25,
                 }}>
                   <div style={{ fontSize: 10, fontWeight: 700 }}>{i+1}. {s.name}</div>
-                  {timeLabel && (
+                  {/* #5 — 도착/예상시각은 선택한 내 정류장에만 표시(전 정류장 표시 클러터 제거) */}
+                  {timeLabel && isMyStop && (
                     <div style={{ fontSize: 11, fontWeight: 700, color: timeColor, marginTop: 1 }}>{timeLabel}</div>
                   )}
                 </div>
@@ -497,7 +512,8 @@ export default function PassengerApp() {
 
           {/* 버스 마커 — 펄스 ring + 키운 pill (정지 시에도 시인성). 클릭 색반전 유지. */}
           {buses.map(b => b.lat && b.lng && (
-            <CustomOverlayMap key={b.id} position={{ lat: b.lat, lng: b.lng }} yAnchor={1.5}>
+            // #4 — yAnchor 0.5(중심 정렬)로 버스 pill 을 노선 라인 위에 안착(이전 1.5=라인보다 위로 뜸).
+            <CustomOverlayMap key={b.id} position={{ lat: b.lat, lng: b.lng }} yAnchor={0.5}>
               <div style={{ position: "relative", display: "inline-block" }}>
                 <span style={{
                   position: "absolute", inset: -2, borderRadius: 999,
@@ -595,10 +611,17 @@ export default function PassengerApp() {
             </span>
           </span>
         </div>
-        {/* 노선 변경 진입점 — 기준 노선 갱신 */}
-        <button onClick={() => { setRouteQuery(""); setShowPicker(true); }} style={S.changeRouteBtn}>
-          <Icon name="route" size={13} /> 노선 변경
-        </button>
+        {/* 노선 변경 + 새로고침(#2) 진입점 */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button onClick={() => { setRouteQuery(""); setShowPicker(true); }} style={S.changeRouteBtn}>
+            <Icon name="route" size={13} /> 노선 변경
+          </button>
+          <button onClick={handleRefresh} disabled={refreshing}
+            style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "5px 11px", borderRadius: "var(--radius-pill)", border: "1px solid var(--color-line)", cursor: refreshing ? "default" : "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, background: "var(--color-bg-soft)", color: "var(--color-label-mute)", opacity: refreshing ? 0.6 : 1 }}>
+            <span style={{ display: "inline-block", animation: refreshing ? "blspin 0.8s linear infinite" : "none" }}>↻</span>
+            {refreshing ? "새로고침 중" : "새로고침"}
+          </button>
+        </div>
       </div>
 
       {/* 노선 변경 모달 — 선택 시 chooseRoute로 기준노선 갱신·재바인딩 */}

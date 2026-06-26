@@ -15,6 +15,7 @@ import { computeStopEstimates, formatDelayLabel, formatPassengerEta, describeEta
 import { useSmoothedEta } from "../lib/useSmoothedEta";
 import { useWakeTick } from "../lib/useWakeTick";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
+import { forceReconnect } from "../lib/forceReconnect";
 
 import { validateAndBoard, createPassengerToken } from "../lib/boarding";
 import { hashPin } from "../lib/partner";
@@ -498,9 +499,32 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
   const [routePicker, setRoutePicker] = useState(false); // 노선 변경 모달 표시
   const [routeQuery, setRouteQuery] = useState("");    // 노선 검색어
   const [stopInfo, setStopInfo]     = useState(null);  // 지도 정류장 클릭 정보 카드
+  const [manualTick, setManualTick] = useState(0);     // 노선 새로고침 버튼 → onSnapshot 재구독
+  const [refreshing, setRefreshing] = useState(false); // 새로고침 진행 표시
   const buses = useAnimatedPositions(rawBuses);
   const favorites = session.favorites || [];
   const lastBusProgressRef = useRef(null); // 경로 이탈 시 직전 유효 진행거리 유지
+  // 정류장 탭 시 사용자가 직접 센터를 옮긴 상태 — true 면 GPS 갱신 자동 재센터를 억제
+  // (탭한 정류장이 다음 GPS 틱에 버스↔내정류장 중점으로 즉시 밀려나던 결함 차단, #3).
+  const userCenteredRef = useRef(false);
+
+  // 노선 새로고침(#2) — Firestore 강제 재연결 + GPS/dispatch onSnapshot 재구독.
+  // 운행 중 기사 GPS 껐다 켜진 뒤 화면에 위치가 즉시 반영 안 되는 케이스 수동 해소.
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    await forceReconnect();
+    setManualTick(t => t + 1);
+    setLastUpdate(new Date());
+    setTimeout(() => setRefreshing(false), 600);
+  };
+
+  // 지도 정류장 마커/라벨 터치 — 정보 카드 + 그 정류장을 중앙으로(#3, 자동 재센터 억제).
+  const openStopInfo = (s, i) => {
+    userCenteredRef.current = true;
+    setCenter({ lat: s.lat, lng: s.lng });
+    setStopInfo({ ...s, idx: i });
+  };
 
   // 백그라운드 → foreground 복귀 시 onSnapshot 재구독(stale 리스너 신선화).
   // EmployeeApp(/p) 통근버스 사용자는 등하교 전후 장시간 백그라운드 상태가 흔함.
@@ -614,7 +638,7 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
       setLastUpdate(new Date());
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId, activeRouteId, wakeTick, recoverTick]);
+  }, [companyId, activeRouteId, wakeTick, recoverTick, manualTick]);
 
   // ── 오늘 노선 dispatch 구독(stopArrivals 실 도착시각 수신) ────────
   // 활성 노선의 오늘 dispatch 1건(여러개면 첫 건) — driver 측이 도착 감지 시
@@ -643,7 +667,7 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
       setTodayDispatch({ stopArrivals: merged });
     }, () => setTodayDispatch(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId, activeRouteId, wakeTick, recoverTick]);
+  }, [companyId, activeRouteId, wakeTick, recoverTick, manualTick]);
 
   const mainBus   = buses[0] || null;
   const myStop    = myStopIdx !== null ? stops[myStopIdx] : null;
@@ -784,8 +808,11 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
           ? 'var(--color-cautionary)'
           : 'var(--color-primary)';
 
-  // 버스와 내 정류장 사이로 지도 중심 설정
+  // 버스와 내 정류장 사이로 지도 중심 설정 — 단, 사용자가 정류장을 직접 탭해
+  // 센터를 옮긴 뒤(userCenteredRef)에는 자동 재센터 억제(#3). 탭한 정류장이 다음
+  // GPS 갱신(~5초)마다 중점으로 밀려나던 결함 차단. 노선 변경 시 ref 리셋(아래).
   useEffect(() => {
+    if (userCenteredRef.current) return;
     if (mainBus?.lat && myStop?.lat) {
       setCenter({ lat: (mainBus.lat + myStop.lat) / 2, lng: (mainBus.lng + myStop.lng) / 2 });
     } else if (myStop?.lat) {
@@ -794,6 +821,9 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
       setCenter({ lat: mainBus.lat, lng: mainBus.lng });
     }
   }, [mainBus?.lat, mainBus?.lng, myStop?.lat, myStop?.lng]);
+
+  // 노선 변경 시 자동 재센터 억제 해제 — 새 노선은 기본 프레이밍(버스/내정류장)부터 시작.
+  useEffect(() => { userCenteredRef.current = false; }, [activeRouteId]);
 
   const timeSince = d => {
     if (!d) return '';
@@ -879,6 +909,12 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
           <div style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 700, color: 'var(--color-label)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {activeRoute ? activeRoute.name : '노선을 선택하세요'}
           </div>
+          {/* #2 — 노선 새로고침: GPS 껐다 켜진 뒤 위치 미반영 시 수동 재구독·재연결 */}
+          <button onClick={handleRefresh} disabled={refreshing}
+            style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 11px', borderRadius: 'var(--radius-pill)', border: '1px solid var(--color-line)', cursor: refreshing ? 'default' : 'pointer', fontFamily: 'inherit', fontSize: 11, fontWeight: 700, background: 'var(--color-bg-soft)', color: 'var(--color-label-mute)', opacity: refreshing ? 0.6 : 1 }}>
+            <span style={{ display: 'inline-block', animation: refreshing ? 'blspin 0.8s linear infinite' : 'none' }}>↻</span>
+            {refreshing ? '새로고침 중' : '새로고침'}
+          </button>
           <button onClick={() => { setRouteQuery(''); setRoutePicker(true); }}
             style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 13px', borderRadius: 'var(--radius-pill)', border: '1px solid var(--color-primary)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, fontWeight: 700, background: 'var(--color-primary-soft)', color: 'var(--color-primary-deep)' }}>
             🔄 노선 변경
@@ -970,7 +1006,7 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
             const isLast   = i === stops.length - 1;
             return (
               <MapMarker key={s.id} position={{ lat: s.lat, lng: s.lng }}
-                onClick={() => setStopInfo({ ...s, idx: i })}
+                onClick={() => openStopInfo(s, i)}
                 image={{
                   src: isMyStop
                     ? 'https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png'
@@ -1010,7 +1046,7 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
             }
             return (
               <CustomOverlayMap key={`lbl-${s.id}`} position={{ lat: s.lat, lng: s.lng }} yAnchor={isMyStop ? 3.6 : emphasize ? 3.1 : 2.5}>
-                <div onClick={() => setStopInfo({ ...s, idx: i })}
+                <div onClick={() => openStopInfo(s, i)}
                   style={ emphasize ? {
                     background: isMyStop ? 'var(--color-primary)' : isFirst ? 'var(--color-positive)' : 'var(--color-destructive)',
                     color: '#fff', borderRadius: 10, padding: '3px 9px',
@@ -1026,7 +1062,8 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
                     textAlign: 'center', lineHeight: 1.25
                   }}>
                   <div>{isMyStop ? '📍 ' : isFirst ? '출 ' : isLast ? '도 ' : ''}{s.name.length > 10 ? s.name.substring(0,10)+'…' : s.name}</div>
-                  {timeLabel && (
+                  {/* #5 — 도착/예상시각 라벨은 선택한 내 정류장에만 표시(전 정류장 표시 클러터 제거). */}
+                  {timeLabel && isMyStop && (
                     <div style={{ fontSize: emphasize ? 12 : 11, fontWeight: 700, color: timeColor, marginTop: 1 }}>
                       {timeLabel}
                     </div>
@@ -1038,7 +1075,8 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
 
           {/* 버스 마커 — 펄스 ring + 강조 원형 아이콘 (시인성 강화). 외부 ring 은 absolute 펄스. */}
           {buses.map(b => b.lat && b.lng && (
-            <CustomOverlayMap key={b.id} position={{ lat: b.lat, lng: b.lng }} yAnchor={1.5}>
+            // #4 — yAnchor 0.5(중심 정렬)로 버스 아이콘을 노선 라인 위에 안착(이전 1.5=라인보다 위로 뜸).
+            <CustomOverlayMap key={b.id} position={{ lat: b.lat, lng: b.lng }} yAnchor={0.5}>
               <div style={{ position: 'relative', width: 30, height: 30 }}>
                 <span style={{
                   position: 'absolute', inset: 0, borderRadius: '50%',
@@ -1096,9 +1134,12 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
                     {/* 정류장 노드 — 폰트/점 크기 키움(모바일 시인성) */}
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 78 }}
                       onClick={() => {
+                        // #3 — 터치한 정류장을 지도 중앙으로(확대/축소 무관). 자동 재센터 억제.
+                        userCenteredRef.current = true;
+                        setCenter({ lat: s.lat, lng: s.lng });
                         // 같은 정류장을 다시 누르면 해제(토글), 아니면 선택. 둘 다 fcmTokens 영속.
                         if (isMyStop) { selectMyStop(null); }
-                        else { selectMyStop(i); setCenter({ lat: s.lat, lng: s.lng }); }
+                        else { selectMyStop(i); }
                       }}>
                       {/* 버스 아이콘 (이 정류장 근처) — 펄스 ring + 키운 크기 */}
                       <div style={{ height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 2 }}>
@@ -1730,9 +1771,9 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
                     </>
                   )}
 
-                  {/* 실시간 버스 마커 */}
+                  {/* 실시간 버스 마커 — #4 노선 라인 정렬(yAnchor 0.5) */}
                   {modalBuses.map(b => b.lat && b.lng && (
-                    <CustomOverlayMap key={b.id} position={{ lat:b.lat, lng:b.lng }} yAnchor={1.7}>
+                    <CustomOverlayMap key={b.id} position={{ lat:b.lat, lng:b.lng }} yAnchor={0.5}>
                       <div style={{ background:"var(--color-bg)", border:"2px solid var(--color-primary)", borderRadius:"var(--radius-pill)", padding:"5px 11px", display:"flex", alignItems:"center", gap:5, boxShadow:"var(--shadow-float)" }}>
                         <span style={{ fontSize:14 }}>🚌</span>
                         <div>
