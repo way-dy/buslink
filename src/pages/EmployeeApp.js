@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import jsQR from "jsqr";
 import { initNotifications, listenForegroundMessages } from "../lib/notifications";
-import { Map, MapMarker, Polyline, CustomOverlayMap } from "react-kakao-maps-sdk";
+import { Map, MapMarker, Polyline, CustomOverlayMap, Roadview } from "react-kakao-maps-sdk";
 import { db, auth } from "../firebase";
 import { signInAnonymously } from "firebase/auth";
 import {
@@ -499,6 +499,7 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
   const [routePicker, setRoutePicker] = useState(false); // 노선 변경 모달 표시
   const [routeQuery, setRouteQuery] = useState("");    // 노선 검색어
   const [stopInfo, setStopInfo]     = useState(null);  // 지도 정류장 클릭 정보 카드
+  const [rvOk, setRvOk]             = useState(true);  // 거리뷰 커버리지(반경 내 파노라마 유무) — 없으면 사진 폴백
   const [manualTick, setManualTick] = useState(0);     // 노선 새로고침 버튼 → onSnapshot 재구독
   const [refreshing, setRefreshing] = useState(false); // 새로고침 진행 표시
   const buses = useAnimatedPositions(rawBuses);
@@ -525,6 +526,10 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
     setCenter({ lat: s.lat, lng: s.lng });
     setStopInfo({ ...s, idx: i });
   };
+
+  // 정보 카드가 새 정류장으로 열릴 때마다 거리뷰 커버리지 상태 리셋 —
+  // 이전 정류장에서 파노라마 없어 폴백했던 rvOk=false 가 다음 정류장에 잔존하는 것 차단.
+  useEffect(() => { setRvOk(true); }, [stopInfo?.idx, stopInfo?.name]);
 
   // 백그라운드 → foreground 복귀 시 onSnapshot 재구독(stale 리스너 신선화).
   // EmployeeApp(/p) 통근버스 사용자는 등하교 전후 장시간 백그라운드 상태가 흔함.
@@ -1365,6 +1370,26 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
             </div>
             <div style={{ overflowY: 'auto', padding: '14px 16px 20px', flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
               {stopInfo.address && <div style={{ fontSize: 12, color: 'var(--color-label-mute)' }}>{stopInfo.address}</div>}
+              {/* ── 카카오 거리뷰(로드뷰) 프로토타입 — 좌표만으로 실사 표시(사진 미등록 대비) ── */}
+              {/* 좌표 유효 && 반경 내 파노라마 있음(rvOk)일 때만. 없으면 아래 사진/설명 폴백. */}
+              {(() => {
+                const rvLat = Number(stopInfo.lat);
+                const rvLng = Number(stopInfo.lng);
+                if (!Number.isFinite(rvLat) || !Number.isFinite(rvLng) || !rvOk) return null;
+                return (
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--color-label-mute)', fontWeight: 600, marginBottom: 6 }}>🛣 거리뷰</div>
+                    <div style={{ height: 200, width: '100%', borderRadius: 'var(--radius-12)', overflow: 'hidden', border: '1px solid var(--color-line)' }}>
+                      <Roadview
+                        position={{ lat: rvLat, lng: rvLng, radius: 60 }}
+                        onErrorGetNearestPanoId={() => setRvOk(false)}
+                        onCreate={rv => { try { rv.relayout(); } catch (e) { /* 바텀시트 애니메이션 중 0px init 방어 */ } }}
+                        style={{ width: '100%', height: '100%' }}
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
               {stopInfo.photo && (
                 <img src={stopInfo.photo} alt={`${stopInfo.name} 정류장`}
                   onClick={() => setStopInfo(null)}
