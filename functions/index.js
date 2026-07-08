@@ -2,6 +2,10 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
+// 외부 운수 시스템(busin.co.kr) 서버사이드 fetch 용 — CORS·비표준 cert chain 때문에
+// 브라우저/클라이언트 fetch 불가, node http/https 로만 접근(rejectUnauthorized:false).
+const https = require("https");
+const http = require("http");
 const { HOLIDAY_SET } = require("./holidays");
 admin.initializeApp();
 
@@ -1507,6 +1511,294 @@ exports.fetchEtaDiagnostic = onCall(async (request) => {
   console.log(`[진단조회] date=${date} runId=${runId} points=${points.length} 호출자=${request.auth.uid}`);
   return { date, runId, count: points.length, points };
 });
+
+// ════════════════════════════════════════════════════════════════
+//  RQ/20260708 #2 — 유비칸 GPS 단말(busin.co.kr) 연동
+//  차량별 위치 신호 방식: 📱 모바일 앱(기존 기사앱 startGPS) / 🛰️ GPS 단말(busin 서버 폴링).
+//  ─────────────────────────────────────────────────────────────
+//  busin GPS API (callcenter functions/index.js 정본에서 이식 — URL·파싱 로직 동일):
+//   편성(번호→carId): GET https://dr.busin.co.kr:4431/api/CarAlloc.aspx?drv=1
+//                     컬럼 기사명 / 차량번호 / 차량ID
+//   위경도:           GET https://dr.busin.co.kr/api/CarLocationAll.aspx?carid=X&date=YYYY-MM-DD
+//                     컬럼 일시 / 위도 / 경도 (HTML <table>)
+//   인증 키 없음. CORS·cert chain 비표준 → 서버사이드 node fetch 만.
+//
+//  device 차량은 gps/{cid}_{vehicleId} 문서를 sendGPS(lib/gps.js) 와 동일 형태로 서버가
+//  써서 관제(MapTab)·승객앱·직원앱이 코드 변경 0 으로 표시(gps 문서 계약 동일).
+// ════════════════════════════════════════════════════════════════
+
+/** HTTP/HTTPS GET → string (UTF-8). busin cert chain 비표준 대비 rejectUnauthorized:false. */
+function fetchBusinHTML(urlStr) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(urlStr);
+    const lib = u.protocol === "https:" ? https : http;
+    const opts = {
+      hostname: u.hostname,
+      port: u.port || (u.protocol === "https:" ? 443 : 80),
+      path: u.pathname + u.search,
+      method: "GET",
+      timeout: 15000,
+      rejectUnauthorized: false,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (BuslinkOps Cloud Functions)",
+        "Accept": "text/html,application/xhtml+xml",
+      },
+    };
+    const req = lib.request(opts, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => {
+        if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode} — ${urlStr}`));
+        resolve(Buffer.concat(chunks).toString("utf8"));
+      });
+    });
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("timeout: " + urlStr)); });
+    req.end();
+  });
+}
+
+/** HTML <table> → 객체 배열 (헤더 행을 키로 사용). ASP.NET WebForm GridView 구조. */
+function parseBusinTable(html) {
+  if (!html) return [];
+  const trRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  const trList = [];
+  let m;
+  while ((m = trRe.exec(html)) !== null) trList.push(m[1]);
+  if (!trList.length) return [];
+
+  const stripHTML = (s) => String(s || "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&#[0-9]+;/g, "")
+    .trim();
+  const extractCells = (trInner, tag) => {
+    const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, "gi");
+    const out = []; let m2;
+    while ((m2 = re.exec(trInner)) !== null) out.push(m2[1]);
+    return out;
+  };
+
+  let headers = null, dataStart = 0;
+  for (let i = 0; i < trList.length; i++) {
+    const ths = extractCells(trList[i], "th");
+    if (ths.length) { headers = ths.map(stripHTML); dataStart = i + 1; break; }
+  }
+  if (!headers) {
+    const tds = extractCells(trList[0], "td");
+    if (tds.length) { headers = tds.map(stripHTML); dataStart = 1; }
+  }
+  if (!headers) return [];
+
+  const rows = [];
+  for (let i = dataStart; i < trList.length; i++) {
+    const tds = extractCells(trList[i], "td");
+    if (!tds.length) continue;
+    const obj = {};
+    headers.forEach((h, idx) => { obj[h] = idx < tds.length ? stripHTML(tds[idx]) : ""; });
+    rows.push(obj);
+  }
+  return rows;
+}
+
+const CAR_ALLOC_URL = "https://dr.busin.co.kr:4431/api/CarAlloc.aspx?drv=1";
+const CAR_LOC_URL   = (carId, date) => `https://dr.busin.co.kr/api/CarLocationAll.aspx?carid=${encodeURIComponent(carId)}&date=${encodeURIComponent(date)}`;
+
+/** 운행편성 → [{ name, plate, carId }] (활성/만료 무관, 매핑은 호출측). */
+async function fetchCarAllocations() {
+  const html = await fetchBusinHTML(CAR_ALLOC_URL);
+  const rows = parseBusinTable(html);
+  const out = [];
+  rows.forEach(r => {
+    const name  = r["기사명"] || "";
+    const plate = r["차량번호"] || "";
+    const carId = r["차량ID"] || r["차량Id"] || "";
+    if (!name || !carId) return;
+    out.push({ name: name.trim(), plate: plate.trim(), carId: String(carId).trim() });
+  });
+  return out;
+}
+
+/** 차량 GPS 행 → [{ time, lat, lng }] (시간 오름차순, lat/lng 0인 행 제외). */
+async function fetchVehicleLocations(carId, dateStr) {
+  const html = await fetchBusinHTML(CAR_LOC_URL(carId, dateStr));
+  const rows = parseBusinTable(html);
+  const out = [];
+  rows.forEach(r => {
+    const t   = r["일시"] || r["시각"] || r["기준일시"] || "";
+    const lat = parseFloat(r["위도"] || r["lat"] || "0");
+    const lng = parseFloat(r["경도"] || r["lng"] || "0");
+    if (!t) return;
+    if (!lat || !lng || lat === 0 || lng === 0) return;
+    out.push({ time: t.trim(), lat, lng });
+  });
+  // "YYYY-MM-DD HH:mm:ss" 또는 "HH:mm:ss" 등 다양 — 문자열 정렬로 시각 순서 유지(같은 날짜 가정).
+  out.sort((a, b) => a.time.localeCompare(b.time));
+  return out;
+}
+
+/** GPS 시각 문자열에서 HH:mm 추출 — busin 한국어 12시간제("오전 12:00"=자정) 우선 파싱.
+ *  callcenter extractHHMM 정본 이식. 24시간제 fallback(legacy). */
+function extractHHMM(timeStr) {
+  if (!timeStr) return "";
+  const s = String(timeStr);
+  const k = s.match(/(오전|오후)\s*(\d{1,2}):(\d{2})/);
+  if (k) {
+    let h = parseInt(k[2], 10);
+    if (k[1] === "오전") { if (h === 12) h = 0; }
+    else                 { if (h !== 12) h += 12; }
+    return `${String(h).padStart(2, "0")}:${k[3]}`;
+  }
+  const m = s.match(/(\d{1,2}):(\d{2})/);
+  if (!m) return "";
+  return `${m[1].padStart(2, "0")}:${m[2]}`;
+}
+
+/** "HH:mm" → 분(number) 또는 null. */
+function hhmmToMinutes(hhmm) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || "");
+  if (!m) return null;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+}
+
+// ════════════════════════════════════════════════════════════════
+// resolveBusinCarId (onCall) — 차량번호 → busin carId 조회.
+// AdminApp 차량 등록/수정 폼의 "번호로 carId 조회" 버튼이 호출.
+// assertAdmin + { vehicleNo } → CarAlloc fetch·parse·번호 정규화(공백/하이픈 제거) 매칭.
+// 미매칭 시 { carId: null } (경고 표시용). 실패는 한국어 HttpsError.
+// ════════════════════════════════════════════════════════════════
+exports.resolveBusinCarId = onCall(async (request) => {
+  await assertAdmin(request);
+  const { vehicleNo } = request.data || {};
+  if (!vehicleNo || typeof vehicleNo !== "string") {
+    throw new HttpsError("invalid-argument", "차량번호가 필요합니다");
+  }
+  const norm = (s) => String(s || "").replace(/[\s-]/g, "");
+  const target = norm(vehicleNo);
+  if (!target) throw new HttpsError("invalid-argument", "차량번호가 비어있습니다");
+
+  let allocs;
+  try {
+    allocs = await fetchCarAllocations();
+  } catch (e) {
+    throw new HttpsError("unavailable", `busin 운행편성 조회 실패: ${e.message}`);
+  }
+  const match = allocs.find(a => norm(a.plate) === target);
+  if (!match) {
+    console.log(`[carId조회] vehicleNo=${vehicleNo} 미매칭(편성 ${allocs.length}건) 호출자=${request.auth.uid}`);
+    return { carId: null };
+  }
+  console.log(`[carId조회] vehicleNo=${vehicleNo} → carId=${match.carId} name=${match.name}`);
+  return { carId: match.carId, name: match.name };
+});
+
+// ════════════════════════════════════════════════════════════════
+// pollDeviceVehicleGps (onSchedule, 매 1분 KST) — GPS 단말 차량 위치 서버 폴링.
+//
+// companies 순회 → 각 회사 vehicles where gpsSource=="device"(+ carId 존재) →
+// 오늘(KST) 배차 맵으로 routeId/routeName/driver 확보 → busin 최신 좌표를
+// gps/{cid}_{vehicleId} 문서에 sendGPS 동일 필드로 write(관제·승객앱 자동 표시).
+//
+// 가드:
+//  · 신선도: 최신 좌표 시각이 KST 현재 대비 15분 초과 과거면 skip(주차·미운행 차량이
+//    어제 마지막 위치로 계속 fresh 뜨는 것 차단 — 이게 없으면 승객앱이 오도됨).
+//  · 오늘 배차 없으면 skip(routeId 없으면 승객앱 표시 불가 = 미운행 취급).
+//  · 좌표 0건 skip.
+//  · 회사별/차량별 try/catch — 한 차량 실패가 전체 폴러를 죽이지 않게.
+//
+// speed 는 0(busin 미제공 — 승객앱 useAnimatedPositions 가 보간하므로 무방).
+// ════════════════════════════════════════════════════════════════
+exports.pollDeviceVehicleGps = onSchedule(
+  {
+    schedule: "* * * * *",
+    timeZone: "Asia/Seoul",
+    region: "us-central1",
+  },
+  async () => {
+    const db = admin.firestore();
+    const now = new Date();
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(now);
+    // KST 현재 분 — UTC + 9h 후 UTC 필드 사용(host-local Date 금지).
+    const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    const nowMin = kst.getUTCHours() * 60 + kst.getUTCMinutes();
+
+    const companiesSnap = await db.collection("companies").get();
+    let targets = 0, written = 0, skipped = 0;
+
+    for (const c of companiesSnap.docs) {
+      const cid = c.id;
+      try {
+        const vehSnap = await db
+          .collection("companies").doc(cid)
+          .collection("vehicles")
+          .where("gpsSource", "==", "device")
+          .get();
+        if (vehSnap.empty) continue;
+
+        // 오늘 배차 1회 조회 → vehicleId → {routeId,routeName,driverId,driverName}
+        const dispByVehicle = {};
+        const dispSnap = await db
+          .collection("companies").doc(cid)
+          .collection("dispatches").doc(today)
+          .collection("list").get();
+        dispSnap.docs.forEach(d => {
+          const v = d.data() || {};
+          if (v.vehicleId) {
+            dispByVehicle[v.vehicleId] = {
+              routeId: v.routeId || "",
+              routeName: v.routeName || "",
+              driverId: v.driverId || "",
+              driverName: v.driverName || "",
+            };
+          }
+        });
+
+        for (const vdoc of vehSnap.docs) {
+          const vehicleId = vdoc.id;
+          const veh = vdoc.data() || {};
+          const carId = veh.carId;
+          if (!carId) continue;
+          targets++;
+          try {
+            const disp = dispByVehicle[vehicleId];
+            if (!disp) { skipped++; continue; } // 오늘 미운행 — routeId 없으면 승객앱 표시 불가
+
+            const rows = await fetchVehicleLocations(carId, today);
+            if (!rows.length) { skipped++; continue; } // 좌표 0건
+
+            const latest = rows[rows.length - 1]; // 오름차순 정렬의 마지막 = 최신
+            // 신선도 가드: 최신 좌표 시각이 15분 초과 과거면 skip(주차·미운행 차량 배제).
+            const coordMin = hhmmToMinutes(extractHHMM(latest.time));
+            if (coordMin === null || (nowMin - coordMin) > 15) { skipped++; continue; }
+
+            // gps/{cid}_{vehicleId} — sendGPS(lib/gps.js) 와 동일 필드 + source:"device".
+            await db.collection("gps").doc(`${cid}_${vehicleId}`).set({
+              lat: latest.lat, lng: latest.lng, speed: 0, accuracy: 0,
+              companyId: cid, vehicleId, vehicleNo: veh.plateNo || "",
+              driverId: disp.driverId, driverName: disp.driverName,
+              routeId: disp.routeId, routeName: disp.routeName,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              source: "device",
+            });
+            // gpsHistory append — lib/gps.js 경로 그대로 미러(운행이력 유지).
+            await db
+              .collection("gpsHistory").doc(cid)
+              .collection(vehicleId).doc(today)
+              .collection("points")
+              .add({ lat: latest.lat, lng: latest.lng, speed: 0, ts: admin.firestore.FieldValue.serverTimestamp() });
+            written++;
+          } catch (e) {
+            console.error(`[단말GPS] 차량 오류 cid=${cid} veh=${vehicleId} carId=${carId}:`, e.message);
+          }
+        }
+      } catch (e) {
+        console.error(`[단말GPS] 회사 오류 cid=${cid}:`, e.message);
+      }
+    }
+
+    console.log(`[단말GPS] 폴링 완료 — 대상 ${targets}대 · 갱신 ${written}대 · skip ${skipped}대`);
+  }
+);
 
 exports.createDriverAuth = onCall(async (request) => {
   await assertAdmin(request);

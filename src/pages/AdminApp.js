@@ -2974,21 +2974,54 @@ function DriverTab({ companyId, vehicles, allowed, currentUserUid }) {
 function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState(null);
-  const [form, setForm] = useState({ plateNo:"", model:"", type:"", seats:"", year:"", memo:"" });
+  // gpsSource: "mobile"(📱 기사앱 startGPS·기본) | "device"(🛰️ GPS 단말·busin 서버 폴링).
+  // carId: device 일 때 busin 차량ID(pollDeviceVehicleGps 가 위치 조회에 사용).
+  const [form, setForm] = useState({ plateNo:"", model:"", type:"", seats:"", year:"", memo:"", gpsSource:"mobile", carId:"" });
   const [loading, setLoading] = useState(false);
+  // "번호로 carId 조회" 상태(resolveBusinCarId 호출 결과 표시).
+  const [carIdLoading, setCarIdLoading] = useState(false);
+  const [carIdMsg, setCarIdMsg] = useState("");
 
   // 차량 격리: 전체권한/슈퍼관리자는 전체, 그 외엔 본인 등록(createdBy===uid) 차량만(2026-06-16).
   const canSeeAll = isAllAccess(allowed);
   const visibleVehicles = canSeeAll ? vehicles : vehicles.filter(v => v.createdBy && v.createdBy === currentUserUid);
 
-  const openAdd = () => { setEditItem(null); setForm({plateNo:"",model:"",type:"대형",seats:"45",year:"",memo:""}); setShowForm(true); };
-  const openEdit = (item) => { setEditItem(item); setForm({plateNo:item.plateNo||"",model:item.model||"",type:item.type||"대형",seats:item.seats?.toString()||"",year:item.year||"",memo:item.memo||""}); setShowForm(true); };
+  const openAdd = () => { setEditItem(null); setForm({plateNo:"",model:"",type:"대형",seats:"45",year:"",memo:"",gpsSource:"mobile",carId:""}); setCarIdMsg(""); setShowForm(true); };
+  const openEdit = (item) => { setEditItem(item); setForm({plateNo:item.plateNo||"",model:item.model||"",type:item.type||"대형",seats:item.seats?.toString()||"",year:item.year||"",memo:item.memo||"",gpsSource:item.gpsSource||"mobile",carId:item.carId||""}); setCarIdMsg(item.carId?`저장된 carId: ${item.carId}`:""); setShowForm(true); };
+
+  // busin 편성에서 차량번호로 carId 조회(device 방식 차량용).
+  const resolveCarId = async () => {
+    const vno = form.plateNo.trim();
+    if (!vno) { alert("차량번호를 먼저 입력하세요"); return; }
+    setCarIdLoading(true); setCarIdMsg("조회 중…");
+    try {
+      const res = await httpsCallable(functions,"resolveBusinCarId")({ vehicleNo: vno });
+      const { carId, name } = res.data || {};
+      if (carId) {
+        setForm(f => ({...f, carId}));
+        setCarIdMsg(`✓ carId ${carId}${name?` (기사 ${name})`:""}`);
+      } else {
+        setCarIdMsg("⚠ busin 편성에 이 차량번호 없음 — 번호 확인");
+      }
+    } catch (e) {
+      setCarIdMsg("조회 실패: "+(e.message||String(e)));
+    }
+    setCarIdLoading(false);
+  };
 
   const handleSave = async () => {
     if (!form.plateNo) return alert("차량번호는 필수입니다");
+    const isDevice = form.gpsSource === "device";
+    if (isDevice && !form.carId.trim() &&
+        !window.confirm("GPS 단말 방식인데 carId 가 없습니다. carId 없이 저장하면 서버 위치 추적이 안 됩니다(나중에 '번호로 carId 조회'로 채울 수 있음).\n계속 저장할까요?")) {
+      return;
+    }
     setLoading(true);
     try {
-      const data = {plateNo:form.plateNo.trim(),model:form.model.trim(),type:form.type,seats:form.seats?parseInt(form.seats):null,year:form.year.trim(),memo:form.memo.trim(),updatedAt:new Date().toISOString()};
+      const data = {plateNo:form.plateNo.trim(),model:form.model.trim(),type:form.type,seats:form.seats?parseInt(form.seats):null,year:form.year.trim(),memo:form.memo.trim(),
+        gpsSource:isDevice?"device":"mobile",
+        carId:isDevice?form.carId.trim():"",
+        updatedAt:new Date().toISOString()};
       if (editItem) {
         await updateDoc(doc(db,"companies",companyId,"vehicles",editItem.id),data);
       } else {
@@ -3020,13 +3053,16 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
       </div>
       <div style={S.tableWrap}>
         <table style={S.table}>
-          <thead><tr>{["차량ID","차량번호","차종","모델명","좌석수","연식","비고"].map(h=><th key={h} style={S.th}>{h}</th>)}<th style={S.th}>관리</th></tr></thead>
+          <thead><tr>{["차량ID","차량번호","위치방식","차종","모델명","좌석수","연식","비고"].map(h=><th key={h} style={S.th}>{h}</th>)}<th style={S.th}>관리</th></tr></thead>
           <tbody>
-            {visibleVehicles.length===0?<tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"var(--color-label-alt)"}}>등록된 차량이 없습니다</td></tr>
+            {visibleVehicles.length===0?<tr><td colSpan={9} style={{...S.td,textAlign:"center",color:"var(--color-label-alt)"}}>등록된 차량이 없습니다</td></tr>
             :visibleVehicles.map(v=>(
               <tr key={v.id} style={S.tr}>
                 <td style={{...S.td,color:"var(--color-label-mute)",fontSize:12}}>{v.id}</td>
                 <td style={{...S.td,fontWeight:600}}>{v.plateNo}</td>
+                <td style={S.td}>{v.gpsSource==="device"
+                  ? <span style={{...S.statusBadge,background:"var(--color-primary-soft)",color:"var(--color-primary-deep)"}}>🛰️ 단말{v.carId?` (${v.carId})`:""}</span>
+                  : <span style={{...S.statusBadge,background:"var(--color-bg-alt)",color:"var(--color-label-mute)"}}>📱 모바일</span>}</td>
                 <td style={S.td}><span style={{...S.statusBadge,background:v.type==="대형"?"var(--color-primary-soft)":v.type==="중형"?"#FFF1E0":"#E6F7EB",color:v.type==="대형"?"var(--color-primary-deep)":v.type==="중형"?"#B95300":"#007A29"}}>{v.type||"–"}</span></td>
                 <td style={S.td}>{v.model||"–"}</td>
                 <td style={S.td}>{v.seats?`${v.seats}석`:"–"}</td>
@@ -3046,6 +3082,33 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
           <div style={S.modalTitle}>{editItem?"차량 수정":"차량 등록"}</div>
           <label style={S.label}>차량번호 *</label>
           <input style={S.input} placeholder="34가 1234" value={form.plateNo} onChange={e=>setForm({...form,plateNo:e.target.value})}/>
+          <label style={S.label}>위치 신호 방식</label>
+          <div style={{display:"flex",gap:8}}>
+            {[["mobile","📱 모바일 앱"],["device","🛰️ GPS 단말"]].map(([val,lbl])=>(
+              <button key={val} type="button"
+                onClick={()=>setForm(f=>({...f,gpsSource:val}))}
+                style={{flex:1,padding:"9px 8px",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",
+                  border:form.gpsSource===val?"1.5px solid var(--color-primary)":"1px solid var(--color-border)",
+                  background:form.gpsSource===val?"var(--color-primary-soft)":"var(--color-bg)",
+                  color:form.gpsSource===val?"var(--color-primary-deep)":"var(--color-label-mute)"}}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+          {form.gpsSource==="device"&&(
+            <div style={{marginTop:8,padding:12,borderRadius:8,background:"var(--color-bg-alt)"}}>
+              <div style={{fontSize:12,color:"var(--color-label-mute)",marginBottom:6}}>
+                GPS 단말은 서버가 busin 편성의 carId 로 위치를 조회해 자동 추적합니다. 차량번호로 carId 를 조회하세요.
+              </div>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <input style={{...S.input,flex:1,margin:0}} placeholder="carId (예: 4660)" value={form.carId} onChange={e=>setForm({...form,carId:e.target.value})}/>
+                <button type="button" style={{...S.editBtn,whiteSpace:"nowrap",opacity:carIdLoading?0.6:1}} onClick={resolveCarId} disabled={carIdLoading}>
+                  {carIdLoading?"조회 중…":"번호로 carId 조회"}
+                </button>
+              </div>
+              {carIdMsg&&<div style={{fontSize:12,marginTop:6,color:carIdMsg.startsWith("⚠")||carIdMsg.startsWith("조회 실패")?"var(--color-destructive)":"var(--color-positive)"}}>{carIdMsg}</div>}
+            </div>
+          )}
           <label style={S.label}>차종</label>
           <select style={S.input} value={form.type} onChange={e=>setForm({...form,type:e.target.value})}>
             {["대형","중형","소형","우등","전세"].map(t=><option key={t} value={t}>{t}</option>)}

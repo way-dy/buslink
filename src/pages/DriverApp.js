@@ -93,6 +93,9 @@ export default function DriverApp({ companyId: propCompanyId }) {
     propCompanyId || resolveByHostname(window.location.hostname) || "dy001"
   );
   const [gpsStatus, setGpsStatus] = useState("");   // GPS 신호 안내 ("" | "확보중" | "권한")
+  // 배정 차량의 위치 신호 방식(RQ/20260708 #2) — "device" 면 GPS 단말로 서버 자동 추적,
+  // 앱은 startGPS 호출 안 함. companies/{cid}/vehicles/{vehicleId}.gpsSource 1회 getDoc.
+  const [deviceGps, setDeviceGps] = useState(false);
   const wakeLockRef = useRef(null);
   const currentStopRowRef = useRef(null);
   // ETA 자동 진단 로깅(2026-05-29) — 운행 1회 단위 runId. 운행 시작 시 산출, 종료 시 null.
@@ -585,11 +588,45 @@ export default function DriverApp({ companyId: propCompanyId }) {
     }
   };
 
+  // 배정 차량 gpsSource 로드(1회 getDoc) — device 면 앱 GPS 전송을 건너뛰고 안내 배너.
+  // 실패/부재는 mobile 취급(기존 흐름 100% 그대로 — 회귀 0).
+  useEffect(() => {
+    if (!companyId || !driver?.vehicleId) { setDeviceGps(false); return; }
+    let alive = true;
+    (async () => {
+      try {
+        const vSnap = await getDoc(doc(db, "companies", companyId, "vehicles", driver.vehicleId));
+        if (!alive) return;
+        setDeviceGps(vSnap.exists() && (vSnap.data() || {}).gpsSource === "device");
+      } catch (e) {
+        if (alive) setDeviceGps(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [companyId, driver?.vehicleId]);
+
   const handleStart = async () => {
     if (!driver.vehicleId) {
       alert("배정된 차량이 없습니다.\n관리자에게 차량 배정을 요청하세요.");
       return;
     }
+
+    // ── GPS 단말(device) 차량: 앱 위치 전송/권한 불필요 — 서버(pollDeviceVehicleGps)가 자동 추적.
+    // startGPS 호출을 건너뛰고 운행 상태만 기록. mobile 경로는 아래 그대로(회귀 0).
+    if (deviceGps) {
+      updateDoc(doc(db, "companies", companyId, "drivers", driver.id), {
+        status: "운행중", startedAt: new Date().toISOString(),
+      }).catch(e => console.warn("[BusLink] drivers 상태 update 실패(통신):", e.message));
+      setGpsStatus("");
+      setDriving(true);
+      setRunId(buildRunId({ driverId: driver.id, vehicleId: driver.vehicleId, startedAtMs: Date.now() }));
+      if (boardingMode !== "passenger-qr") {
+        refreshToken(driver, dispatch);
+        tokenTimerRef.current = setInterval(() => refreshToken(driver, dispatch), 5 * 60 * 1000);
+      }
+      return;
+    }
+
     // 위치 권한 사전 점검(작업4 헬퍼 재사용) — 미허용이면 startGPS 전에 권한 요청 흐름.
     // ensureGeolocationPermission: granted|prompt면 OS 팝업 유도, denied면 false 반환.
     setGpsStatus("확보중");
@@ -943,6 +980,17 @@ export default function DriverApp({ companyId: propCompanyId }) {
           </div>
         )}
 
+        {/* GPS 단말 차량 안내 배너 — 앱이 위치를 전송하지 않고 단말로 서버 자동 추적. */}
+        {driving && deviceGps && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8,
+            background: "var(--color-primary-soft)", color: "var(--color-primary-deep)",
+            borderRadius: 10, padding: "12px 14px", fontSize: 13, fontWeight: 600,
+          }}>
+            🛰️ 이 차량은 GPS 단말로 자동 추적됩니다 — 앱 위치 전송 안 함
+          </div>
+        )}
+
         {/* 라이브 상태 스트립 — GPS 전송 상태(실제 driving / Wake Lock 만, 가짜 수치 없음) */}
         {driving && (
           <div style={S.statStrip}>
@@ -952,11 +1000,11 @@ export default function DriverApp({ companyId: propCompanyId }) {
             </div>
             <div style={S.miniStat}>
               <div style={S.miniStatLabel}>GPS</div>
-              <div style={{ ...S.miniStatVal, color: "var(--color-positive)" }}>전송중</div>
+              <div style={{ ...S.miniStatVal, color: "var(--color-positive)" }}>{deviceGps ? "단말 추적" : "전송중"}</div>
             </div>
             <div style={S.miniStat}>
               <div style={S.miniStatLabel}>화면</div>
-              <div style={S.miniStatVal}>{"wakeLock" in navigator ? "켜짐 유지" : "기본"}</div>
+              <div style={S.miniStatVal}>{deviceGps ? "—" : ("wakeLock" in navigator ? "켜짐 유지" : "기본")}</div>
             </div>
           </div>
         )}
