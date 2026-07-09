@@ -1124,7 +1124,7 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
         const lastIdx = stops.length - 1;
         const inService = !!mainBus && busStopIdx >= 0;
         // 4노드 산출 — 출발/현재/다음/도착. 같은 정류장 인덱스면 역할 병합(예 출발·현재).
-        const seen = new Map();
+        const seen = new window.Map(); // ⚠ react-kakao-maps-sdk 의 Map import 가 native Map 을 shadow → new Map()=비생성자 throw(백지). window.Map 명시 필수(issues.md).
         const addNode = (role, idx, current) => {
           const stop = stops[idx];
           if (!stop) return;
