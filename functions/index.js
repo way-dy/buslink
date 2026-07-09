@@ -1662,6 +1662,88 @@ function hhmmToMinutes(hhmm) {
 }
 
 // ════════════════════════════════════════════════════════════════
+// 서버측 정류장 도착감지 유틸 (device 차량 — pollDeviceVehicleGps 에서 사용).
+// 모바일 lib/gps.js 와 동일한 100m 도착 반경·좌표 coercion 을 서버에 재현.
+// ════════════════════════════════════════════════════════════════
+
+// 정류장 도착 판정 반경(m) — 모바일 gps.js STOP_ARRIVE_M 과 동일값.
+const STOP_ARRIVE_M = 100;
+
+/** haversine 거리(m). 6371000 = 지구 반경. */
+function distMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+/** 정류장 lat/lng 다중 형식(number/string/GeoPoint/{location:GeoPoint}) → {lat,lng} 또는 null.
+ *  issues.md `stops lat/lng 다중 형식` 함정 — typeof==="number" 엄격 필터 금지. */
+function stopLatLng(s) {
+  if (!s) return null;
+  const rawLat = s.lat ?? s.latitude ?? (s.location && s.location.latitude) ?? s._latitude;
+  const rawLng = s.lng ?? s.longitude ?? (s.location && s.location.longitude) ?? s._longitude;
+  const lat = Number(rawLat);
+  const lng = Number(rawLng);
+  if (!isFinite(lat) || !isFinite(lng)) return null;
+  return { lat, lng };
+}
+
+/** 노선 departTime("HH:MM") + 정류장 offsetMin(분) → 계획 도착시각 "HH:MM" 또는 null. */
+function planTimeFromDepart(departTime, offsetMin) {
+  const dm = hhmmToMinutes(departTime);
+  if (dm === null || typeof offsetMin !== "number" || !isFinite(offsetMin)) return null;
+  let pm = dm + Math.round(offsetMin);
+  if (pm < 0) return null;
+  pm = ((pm % 1440) + 1440) % 1440; // 자정 넘김 방어(통근 모델상 드묾)
+  const h = Math.floor(pm / 60);
+  const mi = pm % 60;
+  return `${String(h).padStart(2, "0")}:${String(mi).padStart(2, "0")}`;
+}
+
+/** 회사·노선 메타(departTime + 좌표 유효 정류장) lazy 로드·캐시.
+ *  반환 { departTime, stops:[{id,name,lat,lng,offsetMin,order}] } 또는 null(로드 실패). */
+async function loadRouteMeta(db, cid, routeId, cache) {
+  if (!routeId) return null;
+  const key = `${cid}__${routeId}`;
+  if (key in cache) return cache[key];
+  let meta = null;
+  try {
+    const rSnap = await db
+      .collection("companies").doc(cid)
+      .collection("routes").doc(routeId).get();
+    const rv = rSnap.exists ? (rSnap.data() || {}) : {};
+    const stopsSnap = await db
+      .collection("companies").doc(cid)
+      .collection("routes").doc(routeId)
+      .collection("stops").orderBy("order").get();
+    const stops = [];
+    stopsSnap.docs.forEach(sd => {
+      const sv = sd.data() || {};
+      const ll = stopLatLng(sv);
+      if (!ll) return; // 좌표 무효 정류장 제외
+      stops.push({
+        id: sd.id,
+        name: sv.name || "",
+        lat: ll.lat,
+        lng: ll.lng,
+        offsetMin: typeof sv.offsetMin === "number" ? sv.offsetMin : null,
+        order: typeof sv.order === "number" ? sv.order : null,
+      });
+    });
+    meta = { departTime: rv.departTime || "", stops };
+  } catch (e) {
+    console.error(`[단말도착] 노선 로드 오류 cid=${cid} route=${routeId}:`, e.message);
+    meta = null;
+  }
+  cache[key] = meta;
+  return meta;
+}
+
+// ════════════════════════════════════════════════════════════════
 // resolveBusinCarId (onCall) — 차량번호 → busin carId 조회.
 // AdminApp 차량 등록/수정 폼의 "번호로 carId 조회" 버튼이 호출.
 // assertAdmin + { vehicleNo } → CarAlloc fetch·parse·번호 정규화(공백/하이픈 제거) 매칭.
@@ -1735,7 +1817,7 @@ exports.pollDeviceVehicleGps = onSchedule(
           .get();
         if (vehSnap.empty) continue;
 
-        // 오늘 배차 1회 조회 → vehicleId → {routeId,routeName,driverId,driverName}
+        // 오늘 배차 1회 조회 → vehicleId → {dispatchId,routeId,routeName,driverId,driverName,stopArrivals}
         const dispByVehicle = {};
         const dispSnap = await db
           .collection("companies").doc(cid)
@@ -1745,13 +1827,18 @@ exports.pollDeviceVehicleGps = onSchedule(
           const v = d.data() || {};
           if (v.vehicleId) {
             dispByVehicle[v.vehicleId] = {
+              dispatchId: d.id,
               routeId: v.routeId || "",
               routeName: v.routeName || "",
               driverId: v.driverId || "",
               driverName: v.driverName || "",
+              stopArrivals: v.stopArrivals || {},
             };
           }
         });
+
+        // 회사별 노선 메타 캐시(이 폴 사이클 1회 로드) — device 차량 배차 routeId 한정.
+        const routeMetaCache = {};
 
         for (const vdoc of vehSnap.docs) {
           const vehicleId = vdoc.id;
@@ -1787,6 +1874,50 @@ exports.pollDeviceVehicleGps = onSchedule(
               .collection("points")
               .add({ lat: latest.lat, lng: latest.lng, speed: 0, ts: admin.firestore.FieldValue.serverTimestamp() });
             written++;
+
+            // ── 정류장 서버측 도착감지 (device 차량은 기사앱 없어 stopArrivals 미기록) ──
+            // 최신 좌표와 각 정류장 거리 계산 → 아직 도착기록 없는 정류장 중 100m 이내 = 신규 도착.
+            // recordStopArrival 정본과 동일 dot-notation stopArrivals write(+via:"device") →
+            // notifyPreArrival 트리거 자동 발화(도착임박 푸시)·승객앱 도착시각 정상화.
+            // 감지 실패가 gps write(이미 완료)나 폴러를 죽이지 않게 별도 try/catch.
+            try {
+              const meta = await loadRouteMeta(db, cid, disp.routeId, routeMetaCache);
+              if (meta && meta.stops.length) {
+                const arrivals = disp.stopArrivals || {}; // 인메모리(같은 사이클 재감지 방지)
+                const updates = {};
+                let detected = 0;
+                for (const st of meta.stops) {
+                  if (arrivals[st.id]) continue; // 멱등: 이미 도착 기록 있으면 첫 도착 보존
+                  const d = distMeters(latest.lat, latest.lng, st.lat, st.lng);
+                  if (d > STOP_ARRIVE_M) continue;
+                  const plannedAt = planTimeFromDepart(meta.departTime, st.offsetMin);
+                  let delaySec = null;
+                  if (plannedAt) {
+                    const plannedMs = Date.parse(`${today}T${plannedAt}:00+09:00`);
+                    if (isFinite(plannedMs)) delaySec = Math.round((Date.now() - plannedMs) / 1000);
+                  }
+                  updates[`stopArrivals.${st.id}`] = {
+                    actualAt: admin.firestore.FieldValue.serverTimestamp(),
+                    plannedAt: plannedAt || null,
+                    delaySec,
+                    estimated: false,
+                    via: "device",
+                  };
+                  arrivals[st.id] = true; // 인메모리 반영
+                  detected++;
+                }
+                if (detected > 0) {
+                  await db
+                    .collection("companies").doc(cid)
+                    .collection("dispatches").doc(today)
+                    .collection("list").doc(disp.dispatchId)
+                    .update(updates);
+                  console.log(`[단말도착] cid=${cid} veh=${vehicleId} disp=${disp.dispatchId} 신규 ${detected}건`);
+                }
+              }
+            } catch (e) {
+              console.error(`[단말도착] 감지 오류 cid=${cid} veh=${vehicleId}:`, e.message);
+            }
           } catch (e) {
             console.error(`[단말GPS] 차량 오류 cid=${cid} veh=${vehicleId} carId=${carId}:`, e.message);
           }
