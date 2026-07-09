@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - @.claude/frontend.md — 컴포넌트 구조, 라우팅, 인증·상태관리 패턴
 - @.claude/backend.md — Firestore 스키마, 컬렉션 구조, 보안 규칙
 - @.claude/functions.md — Cloud Functions 목록, 트리거, 주의사항
-- @.claude/issues.md — **중요 이슈 기록**(발견사항·버그·주의 패턴)
+- @.claude/issues.md — **중요 이슈 기록**(미해결·함정). 누적 `[패턴]`은 issues-patterns.md(관련 토픽만 읽을 것)
 - @.claude/tasks.md — 현재 작업 상태 체크박스, 다음 할 일
 - @.claude/redesign.md — 라이트 리스킨 요약·현재 단계(완료 0~4단계 상세는 redesign-log.md @임포트)
 
