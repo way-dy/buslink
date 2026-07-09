@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import QRCode from "qrcode";
 import { Map, MapMarker, Polyline, CustomOverlayMap, Circle } from "react-kakao-maps-sdk";
 import { db, auth } from "../firebase";
 import { signOut } from "firebase/auth";
@@ -11,6 +12,8 @@ import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { sendGPS } from "../lib/gps";
 import { forceReconnect } from "../lib/forceReconnect";
 import { createPartnerCode, getBoardingUrl } from "../lib/partner";
+// 정적(고정) QR — 차량별 인쇄용 URL 생성(2026-07-08 RQ#3)
+import { getStaticBoardingUrl } from "../lib/boarding";
 import { sendNotice } from "../lib/notifications";
 import { compressImageFile } from "../lib/image";
 import { planTimeForStop, offsetMinFromPlanTime, computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
@@ -2981,6 +2984,38 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
   // "번호로 carId 조회" 상태(resolveBusinCarId 호출 결과 표시).
   const [carIdLoading, setCarIdLoading] = useState(false);
   const [carIdMsg, setCarIdMsg] = useState("");
+  // 고정(정적) QR 생성/인쇄 모달 상태(2026-07-08 RQ#3). 모든 차량에 제공(관리자가 필요 차량 인쇄).
+  const [qrVehicle, setQrVehicle] = useState(null);
+  const [qrDataUrl, setQrDataUrl] = useState("");
+
+  useEffect(() => {
+    if (!qrVehicle) { setQrDataUrl(""); return; }
+    let alive = true;
+    const url = getStaticBoardingUrl({ companyId, vehicleId: qrVehicle.id });
+    QRCode.toDataURL(url, { width: 280, margin: 1 })
+      .then(d => { if (alive) setQrDataUrl(d); })
+      .catch(() => { if (alive) setQrDataUrl(""); });
+    return () => { alive = false; };
+  }, [qrVehicle, companyId]);
+
+  // 새 창에 인쇄용 최소 HTML(차량번호 + QR + URL) → 로드 시 자동 인쇄. 팝업 차단 시 안내.
+  const printQr = () => {
+    if (!qrDataUrl || !qrVehicle) return;
+    const w = window.open("", "_blank");
+    if (!w) { alert("팝업이 차단되었습니다. 브라우저 팝업 차단을 해제한 뒤 다시 시도하세요."); return; }
+    const plate = qrVehicle.plateNo || qrVehicle.id;
+    const url = getStaticBoardingUrl({ companyId, vehicleId: qrVehicle.id });
+    w.document.write(
+      '<!doctype html><html><head><meta charset="utf-8"><title>' + plate + ' 탑승 QR</title></head>'
+      + '<body onload="window.print()" style="margin:0;font-family:sans-serif;text-align:center;padding:40px">'
+      + '<h1 style="font-size:30px;margin:0 0 8px">' + plate + '</h1>'
+      + '<div style="font-size:15px;color:#555;margin-bottom:28px">차량에 부착 · 탑승 시 스캔</div>'
+      + '<img src="' + qrDataUrl + '" style="width:340px;height:340px"/>'
+      + '<div style="font-size:12px;color:#888;margin-top:18px;word-break:break-all">' + url + '</div>'
+      + '</body></html>'
+    );
+    w.document.close();
+  };
 
   // 차량 격리: 전체권한/슈퍼관리자는 전체, 그 외엔 본인 등록(createdBy===uid) 차량만(2026-06-16).
   const canSeeAll = isAllAccess(allowed);
@@ -3070,6 +3105,7 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
                 <td style={{...S.td,fontSize:12,color:"var(--color-label-mute)"}}>{v.memo||"–"}</td>
                 <td style={S.td}>
                   <button style={S.editBtn} onClick={()=>openEdit(v)}>수정</button>
+                  <button style={S.editBtn} onClick={()=>setQrVehicle(v)}>🖨 QR</button>
                   <button style={S.delBtn} onClick={()=>handleDelete(v)}>삭제</button>
                 </td>
               </tr>
@@ -3124,6 +3160,26 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
           <div style={{display:"flex",gap:8,marginTop:8}}>
             <button style={{...S.addBtn,flex:1,opacity:loading?0.6:1}} onClick={handleSave} disabled={loading}>{loading?"저장 중...":"저장"}</button>
             <button style={{...S.closeBtn,flex:1}} onClick={()=>setShowForm(false)}>취소</button>
+          </div>
+        </div></div>
+      )}
+      {qrVehicle&&(
+        <div style={S.overlay}><div style={S.modal}>
+          <div style={S.modalTitle}>고정 QR — {qrVehicle.plateNo||qrVehicle.id}</div>
+          <div style={{fontSize:12,color:"var(--color-label-mute)",marginBottom:12,lineHeight:1.6}}>
+            차량에 부착하는 고정 QR입니다. 직원이 스캔하면 그날 이 차량 배차 노선으로 탑승 기록됩니다(만료 없음·재사용). 오늘 배차가 있어야 탑승됩니다.
+          </div>
+          <div style={{display:"flex",justifyContent:"center",padding:"8px 0"}}>
+            {qrDataUrl
+              ? <img src={qrDataUrl} alt="고정 QR" style={{width:240,height:240}}/>
+              : <div style={{width:240,height:240,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--color-label-mute)"}}>QR 생성 중…</div>}
+          </div>
+          <div style={{fontSize:11,color:"var(--color-label-mute)",wordBreak:"break-all",textAlign:"center",marginTop:8}}>
+            {getStaticBoardingUrl({companyId,vehicleId:qrVehicle.id})}
+          </div>
+          <div style={{display:"flex",gap:8,marginTop:16}}>
+            <button style={{...S.addBtn,flex:1,opacity:qrDataUrl?1:0.6}} onClick={printQr} disabled={!qrDataUrl}>🖨 인쇄</button>
+            <button style={{...S.closeBtn,flex:1}} onClick={()=>setQrVehicle(null)}>닫기</button>
           </div>
         </div></div>
       )}

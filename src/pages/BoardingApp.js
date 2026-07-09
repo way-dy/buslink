@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { validateAndBoard } from "../lib/boarding";
+import { validateAndBoard, validateAndBoardStatic } from "../lib/boarding";
 import { auth } from "../firebase";
 import { signInAnonymously } from "firebase/auth";
 
@@ -11,6 +11,10 @@ const STEPS = { INPUT: "input", LOADING: "loading", SUCCESS: "success", ERROR: "
 
 export default function BoardingApp() {
   const tokenId = getParam("t");
+  // 정적(고정) QR — 토큰 없이 회사/차량 ID 만 인코딩(`?c=&v=`). BoardingApp 이 오늘 배차로 노선 해석.
+  const cId = getParam("c");
+  const vId = getParam("v");
+  const isStatic = !tokenId && !!cId && !!vId;
   const [step, setStep] = useState(STEPS.INPUT);
   const [empNo, setEmpNo] = useState("");
   const [name, setName] = useState("");
@@ -19,11 +23,11 @@ export default function BoardingApp() {
   const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
-    if (!tokenId) {
+    if (!tokenId && !isStatic) {
       setErrMsg("QR코드가 올바르지 않습니다.\n버스 내 QR코드를 다시 스캔해주세요.");
       setStep(STEPS.ERROR);
     }
-  }, [tokenId]);
+  }, [tokenId, isStatic]);
 
   // 익명 인증 (2026-05-26) — boardings create rule(`isAuth()`) 통과용. 미인증 시 탑승 저장 차단됨.
   // EmployeeApp·PassengerApp·PartnerApp 패턴 일관. BoardingApp만 누락되어 있어 QR 탑승이 통계에 안 잡히는 결함 보정.
@@ -45,7 +49,9 @@ export default function BoardingApp() {
     }
     setStep(STEPS.LOADING);
     try {
-      const res = await validateAndBoard({ tokenId, empNo, name });
+      const res = isStatic
+        ? await validateAndBoardStatic({ companyId: cId, vehicleId: vId, empNo, name })
+        : await validateAndBoard({ tokenId, empNo, name });
       setResult(res);
       setStep(STEPS.SUCCESS);
       // 진동 피드백 (모바일)
@@ -68,7 +74,7 @@ export default function BoardingApp() {
           <div style={S.logo}>BL</div>
           <div>
             <div style={S.logoText}>BusLink</div>
-            <div style={S.logoSub}>탑승 확인</div>
+            <div style={S.logoSub}>{isStatic ? "고정 QR 탑승" : "탑승 확인"}</div>
           </div>
         </div>
 
@@ -80,8 +86,13 @@ export default function BoardingApp() {
             </div>
             <div style={S.title}>탑승 확인</div>
             <div style={S.desc}>
-              사번을 입력하면 탑승이 기록됩니다.<br/>
-              QR코드는 <span style={{ color: "#FFD166", fontWeight: 600 }}>5분</span> 후 만료됩니다.
+              사번을 입력하면 탑승이 기록됩니다.
+              {!isStatic && (
+                <>
+                  <br/>
+                  QR코드는 <span style={{ color: "#FFD166", fontWeight: 600 }}>5분</span> 후 만료됩니다.
+                </>
+              )}
             </div>
 
             <div style={S.inputGroup}>
@@ -137,8 +148,13 @@ export default function BoardingApp() {
           <div style={S.centerBox}>
             <div style={S.successIcon}>✓</div>
             <div style={{ fontSize: 22, fontWeight: 800, color: "#00C48C", marginBottom: 8 }}>
-              탑승 완료!
+              {result.alreadyBoarded ? "이미 탑승 처리됨" : "탑승 완료!"}
             </div>
+            {result.alreadyBoarded && (
+              <div style={{ fontSize: 13, color: "#FFD166", marginBottom: 8, textAlign: "center" }}>
+                이미 탑승 처리된 QR입니다.
+              </div>
+            )}
             <div style={{ fontSize: 15, color: "#F0F4FF", fontWeight: 600, marginBottom: 4, textAlign: "center" }}>
               {result.routeName}
             </div>
