@@ -1119,6 +1119,101 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
 
       {/* ── 스크롤 컨테이너: 노선도 스트립 + 하단 ETA/QR 패널 (지도 아래 남은 공간·하단 패널이 tabBar 뒤로 잘리는 것 방지, 2026-07-09 #3) ── */}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+      {/* ── 지하철식 진척 요약바 (#4, 2026-07-09) — 출발·현재·다음·도착 4노드 가로 진척 + 상태줄. 순수 추가 블록(아래 노선도 스트립·ETA 패널 100% 보존) ── */}
+      {stops.length >= 2 && (() => {
+        const lastIdx = stops.length - 1;
+        const inService = !!mainBus && busStopIdx >= 0;
+        // 4노드 산출 — 출발/현재/다음/도착. 같은 정류장 인덱스면 역할 병합(예 출발·현재).
+        const seen = new Map();
+        const addNode = (role, idx, current) => {
+          const stop = stops[idx];
+          if (!stop) return;
+          if (seen.has(idx)) {
+            const n = seen.get(idx);
+            if (!n.role.split('·').includes(role)) n.role += '·' + role;
+            n.current = n.current || current;
+          } else {
+            seen.set(idx, { role, idx, stop, current: !!current });
+          }
+        };
+        addNode('출발', 0, false);
+        if (inService) {
+          addNode('현재', busStopIdx, true);
+          if (busStopIdx + 1 <= lastIdx) addNode('다음', busStopIdx + 1, false); // 종점 임박이면 생략
+        }
+        addNode('도착', lastIdx, false);
+        const nodes = Array.from(seen.values()).sort((a, b) => a.idx - b.idx);
+        const reached = (idx) => inService && idx <= busStopIdx; // 통과/현재 구간
+
+        // 상태줄 — 운행 중이면 다음(없으면 도착)역으로 이동 중 + 다음역 ETA
+        const nextStop = inService
+          ? (busStopIdx + 1 <= lastIdx ? stops[busStopIdx + 1] : stops[lastIdx])
+          : null;
+        let etaText = null;
+        if (nextStop) {
+          const est = estByStopId[nextStop.id];
+          const hhmm = est && (est.estimatedAt || est.plannedAt);
+          const m = hhmm && /^(\d{1,2}):(\d{2})$/.exec(hhmm);
+          if (m) {
+            const base = new Date(); base.setHours(0, 0, 0, 0);
+            const diff = Math.round((base.getTime() + (+m[1] * 60 + +m[2]) * 60000 - Date.now()) / 60000);
+            if (diff >= 0 && diff < 60) etaText = diff === 0 ? '곧 도착' : `${diff}분`;
+            else if (est.estimatedAt) etaText = `${est.estimatedAt} 예상`; // 60분 이상/과거는 시각 표시
+          }
+        }
+
+        return (
+          <div style={{ background: 'var(--color-bg)', borderBottom: '1px solid var(--color-line)', padding: '12px 14px 10px' }}>
+            {/* 4노드 가로 진척 */}
+            <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+              {nodes.map((n, j) => {
+                const isReached = reached(n.idx) || n.current;
+                const est = estByStopId[n.stop.id];
+                const timeLabel = est && (est.estimatedAt || est.plannedAt);
+                const leftOn = j > 0 && reached(n.idx);
+                const rightOn = j < nodes.length - 1 && reached(nodes[j + 1].idx);
+                const nameColor = n.current ? 'var(--color-primary)'
+                  : n.role.includes('출발') ? 'var(--color-positive)'
+                  : n.role.includes('도착') ? 'var(--color-destructive)'
+                  : isReached ? 'var(--color-label)' : 'var(--color-label-mute)';
+                return (
+                  <div key={n.idx} style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    {/* 역할 라벨 */}
+                    <div style={{ fontSize: 11, fontWeight: 800, marginBottom: 3, color: n.current ? 'var(--color-primary)' : 'var(--color-label-mute)' }}>{n.role}</div>
+                    {/* 점 + 좌우 연결선(진척 색) */}
+                    <div style={{ position: 'relative', width: '100%', height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {j > 0 && <span style={{ position: 'absolute', left: 0, right: '50%', top: '50%', height: 3, transform: 'translateY(-50%)', background: leftOn ? 'var(--color-primary)' : 'var(--color-line)' }} />}
+                      {j < nodes.length - 1 && <span style={{ position: 'absolute', left: '50%', right: 0, top: '50%', height: 3, transform: 'translateY(-50%)', background: rightOn ? 'var(--color-primary)' : 'var(--color-line)' }} />}
+                      {n.current && <span style={{ position: 'absolute', left: '50%', top: '50%', width: 22, height: 22, transform: 'translate(-50%,-50%)', borderRadius: '50%', background: 'var(--color-primary)', opacity: 0.45, animation: 'buspulse 2s ease-out infinite', pointerEvents: 'none' }} />}
+                      <span style={{ position: 'relative', width: n.current ? 16 : 12, height: n.current ? 16 : 12, borderRadius: '50%', background: isReached ? 'var(--color-primary)' : 'var(--color-line)', border: '2px solid var(--color-bg)', boxShadow: n.current ? '0 0 0 3px rgba(0,102,255,.28)' : 'none' }} />
+                    </div>
+                    {/* 정류장명 */}
+                    <div style={{ fontSize: 12.5, fontWeight: n.current ? 800 : 700, marginTop: 5, maxWidth: '100%', color: nameColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.stop.name}</div>
+                    {/* 시각(있을 때만) */}
+                    {timeLabel && <div style={{ fontSize: 10, color: 'var(--color-label-alt)', marginTop: 1 }}>{timeLabel}</div>}
+                  </div>
+                );
+              })}
+            </div>
+            {/* 상태줄 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+              {inService && nextStop ? (
+                <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--color-label)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  🚌 {nextStop.name}(으)로 이동 중{etaText ? <> · <span style={{ color: 'var(--color-primary)', fontWeight: 800 }}>{nextStop.name}까지 {etaText}</span></> : null}
+                </div>
+              ) : (
+                <div style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: 'var(--color-label-mute)' }}>운행 중인 버스가 없습니다</div>
+              )}
+              {inService && mainBus && (
+                <button onClick={() => { userCenteredRef.current = true; setCenter({ lat: mainBus.lat, lng: mainBus.lng }); }}
+                  style={{ flexShrink: 0, background: 'var(--color-primary)', border: 'none', borderRadius: 'var(--radius-8)', padding: '6px 12px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', boxShadow: 'var(--shadow-strong)' }}>
+                  🚌 차량 위치 보기
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })()}
       {/* ── 노선도 스트립 (중간) ── */}
       <div style={{ background: 'var(--color-bg)', borderTop: '1px solid var(--color-line)', borderBottom: '1px solid var(--color-line)', flexShrink: 0, padding: '10px 0' }}>
         {stops.length === 0 ? (
