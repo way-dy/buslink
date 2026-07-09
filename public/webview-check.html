@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>BusLink 브라우저 진단</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --card:#fff; --line:#e3e6ea;
+    --text:#1a1d21; --mute:#6b7280;
+    --ok:#0f8a4d; --okbg:#e8f6ee;
+    --bad:#c62828; --badbg:#fdecec;
+    --warn:#a86400; --warnbg:#fff5e0;
+    --brand:#1565d8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Malgun Gothic","맑은 고딕",sans-serif;
+    font-size:15px;line-height:1.6;padding:16px 14px 48px;-webkit-text-size-adjust:100%}
+  h1{font-size:19px;margin:4px 0 2px;letter-spacing:-.02em}
+  .sub{color:var(--mute);font-size:13px;margin-bottom:18px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:16px;margin-bottom:14px}
+  .card h2{font-size:14px;margin:0 0 12px;color:var(--mute);font-weight:700;
+    letter-spacing:.02em}
+  .verdict{border-radius:14px;padding:18px 16px;margin-bottom:14px;border:1px solid transparent}
+  .verdict .big{font-size:20px;font-weight:800;letter-spacing:-.02em;margin-bottom:6px}
+  .verdict .why{font-size:14px;line-height:1.55}
+  .v-ok{background:var(--okbg);border-color:#bfe5cf;color:var(--ok)}
+  .v-bad{background:var(--badbg);border-color:#f3c9c9;color:var(--bad)}
+  .v-warn{background:var(--warnbg);border-color:#f0dcae;color:var(--warn)}
+  .verdict .why{color:var(--text)}
+  .row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+    padding:9px 0;border-bottom:1px dashed var(--line)}
+  .row:last-child{border-bottom:0;padding-bottom:0}
+  .row .k{color:var(--mute);font-size:13px;flex:0 0 auto}
+  .row .v{font-weight:600;text-align:right;word-break:break-all;font-size:13.5px}
+  .v.pass{color:var(--ok)} .v.fail{color:var(--bad)} .v.na{color:var(--mute)}
+  .steps{counter-reset:s;padding:0;margin:0;list-style:none}
+  .steps li{counter-increment:s;position:relative;padding:0 0 12px 30px;font-size:14px}
+  .steps li:last-child{padding-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:1px;
+    width:21px;height:21px;border-radius:50%;background:var(--brand);color:#fff;
+    font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  button{width:100%;padding:14px;border-radius:11px;border:0;background:var(--brand);
+    color:#fff;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;
+    margin-top:8px;-webkit-appearance:none}
+  button.ghost{background:#fff;color:var(--text);border:1px solid var(--line)}
+  pre{background:#f0f2f5;border:1px solid var(--line);border-radius:10px;padding:12px;
+    font-size:11.5px;line-height:1.5;overflow-x:auto;white-space:pre-wrap;word-break:break-all;
+    margin:12px 0 0;color:#374151}
+  .foot{color:var(--mute);font-size:12px;text-align:center;margin-top:20px;line-height:1.6}
+</style>
+</head>
+<body>
+
+<h1>BusLink 브라우저 진단</h1>
+<div class="sub">이 페이지를 연 브라우저에서 로그인 상태가 유지되는지 확인합니다.</div>
+
+<div id="verdict" class="verdict v-warn">
+  <div class="big">확인 중…</div>
+  <div class="why">잠시만 기다려 주세요.</div>
+</div>
+
+<div class="card">
+  <h2>테스트 방법</h2>
+  <ol class="steps">
+    <li>이 페이지가 <b>카카오T 앱 안에서</b> 열렸는지 확인합니다.</li>
+    <li>카카오T 앱을 <b>완전히 종료</b>합니다. (최근 앱 목록에서 밀어서 닫기)</li>
+    <li>카카오T를 다시 실행해 <b>같은 링크로 이 페이지에 재진입</b>합니다.</li>
+    <li>위 결과가 <b>“유지됨”</b> 이면 최초 1회 로그인 후 계속 로그인 상태가 유지됩니다.</li>
+  </ol>
+</div>
+
+<div class="card">
+  <h2>저장소 유지 여부</h2>
+  <div id="storage"></div>
+</div>
+
+<div class="card">
+  <h2>실행 환경</h2>
+  <div id="env"></div>
+</div>
+
+<div class="card">
+  <h2>알림 · 앱 설치 지원</h2>
+  <div id="caps"></div>
+</div>
+
+<div class="card">
+  <h2>결과 전송</h2>
+  <div style="color:var(--mute);font-size:13px;margin-bottom:6px">
+    아래 버튼으로 결과를 복사해 담당자에게 보내주세요.
+  </div>
+  <button id="copy">결과 복사하기</button>
+  <button id="reset" class="ghost">기록 지우고 처음부터 다시</button>
+  <pre id="report">…</pre>
+</div>
+
+<div class="foot">
+  동영관광 BusLink · 진단 전용 페이지<br>
+  개인정보를 수집하지 않으며, 결과는 이 기기에만 저장됩니다.
+</div>
+
+<script>
+(function () {
+  var KEY = "buslink_webview_probe";   // 이 진단 전용 키 (앱 세션 키와 분리)
+  var COOKIE = "buslink_probe_c";
+  var SESSION_KEY = "buslink_employee"; // 직원앱(/p) 실제 로그인 세션 키
+
+  function el(id) { return document.getElementById(id); }
+  function pad(n) { return n < 10 ? "0" + n : "" + n; }
+  function stamp(d) {
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+           " " + pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+  }
+  function row(k, v, cls) {
+    return '<div class="row"><span class="k">' + k +
+           '</span><span class="v ' + (cls || "") + '">' + v + "</span></div>";
+  }
+
+  // ── 저장소별 쓰기/읽기 (개별 try — 하나가 막혀도 나머지 계속) ──────────
+  function probe(store) {
+    try {
+      var raw = store.getItem(KEY);
+      store.setItem(KEY, raw || "1");
+      store.removeItem(KEY + "_t");
+      return { ok: true, had: !!raw };
+    } catch (e) { return { ok: false, had: false, err: e.name || "차단" }; }
+  }
+
+  function readCookie() {
+    var m = document.cookie.match(new RegExp("(?:^|; )" + COOKIE + "=([^;]*)"));
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+  function writeCookie(v) {
+    try {
+      document.cookie = COOKIE + "=" + encodeURIComponent(v) +
+        "; path=/; max-age=31536000; SameSite=Lax" +
+        (location.protocol === "https:" ? "; Secure" : "");
+      return true;
+    } catch (e) { return false; }
+  }
+
+  // ── 방문 기록: 최초 방문 시각 + 방문 횟수 (localStorage 정본) ──────────
+  var now = new Date();
+  var lsOk = true, record = null;
+  try {
+    var stored = localStorage.getItem(KEY);
+    record = stored ? JSON.parse(stored) : null;
+  } catch (e) { lsOk = false; }
+
+  var isFirstVisit = !record;
+  if (!record) record = { firstSeen: now.getTime(), visits: 0 };
+  record.visits += 1;
+  record.lastSeen = now.getTime();
+  try { localStorage.setItem(KEY, JSON.stringify(record)); } catch (e) { lsOk = false; }
+
+  var ssState = probe(window.sessionStorage);
+  var cookieHad = readCookie();
+  var cookieOk = writeCookie(String(record.firstSeen));
+
+  // IndexedDB 는 존재 여부만 (비동기 · 판정에 미사용)
+  var idbOk = false;
+  try { idbOk = !!window.indexedDB; } catch (e) { idbOk = false; }
+
+  // 실제 직원앱 로그인 세션이 이 브라우저에 남아있는지
+  var appSession = null;
+  try {
+    var s = localStorage.getItem(SESSION_KEY);
+    if (s) { var p = JSON.parse(s); appSession = p && p.empNo ? "있음 (사번 " + p.empNo + ")" : "있음"; }
+  } catch (e) { appSession = null; }
+
+  // ── 환경 판별 ────────────────────────────────────────────────────────
+  var ua = navigator.userAgent || "";
+  var isIOS = /iPhone|iPad|iPod/i.test(ua);
+  var isAndroid = /Android/i.test(ua);
+  var isKakaoTalk = /KAKAOTALK/i.test(ua);
+  var isKakaoT = /kakaot|daumkakao|TIARA/i.test(ua) && !isKakaoTalk;
+  var isOtherInApp = /FBAN|FBAV|Instagram|Line\/|NAVER|whale|everytimeapp/i.test(ua);
+  var isInApp = isKakaoTalk || isKakaoT || isOtherInApp;
+  var standalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+                   window.navigator.standalone === true;
+
+  var browserName = isKakaoT ? "카카오T 인앱 브라우저"
+    : isKakaoTalk ? "카카오톡 인앱 브라우저"
+    : isOtherInApp ? "기타 앱 내부 브라우저"
+    : standalone ? "홈 화면 설치 앱(PWA)"
+    : isIOS ? "iOS 기본 브라우저(사파리 계열)"
+    : isAndroid ? "Android 기본 브라우저(크롬 계열)"
+    : "데스크톱/일반 브라우저";
+
+  // 인앱 브라우저 UA 는 앱마다 제각각 → 미검출이어도 단정하지 않는다.
+  var envUncertain = !isInApp && !standalone && (isIOS || isAndroid);
+
+  // ── 지원 기능 ────────────────────────────────────────────────────────
+  var swOk = "serviceWorker" in navigator;
+  var notiOk = "Notification" in window;
+  var notiPerm = notiOk ? Notification.permission : "미지원";
+  var pushOk = "PushManager" in window;
+
+  // ── 판정 ────────────────────────────────────────────────────────────
+  // 2회차 이상 방문인데 최초 방문 시각이 남아있다 = 저장소가 살아남았다.
+  var persisted = !isFirstVisit && lsOk;
+  var v = el("verdict");
+  if (!lsOk) {
+    v.className = "verdict v-bad";
+    v.innerHTML = '<div class="big">로그인 유지 불가</div><div class="why">' +
+      "이 브라우저는 저장소를 차단하고 있습니다(시크릿 모드이거나 앱이 저장을 막는 경우). " +
+      "매번 새로 로그인해야 합니다.</div>";
+  } else if (persisted) {
+    v.className = "verdict v-ok";
+    v.innerHTML = '<div class="big">유지됨 · ' + record.visits + "회차 방문</div>" +
+      '<div class="why">최초 방문(' + stamp(new Date(record.firstSeen)) + ")에 저장한 기록이 " +
+      "그대로 남아 있습니다. <b>앱을 완전히 종료한 뒤 다시 열어도 이 화면이 계속 “유지됨”이면, " +
+      "최초 1회 로그인 후 재로그인 없이 사용할 수 있습니다.</b></div>";
+  } else {
+    v.className = "verdict v-warn";
+    v.innerHTML = '<div class="big">첫 방문 — 기록 저장 완료</div>' +
+      '<div class="why">지금 이 기기에 기록을 남겼습니다. <b>카카오T를 완전히 종료한 뒤 ' +
+      "같은 링크로 다시 들어와 주세요.</b> 그때 “유지됨”이 뜨면 로그인이 유지되는 환경입니다.</div>";
+  }
+
+  // ── 렌더 ────────────────────────────────────────────────────────────
+  el("storage").innerHTML =
+    row("방문 횟수", record.visits + "회", record.visits > 1 ? "pass" : "na") +
+    row("최초 방문 시각", stamp(new Date(record.firstSeen)), "na") +
+    row("localStorage (로그인 저장소)", lsOk ? "사용 가능" : "차단됨", lsOk ? "pass" : "fail") +
+    row("이전 기록 유지", persisted ? "유지됨" : (isFirstVisit ? "첫 방문" : "사라짐"),
+        persisted ? "pass" : (isFirstVisit ? "na" : "fail")) +
+    row("cookie", cookieOk ? (cookieHad ? "유지됨" : "저장함") : "차단됨", cookieOk ? "pass" : "fail") +
+    row("sessionStorage", ssState.ok ? "사용 가능" : "차단됨", ssState.ok ? "pass" : "fail") +
+    row("IndexedDB", idbOk ? "사용 가능" : "미지원", idbOk ? "pass" : "fail") +
+    row("직원앱 로그인 세션", appSession || "없음", appSession ? "pass" : "na");
+
+  el("env").innerHTML =
+    row("열린 브라우저", browserName + (envUncertain ? " (추정)" : ""),
+        isInApp ? "fail" : "pass") +
+    row("앱 내부 브라우저", isInApp ? "예" : (envUncertain ? "아닌 것으로 보임" : "아니오"),
+        isInApp ? "fail" : "pass") +
+    row("홈 화면 설치 앱", standalone ? "예" : "아니오", standalone ? "pass" : "na") +
+    row("접속 주소", location.host, "na") +
+    row("보안 연결(HTTPS)", location.protocol === "https:" ? "예" : "아니오",
+        location.protocol === "https:" ? "pass" : "fail");
+
+  el("caps").innerHTML =
+    row("푸시 알림 API", pushOk ? "지원" : "미지원", pushOk ? "pass" : "fail") +
+    row("알림 권한", notiPerm === "granted" ? "허용됨" : notiPerm === "denied" ? "거부됨" : notiPerm,
+        notiPerm === "granted" ? "pass" : "na") +
+    row("Service Worker", swOk ? "지원" : "미지원", swOk ? "pass" : "fail") +
+    row("도착 알림 수신 가능", (pushOk && swOk && !isInApp) ? "가능" : "불가",
+        (pushOk && swOk && !isInApp) ? "pass" : "fail");
+
+  // ── 보고서 텍스트 ────────────────────────────────────────────────────
+  var lines = [
+    "[BusLink 브라우저 진단 결과]",
+    "측정 시각: " + stamp(now),
+    "",
+    "판정: " + (!lsOk ? "로그인 유지 불가(저장소 차단)"
+              : persisted ? "유지됨 (" + record.visits + "회차)"
+              : "첫 방문 — 앱 종료 후 재진입해 재확인 필요"),
+    "최초 방문: " + stamp(new Date(record.firstSeen)),
+    "방문 횟수: " + record.visits,
+    "",
+    "브라우저: " + browserName,
+    "앱 내부 브라우저: " + (isInApp ? "예" : "아니오" + (envUncertain ? "(추정)" : "")),
+    "홈 화면 설치 앱: " + (standalone ? "예" : "아니오"),
+    "",
+    "localStorage: " + (lsOk ? "OK" : "차단"),
+    "cookie: " + (cookieOk ? "OK" : "차단"),
+    "sessionStorage: " + (ssState.ok ? "OK" : "차단"),
+    "IndexedDB: " + (idbOk ? "OK" : "미지원"),
+    "직원앱 세션: " + (appSession || "없음"),
+    "",
+    "푸시 알림: " + (pushOk ? "지원" : "미지원") + " / 권한: " + notiPerm,
+    "Service Worker: " + (swOk ? "지원" : "미지원"),
+    "도착 알림 수신: " + ((pushOk && swOk && !isInApp) ? "가능" : "불가"),
+    "",
+    "UA: " + ua
+  ];
+  var reportText = lines.join("\n");
+  el("report").textContent = reportText;
+
+  el("copy").addEventListener("click", function () {
+    var btn = this;
+    function done(msg) { btn.textContent = msg; setTimeout(function () { btn.textContent = "결과 복사하기"; }, 1800); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(reportText).then(function () { done("복사되었습니다"); },
+        function () { done("아래 내용을 직접 복사해 주세요"); });
+    } else {
+      // 인앱 브라우저는 clipboard API 가 막힌 경우가 많다 → 선택 폴백.
+      var r = document.createRange();
+      r.selectNodeContents(el("report"));
+      var sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(r);
+      done("아래 내용을 길게 눌러 복사해 주세요");
+    }
+  });
+
+  el("reset").addEventListener("click", function () {
+    try { localStorage.removeItem(KEY); } catch (e) {}
+    try { document.cookie = COOKIE + "=; path=/; max-age=0"; } catch (e) {}
+    location.reload();
+  });
+})();
+</script>
+</body>
+</html>
