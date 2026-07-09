@@ -1569,7 +1569,12 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
     } catch {}
   };
 
+  // 거래처 데이터 격리(2026-07-09 #1) — 직원 본인 거래처(session.partnerCode) 노선만 노출.
+  //   회의 결정 "자기 거래처만 보이게"(드롭다운 필터 불필요). partnerCode 미설정 직원은
+  //   전체 노출(하위호환) — 노선 변경 모달 filteredAllRoutes(2026-06-17)와 동일 규칙.
+  const myPartner = session.partnerCode || null;
   const filtered = routes.filter(r => {
+    if (myPartner && (r.partnerCode || null) !== myPartner) return false;
     if (filter === "즐겨찾기" && !favorites.includes(r.id)) return false;
     if (filter === "운행중" && !gpsData[r.id]) return false;
     if (filter !== "전체" && filter !== "즐겨찾기" && filter !== "운행중" && r.type !== filter) return false;
@@ -1581,6 +1586,16 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
     <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", background: "var(--color-bg-alt)" }}>
       <div style={{ background: "var(--color-bg)", padding: "14px 16px", borderBottom: "1px solid var(--color-line)" }}>
         <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 10, color: "var(--color-label)", letterSpacing: "-0.02em" }}>노선 목록</div>
+        {/* 선택된 거래처 안내(#1 데이터 격리) — 자기 거래처 노선만 노출됨을 명시. 미설정 직원은 미표시(전체). */}
+        {myPartner && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "9px 12px", borderRadius: "var(--radius-8)", background: "var(--color-primary-soft)", border: "1px solid var(--color-primary)" }}>
+            <span style={{ fontSize: 15 }}>🏢</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--color-primary-deep)" }}>선택된 거래처: {session.partnerName || myPartner}</div>
+              <div style={{ fontSize: 10, color: "var(--color-primary-deep)", opacity: 0.75 }}>해당 거래처 노선만 표시됩니다</div>
+            </div>
+          </div>
+        )}
         <input style={{ ...S.input, marginBottom: 10 }} placeholder="🔍 노선명·코드 검색"
           value={search} onChange={e => setSearch(e.target.value)} />
         <div style={{ display: "flex", gap: 6, overflowX: "auto" }}>
@@ -1605,7 +1620,12 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
           <div key={r.id} style={{ background: "var(--color-bg)", border: `1px solid ${favorites.includes(r.id) ? "var(--color-cautionary)" : "var(--color-line)"}`, borderRadius: "var(--radius-16)", padding: "14px 16px", marginBottom: 10, boxShadow: "var(--shadow-emphasize)" }}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
+                  {r.partnerName && (
+                    <span style={{ fontSize: 10, padding: "3px 9px", borderRadius: "var(--radius-pill)", background: "var(--color-bg-soft)", color: "var(--color-primary-deep)", fontWeight: 700, border: "1px solid var(--color-primary)" }}>
+                      {r.partnerName}
+                    </span>
+                  )}
                   <span style={{ fontSize: 10, padding: "3px 9px", borderRadius: "var(--radius-pill)", background: r.type === "출근" ? "var(--color-primary-soft)" : "var(--color-atomic-orange-90)", color: r.type === "출근" ? "var(--color-primary-deep)" : "#B95300", fontWeight: 600 }}>
                     {r.type}
                   </span>
