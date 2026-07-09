@@ -1117,6 +1117,8 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
         )}
       </div>
 
+      {/* ── 스크롤 컨테이너: 노선도 스트립 + 하단 ETA/QR 패널 (지도 아래 남은 공간·하단 패널이 tabBar 뒤로 잘리는 것 방지, 2026-07-09 #3) ── */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
       {/* ── 노선도 스트립 (중간) ── */}
       <div style={{ background: 'var(--color-bg)', borderTop: '1px solid var(--color-line)', borderBottom: '1px solid var(--color-line)', flexShrink: 0, padding: '10px 0' }}>
         {stops.length === 0 ? (
@@ -1290,6 +1292,7 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
           </div>
         )}
       </div>
+      </div>{/* /스크롤 컨테이너 (#3) — fixed 오버레이(모달/카드)는 이 아래 형제로 유지 */}
 
       {/* ── 노선 변경 모달 — 선택 시 chooseRoute로 기준 노선 갱신·영속·재바인딩 ── */}
       {routePicker && (
@@ -1460,7 +1463,9 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
   const [stopModal, setStopModal] = useState(null);     // 정류장+지도 바텀시트
   const [modalStops, setModalStops] = useState([]);
   const [modalBuses, setModalBuses] = useState([]);      // 해당 노선 실시간 버스
-  const [modalMapView, setModalMapView] = useState(false); // 바텀시트 내 지도 토글
+  const [modalView, setModalView] = useState("list"); // 바텀시트 보기: list | map | rv(거리뷰)
+  const [rvOpenStopId, setRvOpenStopId] = useState(null); // 거리뷰 아코디언: 펼친 정류장(한 번에 하나)
+  const [rvErrStopId, setRvErrStopId] = useState(null);   // 펼친 정류장에 파노라마 없을 때 그 id
   const [modalCenter, setModalCenter] = useState({ lat: 37.3894, lng: 126.9522 });
   const [loadingStops, setLoadingStops] = useState(false);
   const [photoView, setPhotoView] = useState(null); // 정류장 사진 라이트박스
@@ -1491,6 +1496,7 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
   useEffect(() => {
     if (!stopModal || !companyId) return;
     setLoadingStops(true); setModalStops([]);
+    setRvOpenStopId(null); setRvErrStopId(null); // 노선 바뀌면 거리뷰 아코디언 초기화
     getDocs(query(
       collection(db, "companies", companyId, "routes", stopModal.id, "stops"),
       orderBy("order", "asc")
@@ -1632,11 +1638,11 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
                 </div>
               ) : <div />}
               <div style={{ display:"flex", gap:4 }}>
-                <button onClick={(e) => { e.stopPropagation(); setStopModal(r); setModalMapView(false); }}
+                <button onClick={(e) => { e.stopPropagation(); setStopModal(r); setModalView("list"); }}
                   style={{ fontSize: 11, color: "var(--color-label-mute)", background: "var(--color-bg-soft)", border: "1px solid var(--color-line)", borderRadius: "var(--radius-6)", padding: "4px 10px", cursor: "pointer", fontFamily: "inherit" }}>
                   📍 정류장
                 </button>
-                <button onClick={(e) => { e.stopPropagation(); setStopModal(r); setModalMapView(true);
+                <button onClick={(e) => { e.stopPropagation(); setStopModal(r); setModalView("map");
                     if (modalStops.length > 0) setModalCenter({ lat: modalStops[0].lat, lng: modalStops[0].lng });
                   }}
                   style={{ fontSize: 11, color: gpsData[r.id] ? "#007A29" : "var(--color-label-mute)", background: gpsData[r.id] ? "#E6F7EB" : "var(--color-bg-soft)", border: gpsData[r.id] ? "1px solid rgba(0,191,64,.3)" : "1px solid var(--color-line)", borderRadius: "var(--radius-6)", padding: "4px 10px", cursor: "pointer", fontFamily: "inherit" }}>
@@ -1683,11 +1689,11 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
 
               {/* 보기 모드 전환 탭 */}
               <div style={{ display:"flex", gap:6, marginTop:10, background:"var(--color-bg-soft)", borderRadius:"var(--radius-8)", padding:3 }}>
-                {[["list","📋 정류장 목록"],["map","🗺 실시간 지도"]].map(([v,label])=>(
-                  <button key={v} onClick={()=>setModalMapView(v==="map")}
-                    style={{ flex:1, padding:"8px", border:"none", borderRadius:"var(--radius-6)", cursor:"pointer", fontFamily:"inherit", fontSize:12, fontWeight:600,
-                      background: (modalMapView ? v==="map" : v==="list") ? "var(--color-primary)" : "transparent",
-                      color: (modalMapView ? v==="map" : v==="list") ? "#fff" : "var(--color-label-mute)" }}>
+                {[["list","📋 정류장 목록"],["map","🗺 실시간 지도"],["rv","🛣 거리뷰"]].map(([v,label])=>(
+                  <button key={v} onClick={()=>setModalView(v)}
+                    style={{ flex:1, padding:"8px 4px", border:"none", borderRadius:"var(--radius-6)", cursor:"pointer", fontFamily:"inherit", fontSize:11, fontWeight:600, whiteSpace:"nowrap",
+                      background: modalView===v ? "var(--color-primary)" : "transparent",
+                      color: modalView===v ? "#fff" : "var(--color-label-mute)" }}>
                     {label}
                   </button>
                 ))}
@@ -1695,7 +1701,7 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
             </div>
 
             {/* ── 정류장 목록 보기 ── */}
-            {!modalMapView && (
+            {modalView === "list" && (
               <div style={{ overflowY:"auto", padding:"12px 16px 24px", flex:1 }}>
                 {loadingStops ? (
                   <div style={{ textAlign:"center", padding:24, color:"var(--color-label-mute)", fontSize:13 }}>로딩 중...</div>
@@ -1753,7 +1759,7 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
             )}
 
             {/* ── 실시간 지도 보기 ── */}
-            {modalMapView && (
+            {modalView === "map" && (
               <div style={{ flex:1, minHeight:300, position:"relative" }}>
                 <Map center={modalCenter} style={{ width:"100%", height:"100%" }} level={9}
                   onCreate={map => { map.relayout(); setTimeout(() => map.relayout(), 300); }}
@@ -1815,6 +1821,70 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
                   <div style={{ position:"absolute", bottom:12, left:"50%", transform:"translateX(-50%)", background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:"var(--radius-pill)", padding:"7px 16px", fontSize:11, color:"var(--color-label-mute)", whiteSpace:"nowrap", boxShadow:"var(--shadow-float)" }}>
                     현재 운행 중인 버스가 없습니다
                   </div>
+                )}
+              </div>
+            )}
+
+            {/* ── 거리뷰 보기 (아코디언, 한 번에 하나 펼침, 2026-07-09 #2) ── */}
+            {modalView === "rv" && (
+              <div style={{ overflowY:"auto", padding:"12px 16px 24px", flex:1 }}>
+                {loadingStops ? (
+                  <div style={{ textAlign:"center", padding:24, color:"var(--color-label-mute)", fontSize:13 }}>로딩 중...</div>
+                ) : modalStops.length === 0 ? (
+                  <div style={{ textAlign:"center", padding:24, color:"var(--color-label-alt)", fontSize:13 }}>등록된 정류장이 없습니다</div>
+                ) : (
+                  modalStops.map((s, i) => {
+                    const open = rvOpenStopId === s.id;
+                    const rvLat = Number(s.lat), rvLng = Number(s.lng);
+                    const coordOk = Number.isFinite(rvLat) && Number.isFinite(rvLng);
+                    return (
+                      <div key={s.id} style={{ border:"1px solid var(--color-line)", borderRadius:"var(--radius-12)", marginBottom:8, overflow:"hidden", background:"var(--color-bg)" }}>
+                        <div onClick={() => { if (open) { setRvOpenStopId(null); } else { setRvOpenStopId(s.id); setRvErrStopId(null); } }}
+                          style={{ display:"flex", alignItems:"center", gap:10, padding:"11px 12px", cursor:"pointer" }}>
+                          <div style={{ width:26, height:26, borderRadius:"50%", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:700,
+                            background: i===0?"var(--color-positive)":i===modalStops.length-1?"var(--color-destructive)":"var(--color-primary)", color:"#fff", border:"3px solid var(--color-bg)" }}>
+                            {i===0?"출":i===modalStops.length-1?"도":i+1}
+                          </div>
+                          <div style={{ flex:1, minWidth:0, fontSize:13, fontWeight: i===0||i===modalStops.length-1?700:600,
+                            color: i===0?"#007A29":i===modalStops.length-1?"var(--color-destructive)":"var(--color-label)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                            {s.name}
+                          </div>
+                          <span style={{ fontSize:15, fontWeight:800, color:"var(--color-label-mute)", flexShrink:0, transform: open?"rotate(90deg)":"none", transition:"transform .15s" }}>›</span>
+                        </div>
+                        {open && (
+                          <div style={{ padding:"0 12px 12px" }}>
+                            {coordOk && rvErrStopId !== s.id ? (
+                              <>
+                                <div style={{ height:200, width:"100%", borderRadius:"var(--radius-8)", overflow:"hidden", border:"1px solid var(--color-line)" }}>
+                                  <Roadview
+                                    position={{ lat:rvLat, lng:rvLng, radius:60 }}
+                                    onErrorGetNearestPanoId={() => setRvErrStopId(s.id)}
+                                    onCreate={rv => { try { rv.relayout(); } catch (e) { /* 바텀시트 애니메이션 중 0px init 방어 */ } }}
+                                    style={{ width:"100%", height:"100%" }}
+                                  />
+                                </div>
+                                <button onClick={() => window.open("https://map.kakao.com/link/roadview/"+rvLat+","+rvLng, "_blank")}
+                                  style={{ marginTop:8, width:"100%", padding:"9px", border:"1px solid var(--color-line)", borderRadius:"var(--radius-8)", background:"var(--color-bg-soft)", color:"var(--color-label)", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
+                                  🗺 카카오맵에서 열기
+                                </button>
+                              </>
+                            ) : (
+                              <div>
+                                <div style={{ fontSize:12, color:"var(--color-label-mute)", padding:"8px 0", textAlign:"center" }}>
+                                  이 정류장은 거리뷰가 없습니다
+                                </div>
+                                {s.photo && (
+                                  <img src={s.photo} alt={`${s.name} 정류장`}
+                                    onClick={()=>setPhotoView({ src:s.photo, name:s.name, desc:s.description })}
+                                    style={{ width:"100%", maxHeight:200, objectFit:"cover", borderRadius:"var(--radius-8)", border:"1px solid var(--color-line)", cursor:"pointer", display:"block" }}/>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             )}
