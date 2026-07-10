@@ -203,25 +203,19 @@ export function getStaticBoardingUrl({ companyId, vehicleId }) {
   return `${base}/board?c=${encodeURIComponent(companyId)}&v=${encodeURIComponent(vehicleId)}`;
 }
 
-// ─── 정적 QR 검증 + 탑승 기록 ────────────────────────────
-// 만료/소각 없음(재사용 가능). 중복 방지 = 멱등(직원 1인 × 차량 × 당일 1건).
-// boardings 스키마는 validateAndBoard 와 100% 동일(통계 화면 무영향) + via:"static" 만 추가.
-export async function validateAndBoardStatic({ companyId, vehicleId, empNo, name }) {
-  if (!empNo || !empNo.trim()) throw new Error("사번을 입력해주세요");
-
+// ─── 정적 QR — 오늘 배차 해석 ────────────────────────────
+// 차량ID만 있는 고정 QR 은 "오늘 이 차량이 어느 노선을 뛰는가"를 배차에서 읽어야 한다.
+// 탑승 기록(validateAndBoardStatic) 과 스캔 직후 확인 화면(직원앱 ScanTab) 이 함께 쓴다.
+// 배차 없으면 throw — 어느 노선 탑승인지 결정 불가.
+export async function resolveStaticDispatch({ companyId, vehicleId }) {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 
-  // 오늘 배차 해석 — 이 차량의 오늘 dispatch 로 routeId/routeName/driverId/vehicleNo 확보.
-  // 배차 없으면 탑승 불가(어느 노선 탑승인지 결정 불가) — 관리자 문의 안내.
   const dispSnap = await getDocs(
     query(collection(db, "companies", companyId, "dispatches", today, "list"), where("vehicleId", "==", vehicleId))
   );
   if (dispSnap.empty) throw new Error("오늘 이 차량은 운행 배차가 없습니다\n관리자에게 문의하세요");
 
   const disp = dispSnap.docs[0].data();
-  const routeId = disp.routeId || "";
-  const routeName = disp.routeName || "";
-  const driverId = disp.driverId || "";
   let vehicleNo = disp.vehicleNo || "";
   // 배차에 vehicleNo 없으면 vehicles/{vehicleId}.plateNo 폴백.
   if (!vehicleNo) {
@@ -230,6 +224,23 @@ export async function validateAndBoardStatic({ companyId, vehicleId, empNo, name
       if (vSnap.exists()) vehicleNo = vSnap.data().plateNo || "";
     } catch (_) { /* 권한/네트워크 오류 → vehicleNo 빈 문자열, 탑승 자체는 진행 */ }
   }
+
+  return {
+    today,
+    routeId: disp.routeId || "",
+    routeName: disp.routeName || "",
+    driverId: disp.driverId || "",
+    vehicleNo,
+  };
+}
+
+// ─── 정적 QR 검증 + 탑승 기록 ────────────────────────────
+// 만료/소각 없음(재사용 가능). 중복 방지 = 멱등(직원 1인 × 차량 × 당일 1건).
+// boardings 스키마는 validateAndBoard 와 100% 동일(통계 화면 무영향) + via:"static" 만 추가.
+export async function validateAndBoardStatic({ companyId, vehicleId, empNo, name }) {
+  if (!empNo || !empNo.trim()) throw new Error("사번을 입력해주세요");
+
+  const { today, routeId, routeName, driverId, vehicleNo } = await resolveStaticDispatch({ companyId, vehicleId });
 
   // partnerCode 자동 채움 — validateAndBoard 와 동일 패턴(협력사별 통계용).
   let partnerCode = null;

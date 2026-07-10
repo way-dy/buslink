@@ -9,6 +9,7 @@ import {
   doc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, orderBy
 } from "firebase/firestore";
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
+import { compareRoutes } from "../lib/routeOrder";
 import { sendGPS } from "../lib/gps";
 import { forceReconnect } from "../lib/forceReconnect";
 import { createPartnerCode, getBoardingUrl } from "../lib/partner";
@@ -1864,8 +1865,9 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
   const [editItem, setEditItem] = useState(null);
   const [filter, setFilter] = useState("전체");
   const [search, setSearch] = useState("");
-  const [form, setForm] = useState({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"", boardingMode:"" });
+  const [form, setForm] = useState({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"", boardingMode:"", order:"" });
   const [loading, setLoading] = useState(false);
+  const [reordering, setReordering] = useState(false); // 노선 순서 ▲▼ 저장 중
   const [partners, setPartners] = useState([]); // 협력사 목록
   const [partnerFilter, setPartnerFilter] = useState("전체"); // 거래처 필터
   // 대시보드 '거래처별 노선관리' 진입 시 해당 거래처로 필터 고정 후 신호 소비(1회, 2026-06-15).
@@ -1925,10 +1927,10 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
     );
   }, [stopsRoute, companyId]);
 
-  const openAdd = () => { setEditItem(null); setForm({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"", boardingMode:"" }); setShowForm(true); };
+  const openAdd = () => { setEditItem(null); setForm({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"", boardingMode:"", order:"" }); setShowForm(true); };
   const openEdit = (item) => {
     setEditItem(item);
-    setForm({ name:item.name||"", code:item.code||"", type:item.type||"출근", shift:item.shift||"주간조", seats:item.seats?.toString()||"", departTime:item.departTime||"", memo:item.memo||"", partnerCode:item.partnerCode||"", partnerName:item.partnerName||"", boardingMode:item.boardingMode||"" });
+    setForm({ name:item.name||"", code:item.code||"", type:item.type||"출근", shift:item.shift||"주간조", seats:item.seats?.toString()||"", departTime:item.departTime||"", memo:item.memo||"", partnerCode:item.partnerCode||"", partnerName:item.partnerName||"", boardingMode:item.boardingMode||"", order: typeof item.order === "number" ? String(item.order) : "" });
     setShowForm(true);
   };
 
@@ -1937,7 +1939,11 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
     setLoading(true);
     // boardingMode: ""(미설정=협력사 정책 fallback) | "driver-qr"(노선 강제 기사발행) | "passenger-qr"(노선 강제 직원발행).
     // 2026-05-27 — 혼승 노선 대응을 위한 노선 단위 override.
-    const data = { name:form.name.trim(), code:form.code.trim(), type:form.type, shift:form.shift, seats:form.seats?parseInt(form.seats):null, departTime:form.departTime, memo:form.memo.trim(), partnerCode:form.partnerCode, partnerName:form.partnerName, boardingMode:form.boardingMode||"", updatedAt:new Date().toISOString() };
+    // order: 승객·직원앱 노선 목록 표시 순서(작을수록 위). 빈값=null(미설정 → 목록 맨 뒤).
+    const rawOrder = (form.order ?? "").toString().trim();
+    const orderVal = rawOrder === "" ? null : parseInt(rawOrder, 10);
+    if (rawOrder !== "" && !Number.isFinite(orderVal)) { setLoading(false); return alert("표시 순서는 숫자로 입력해주세요"); }
+    const data = { name:form.name.trim(), code:form.code.trim(), type:form.type, shift:form.shift, seats:form.seats?parseInt(form.seats):null, departTime:form.departTime, memo:form.memo.trim(), partnerCode:form.partnerCode, partnerName:form.partnerName, boardingMode:form.boardingMode||"", order:orderVal, updatedAt:new Date().toISOString() };
     try {
       if (editItem) {
         await updateDoc(doc(db, "companies", companyId, "routes", editItem.id), data);
@@ -1973,6 +1979,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
         seats: item.seats ?? null,
         departTime: item.departTime || "",
         memo: item.memo || "",
+        order: typeof item.order === "number" ? item.order : null, // 원본 옆에 붙도록 순서 보존
         partnerCode: item.partnerCode || "",
         partnerName: item.partnerName || "",
         boardingMode: item.boardingMode || "",
@@ -2301,7 +2308,38 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
     }
     if (search && !r.name.includes(search) && !r.code?.includes(search)) return false;
     return true;
-  });
+  }).sort(compareRoutes); // 표시 순서(order) — 승객·직원앱 노선 목록과 동일 규칙(2026-07-10)
+
+  // ── 노선 표시 순서 ▲▼ (2026-07-10) — 정류장 moveStop 과 같은 패턴(인접 두 행의 order 값 교환).
+  //   레거시 노선은 order 가 없으므로, 첫 이동 시 현재 정렬 순서대로 회사 전체 노선에 0..n-1 을
+  //   한 번 백필한 뒤 교환한다(백필 없이 교환하면 둘 다 undefined 라 순서가 안 바뀜).
+  //   필터/검색으로 일부만 보이는 상태에서도 "보이는 두 행"의 값만 맞바꾸므로 그 부분순서는 정확.
+  const moveRoute = async (idx, dir) => {
+    const target = idx + dir;
+    if (target < 0 || target >= filtered.length || reordering) return;
+    setReordering(true);
+    try {
+      let list = filtered;
+      // 백필 — 회사 전체 노선에 order 부여(이미 전부 숫자면 skip).
+      if (routes.some(r => typeof r.order !== "number")) {
+        const seeded = [...routes].sort(compareRoutes);
+        await Promise.all(seeded.map((r, i) =>
+          typeof r.order === "number" && r.order === i
+            ? Promise.resolve()
+            : updateDoc(doc(db, "companies", companyId, "routes", r.id), { order: i })
+        ));
+        const orderById = new Map(seeded.map((r, i) => [r.id, i]));
+        list = filtered.map(r => ({ ...r, order: orderById.get(r.id) }));
+      }
+      const a = list[idx], b = list[target];
+      await Promise.all([
+        updateDoc(doc(db, "companies", companyId, "routes", a.id), { order: b.order }),
+        updateDoc(doc(db, "companies", companyId, "routes", b.id), { order: a.order }),
+      ]);
+    } catch (e) { alert("순서 변경 오류: " + e.message); }
+    setReordering(false);
+  };
+
   // 거래처 드롭다운 옵션도 제한(allowed 협력사만).
   const visiblePartners = isAllAccess(allowed)
     ? partners
@@ -2341,15 +2379,27 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
       <div style={S.tableWrap}>
         <table style={S.table}>
           <thead>
-            <tr>{["구분","거래처","근무조","코드","노선명","좌석수","출발시간","정류장"].map(h=><th key={h} style={S.th}>{h}</th>)}<th style={S.th}>관리</th></tr>
+            <tr>{["순서","구분","거래처","근무조","코드","노선명","좌석수","출발시간","정류장"].map(h=><th key={h} style={S.th}>{h}</th>)}<th style={S.th}>관리</th></tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"var(--color-label-alt)"}}>
+              <tr><td colSpan={10} style={{...S.td,textAlign:"center",color:"var(--color-label-alt)"}}>
                 {routes.length===0?"등록된 노선이 없습니다":"검색 결과가 없습니다"}
               </td></tr>
-            ) : [...filtered].sort((a,b)=>a.departTime>b.departTime?1:-1).map(r=>(
+            ) : filtered.map((r,i)=>(
               <tr key={r.id} style={S.tr}>
+                {/* 표시 순서 — 승객·직원앱 노선 목록에 이 순서 그대로 반영(2026-07-10) */}
+                <td style={S.td}>
+                  <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                    <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
+                      <button title="위로" disabled={i===0||reordering} onClick={()=>moveRoute(i,-1)}
+                        style={{...S.editBtn, padding:"1px 5px", lineHeight:1.2, opacity:(i===0||reordering)?0.35:1, cursor:(i===0||reordering)?"default":"pointer"}}>▲</button>
+                      <button title="아래로" disabled={i===filtered.length-1||reordering} onClick={()=>moveRoute(i,1)}
+                        style={{...S.editBtn, padding:"1px 5px", lineHeight:1.2, opacity:(i===filtered.length-1||reordering)?0.35:1, cursor:(i===filtered.length-1||reordering)?"default":"pointer"}}>▼</button>
+                    </div>
+                    <span style={{ fontSize:12, fontWeight:700, color:"var(--color-label-mute)", fontFamily:"var(--font-mono)" }}>{i+1}</span>
+                  </div>
+                </td>
                 <td style={S.td}><span style={{...S.statusBadge, background:r.type==="출근"?"var(--color-primary-soft)":"#FFF1E0", color:r.type==="출근"?"var(--color-primary-deep)":"#B95300"}}>{r.type}</span></td>
                 <td style={{...S.td,fontSize:12}}><span style={{ background:"var(--color-bg-soft)", color:"var(--color-label-mute)", borderRadius:6, padding:"2px 7px", fontSize:11, fontWeight:600, whiteSpace:"nowrap" }}>{r.partnerName||"–"}</span></td>
                 <td style={{...S.td,color:"var(--color-label-mute)",fontSize:12}}>{r.shift||"–"}</td>
@@ -2815,6 +2865,12 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
           <input style={S.input} type="time" value={form.departTime} onChange={e=>setForm({...form,departTime:e.target.value})} />
           <label style={S.label}>좌석수</label>
           <input style={S.input} type="number" placeholder="45" value={form.seats} onChange={e=>setForm({...form,seats:e.target.value})} />
+          {/* 표시 순서 — 승객·직원앱 노선 목록 정렬 기준. 비워두면 목록 맨 뒤(출발시간순). 2026-07-10 */}
+          <label style={S.label}>표시 순서</label>
+          <input style={S.input} type="number" placeholder="비워두면 맨 뒤 (작을수록 위)" value={form.order} onChange={e=>setForm({...form,order:e.target.value})} />
+          <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:-6, marginBottom:8 }}>
+            승객·직원앱 노선 목록에 보이는 순서입니다. 목록에서 ▲▼ 버튼으로도 바꿀 수 있습니다.
+          </div>
           {/* 탑승 QR 방향(노선 단위 override) — 혼승 노선 대응. 미설정 시 협력사 정책 따름. 2026-05-27 */}
           <label style={S.label}>탑승 QR 방향 (노선 override)</label>
           <select style={S.input} value={form.boardingMode}

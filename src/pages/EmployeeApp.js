@@ -16,8 +16,9 @@ import { useSmoothedEta } from "../lib/useSmoothedEta";
 import { useWakeTick } from "../lib/useWakeTick";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
 import { forceReconnect } from "../lib/forceReconnect";
+import { compareRoutes, sortRoutes } from "../lib/routeOrder";
 
-import { validateAndBoard, createPassengerToken } from "../lib/boarding";
+import { validateAndBoard, createPassengerToken, resolveStaticDispatch, validateAndBoardStatic } from "../lib/boarding";
 import { hashPin } from "../lib/partner";
 import QRCode from "qrcode";
 import { BusLinkLogo, StatusDot } from "../components/ui";
@@ -552,7 +553,7 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
       const shown = all.filter(r => r.id === session.routeId || favorites.includes(r.id));
       // 미배정 폴백도 본인 거래처 노선만(타 거래처 노출 차단). partnerCode 미설정 직원은 전체(하위호환).
       const myPartner = session.partnerCode || null;
-      const fallback = (myPartner ? all.filter(r => (r.partnerCode || null) === myPartner) : all).slice(0, 3);
+      const fallback = sortRoutes(myPartner ? all.filter(r => (r.partnerCode || null) === myPartner) : all).slice(0, 3);
       setRoutes(shown.length > 0 ? shown : fallback);
       if (!activeRouteId && shown.length > 0) setActiveRouteId(shown[0].id);
     });
@@ -593,7 +594,7 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
     const q = routeQuery.trim().toLowerCase();
     if (!q) return true;
     return [r.name, r.type, r.code, r.partnerName].some(v => (v || "").toString().toLowerCase().includes(q));
-  });
+  }).sort(compareRoutes); // 관리자 지정 표시 순서(2026-07-10) — 노선 탭 목록과 동일 규칙
 
   // 정류장 로드 + 저장된 '내 정류장' 복원(도착 임박 푸시, 2026-05-22)
   // fcmTokens/{empNo} 에 저장된 routeId/stopId 가 현재 노선과 일치하면 myStopIdx 복원 →
@@ -1675,7 +1676,7 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
     if (filter !== "전체" && filter !== "즐겨찾기" && filter !== "운행중" && r.type !== filter) return false;
     if (search && !r.name.includes(search) && !r.code?.includes(search)) return false;
     return true;
-  });
+  }).sort(compareRoutes); // 관리자가 노선 관리에서 정한 표시 순서(2026-07-10)
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", background: "var(--color-bg-alt)" }}>
@@ -2336,6 +2337,8 @@ function ScanTabDriverQR({ companyId, session }) {
   // jsQR npm 패키지로 직접 import — 항상 사용 가능
   const [scannedToken, setScannedToken] = useState(null);
   const [tokenData, setTokenData] = useState(null);
+  const [staticQr, setStaticQr] = useState(null);          // 고정 QR 이면 {companyId, vehicleId}
+  const [alreadyBoarded, setAlreadyBoarded] = useState(false); // 고정 QR 재스캔(당일 중복) 여부
   const [errMsg, setErrMsg] = useState("");
   const [scanStatus, setScanStatus] = useState("");
   const videoRef = useRef(null);
@@ -2424,8 +2427,32 @@ function ScanTabDriverQR({ companyId, session }) {
   const handleTokenScanned = async (rawValue) => {
     setScanStatus("QR 확인 중...");
     try {
-      let token = rawValue.trim();
-      try { token = new URL(rawValue).searchParams.get("t") || token; } catch {}
+      const raw = (rawValue || "").trim();
+      let t = null, c = null, v = null;
+      try {
+        const u = new URL(raw);
+        t = u.searchParams.get("t");
+        c = u.searchParams.get("c");
+        v = u.searchParams.get("v");
+      } catch { /* URL 아님 → 토큰 문자열 그대로 취급 */ }
+
+      // 차량 부착 고정 QR(`/board?c={companyId}&v={vehicleId}`, 2026-07-09) — 토큰 없음.
+      // 유비칸 등 기사앱 미사용 차량용. 폰 기본 카메라(BoardingApp)와 이 인앱 스캐너 둘 다 지원.
+      if (!t && c && v) {
+        if (companyId && c !== companyId) throw new Error("다른 회사의 QR코드입니다");
+        const info = await resolveStaticDispatch({ companyId: c, vehicleId: v });
+        setStaticQr({ companyId: c, vehicleId: v });
+        setTokenData({ routeName: info.routeName, vehicleNo: info.vehicleNo });
+        setStep("confirm");
+        return;
+      }
+
+      const token = t || raw;
+      // Firestore 문서 ID 는 "/" 를 못 쓴다 — 탑승용이 아닌 QR(임의 URL 등)이 그대로 들어오면
+      // doc() 가 "Invalid segment / Paths must not contain //" 로 죽으므로 미리 걸러 안내한다.
+      if (!token || token.includes("/")) throw new Error("탑승용 QR코드가 아닙니다\n기사 폰 또는 차량에 부착된 QR을 스캔하세요");
+
+      setStaticQr(null);
       const snap = await getDoc(doc(db, "boardingTokens", token));
       if (!snap.exists()) throw new Error("유효하지 않은 QR코드입니다");
       const data = snap.data();
@@ -2438,7 +2465,13 @@ function ScanTabDriverQR({ companyId, session }) {
   const handleBoard = async () => {
     setStep("processing");
     try {
-      await validateAndBoard({ tokenId: scannedToken, empNo: session.empNo, name: session.name });
+      if (staticQr) {
+        const res = await validateAndBoardStatic({ ...staticQr, empNo: session.empNo, name: session.name });
+        setAlreadyBoarded(!!res.alreadyBoarded);
+      } else {
+        await validateAndBoard({ tokenId: scannedToken, empNo: session.empNo, name: session.name });
+        setAlreadyBoarded(false);
+      }
       if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]);
       setStep("success");
     } catch (e) { setErrMsg(e.message); setStep("error"); }
@@ -2447,6 +2480,7 @@ function ScanTabDriverQR({ companyId, session }) {
   const reset = () => {
     stopStream();
     setStep("ready"); setScannedToken(null); setTokenData(null);
+    setStaticQr(null); setAlreadyBoarded(false);
     setErrMsg(""); setScanStatus("");
   };
 
@@ -2454,7 +2488,7 @@ function ScanTabDriverQR({ companyId, session }) {
     <div style={{ display:"flex", flexDirection:"column", flex:1, overflow:"hidden", background:"var(--color-bg-alt)" }}>
       <div style={{ background:"var(--color-bg)", padding:"14px 16px", borderBottom:"1px solid var(--color-line)" }}>
         <div style={{ fontSize:16, fontWeight:800, color:"var(--color-label)", letterSpacing:"-0.02em" }}>QR 탑승</div>
-        <div style={{ fontSize:12, color:"var(--color-label-mute)", marginTop:2 }}>기사 폰의 QR코드를 스캔하세요</div>
+        <div style={{ fontSize:12, color:"var(--color-label-mute)", marginTop:2 }}>기사 폰 또는 차량에 부착된 QR코드를 스캔하세요</div>
       </div>
 
       <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24, gap:20, overflowY:"auto" }}>
@@ -2506,6 +2540,9 @@ function ScanTabDriverQR({ companyId, session }) {
               <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
                 <span style={{ fontSize:22 }}>✅</span>
                 <div style={{ fontSize:14, fontWeight:800, color:"#007A29" }}>QR 인식 완료</div>
+                {staticQr && (
+                  <span style={{ marginLeft:"auto", fontSize:10, fontWeight:700, padding:"3px 8px", borderRadius:"var(--radius-pill)", background:"var(--color-primary-soft)", color:"var(--color-primary-deep)" }}>고정 QR</span>
+                )}
               </div>
               {[["노선",tokenData.routeName],["차량",tokenData.vehicleNo],["탑승자",`${session.name} (${session.empNo})`],["부서",session.dept||"–"]].map(([k,v])=>(
                 <div key={k} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:"1px solid var(--color-line)" }}>
@@ -2531,9 +2568,11 @@ function ScanTabDriverQR({ companyId, session }) {
         {step === "success" && (
           <>
             <div style={{ width:80, height:80, borderRadius:"50%", background:"#E6F7EB", border:"2px solid var(--color-positive)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:36, color:"#007A29" }}>✓</div>
-            <div style={{ fontSize:22, fontWeight:800, color:"#007A29" }}>탑승 완료!</div>
+            <div style={{ fontSize:22, fontWeight:800, color:"#007A29" }}>{alreadyBoarded ? "이미 탑승 처리됨" : "탑승 완료!"}</div>
             <div style={{ fontSize:14, color:"var(--color-label)", fontWeight:700 }}>{session.name} ({session.dept})</div>
-            <div style={{ fontSize:12, color:"var(--color-label-mute)" }}>{new Date().toLocaleTimeString("ko-KR")}</div>
+            {alreadyBoarded
+              ? <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center", lineHeight:1.6 }}>오늘 이 차량 탑승은 이미 기록되어 있습니다<br/>중복 기록되지 않습니다</div>
+              : <div style={{ fontSize:12, color:"var(--color-label-mute)" }}>{new Date().toLocaleTimeString("ko-KR")}</div>}
             <button style={{ ...S.btnSecondary, marginTop:8, maxWidth:280 }} onClick={reset}>확인</button>
           </>
         )}

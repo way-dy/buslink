@@ -14,6 +14,7 @@ import { forceReconnect } from "../lib/forceReconnect";
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 import { resolveCompanyIdForAnon } from "../lib/companyResolver";
 import { useExitConfirm } from "../lib/useExitConfirm";
+import { sortRoutes } from "../lib/routeOrder";
 
 // ── 경로 진행 판정 임계값 (작업2, 2026-05-18 — EmployeeApp과 동일 정책) ──
 const OFF_ROUTE_M = 70;       // 버스 투영 수직거리 초과 시 경로 이탈로 보고 직전 진행 유지
@@ -131,9 +132,8 @@ export default function PassengerApp() {
   useEffect(() => {
     if (!ready) return;
     return onSnapshot(collection(db, "companies", companyId, "routes"), (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      list.sort((a, b) => (a.departTime || "") > (b.departTime || "") ? 1 : -1);
-      setRouteList(list);
+      // 관리자가 노선 관리에서 정한 표시 순서(order) → 출발시각 → 노선명 (2026-07-10)
+      setRouteList(sortRoutes(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     }, () => setRouteList([])); // 권한/네트워크 오류 시 우아 실패(딥링크 동작은 영향 없음)
   }, [companyId, ready]);
 
