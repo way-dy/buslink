@@ -1876,6 +1876,38 @@ async function loadRouteMeta(db, cid, routeId, cache) {
   return meta;
 }
 
+// ─── GPS 수신 시간 창 (device 차량 — pollDeviceVehicleGps 에서 사용) ───
+// device(유비칸 GPS 단말)는 상시신호라 기사 운행 시작/종료(mobile) 같은 수동 on/off 가 없다.
+// 노선 시간표(departTime + 정류장 offsetMin)에서 운행 시간 창을 자동 도출해, 그 밖의 시각에
+// 들어오는 좌표(퇴근 후 개인 운전 등)를 관제/승객앱에서 차단한다. 15분 신선도 가드는 '정차'
+// 차량만 걸러내지 '운행시간 밖 이동' 은 못 걸러 이 게이트가 보완.
+// 창 = [departTime − PRE, (departTime + 마지막 정류장 offset) + POST]. 운영자는 노선 출발시각·
+// 정류장 offsetMin(노선설정) 으로 이 창을 통제한다(별도 입력 필드 불필요).
+const GPS_WINDOW_PRE_MIN = 30;              // 출발 전 여유(예열·조기 출발)
+const GPS_WINDOW_POST_MIN = 60;             // 마지막 정류장 도착 후 여유(지연·회차)
+const GPS_WINDOW_DEFAULT_DURATION_MIN = 120; // 정류장 offsetMin 이 전무할 때 기본 운행 소요
+
+/** 노선 메타 → GPS 수신 허용 분(minute-of-day) 창 { startMin, endMin } 또는 null.
+ *  null = 게이트 없음(관대한 폴백): meta 부재/로드실패 또는 departTime 미설정 시.
+ *  → 노선에 출발시각을 넣기 전(레거시)에는 기존 동작(항상 허용, 신선도만) 그대로. */
+function computeGpsWindow(meta) {
+  if (!meta) return null;
+  const dep = hhmmToMinutes(meta.departTime);
+  if (dep === null) return null; // 출발시각 미설정 → 시간창 게이트 없음
+  let maxOffset = 0;
+  for (const st of (meta.stops || [])) {
+    if (typeof st.offsetMin === "number" && isFinite(st.offsetMin) && st.offsetMin > maxOffset) {
+      maxOffset = st.offsetMin;
+    }
+  }
+  const span = maxOffset > 0 ? maxOffset : GPS_WINDOW_DEFAULT_DURATION_MIN;
+  let startMin = dep - GPS_WINDOW_PRE_MIN;
+  let endMin = dep + span + GPS_WINDOW_POST_MIN;
+  if (startMin < 0) startMin = 0;          // 자정 이전 클램프
+  if (endMin > 1439) endMin = 1439;        // 자정 넘김 클램프(그날 끝까지 허용)
+  return { startMin, endMin };
+}
+
 // ════════════════════════════════════════════════════════════════
 // resolveBusinCarId (onCall) — 차량번호 → busin carId 조회.
 // AdminApp 차량 등록/수정 폼의 "번호로 carId 조회" 버튼이 호출.
@@ -1915,6 +1947,9 @@ exports.resolveBusinCarId = onCall(async (request) => {
 // gps/{cid}_{vehicleId} 문서에 sendGPS 동일 필드로 write(관제·승객앱 자동 표시).
 //
 // 가드:
+//  · 운행 시간 창(computeGpsWindow): 노선 departTime+정류장 offsetMin 에서 창 도출,
+//    현재 시각이 창 밖이면 skip(상시신호 단말이 운행 전/후 이동해도 표시 안 함).
+//    노선 departTime 미설정이면 게이트 없음(기존 동작 보존).
 //  · 신선도: 최신 좌표 시각이 KST 현재 대비 15분 초과 과거면 skip(주차·미운행 차량이
 //    어제 마지막 위치로 계속 fresh 뜨는 것 차단 — 이게 없으면 승객앱이 오도됨).
 //  · 오늘 배차 없으면 skip(routeId 없으면 승객앱 표시 불가 = 미운행 취급).
@@ -1983,6 +2018,16 @@ exports.pollDeviceVehicleGps = onSchedule(
             const disp = dispByVehicle[vehicleId];
             if (!disp) { skipped++; continue; } // 오늘 미운행 — routeId 없으면 승객앱 표시 불가
 
+            // 운행 시간 창 게이트 — 노선 시간표 밖(운행 전/후) 상시신호 좌표 차단.
+            // win=null(노선 departTime 미설정) 이면 게이트 없음 = 기존 동작 보존.
+            // meta 는 아래 도착감지에서도 재사용(routeMetaCache 로 1회 로드).
+            const meta = await loadRouteMeta(db, cid, disp.routeId, routeMetaCache);
+            const win = computeGpsWindow(meta);
+            if (win && (nowMin < win.startMin || nowMin > win.endMin)) {
+              skipped++;
+              continue; // 운행 시간대 아님 — busin 조회·gps write 모두 skip
+            }
+
             const rows = await fetchVehicleLocations(carId, today);
             if (!rows.length) { skipped++; continue; } // 좌표 0건
 
@@ -2014,7 +2059,7 @@ exports.pollDeviceVehicleGps = onSchedule(
             // notifyPreArrival 트리거 자동 발화(도착임박 푸시)·승객앱 도착시각 정상화.
             // 감지 실패가 gps write(이미 완료)나 폴러를 죽이지 않게 별도 try/catch.
             try {
-              const meta = await loadRouteMeta(db, cid, disp.routeId, routeMetaCache);
+              // meta 는 위 시간창 게이트에서 이미 로드(routeMetaCache) — 재사용.
               if (meta && meta.stops.length) {
                 const arrivals = disp.stopArrivals || {}; // 인메모리(같은 사이클 재감지 방지)
                 const updates = {};
