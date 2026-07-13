@@ -1,6 +1,9 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { defineSecret } = require("firebase-functions/params");
+// 개선 요청 구글챗 웹훅 — 시크릿 우선(getImprovementWebhookUrl 가 env→Firestore config 순 폴백).
+const GCHAT_WEBHOOK_URL = defineSecret("GCHAT_WEBHOOK_URL");
 const admin = require("firebase-admin");
 // 외부 운수 시스템(busin.co.kr) 서버사이드 fetch 용 — CORS·비표준 cert chain 때문에
 // 브라우저/클라이언트 fetch 불가, node http/https 로만 접근(rejectUnauthorized:false).
@@ -2198,6 +2201,9 @@ function postJson(urlStr, bodyObj) {
 
 /** config/improvementBoard.gchatWebhookUrl → http(s) URL 또는 null(미설정). */
 async function getImprovementWebhookUrl(db) {
+  // 우선순위: Functions 시크릿(GCHAT_WEBHOOK_URL) → Firestore config/improvementBoard.gchatWebhookUrl.
+  const envUrl = (process.env.GCHAT_WEBHOOK_URL || "").trim();
+  if (/^https?:\/\//.test(envUrl)) return envUrl;
   try {
     const snap = await db.collection("config").doc("improvementBoard").get();
     if (!snap.exists) return null;
@@ -2231,7 +2237,7 @@ function chatThreadUrl(baseUrl, reply) {
 }
 
 exports.onImprovementRequestCreate = onDocumentCreated(
-  { document: "improvement_requests/{id}", region: "us-central1" },
+  { document: "improvement_requests/{id}", region: "us-central1", secrets: [GCHAT_WEBHOOK_URL] },
   async (event) => {
     try {
       const db = admin.firestore();
@@ -2249,7 +2255,7 @@ exports.onImprovementRequestCreate = onDocumentCreated(
         cardsV2: [{
           cardId: "imp-" + id,
           card: {
-            header: { title: "🛠 새 개선 요청", subtitle: companyName },
+            header: { title: "🚌 BusLink · 새 개선 요청", subtitle: companyName },
             sections: [{
               widgets: [
                 { decoratedText: { topLabel: "제목", text: data.title || "(제목 없음)" } },
@@ -2270,7 +2276,7 @@ exports.onImprovementRequestCreate = onDocumentCreated(
 );
 
 exports.onImprovementRequestUpdate = onDocumentUpdated(
-  { document: "improvement_requests/{id}", region: "us-central1" },
+  { document: "improvement_requests/{id}", region: "us-central1", secrets: [GCHAT_WEBHOOK_URL] },
   async (event) => {
     try {
       const before = event.data?.before?.data() || {};
@@ -2295,7 +2301,7 @@ exports.onImprovementRequestUpdate = onDocumentUpdated(
       for (const h of notifiable) {
         const isStatus = !!h.statusTo;
         const statusLabel = IMPROVEMENT_STATUS_LABELS[h.statusTo] || h.statusTo;
-        const headerTitle = isStatus ? `🔄 상태 변경 → ${statusLabel}` : "💬 새 댓글";
+        const headerTitle = isStatus ? `🚌 BusLink · 상태 변경 → ${statusLabel}` : "🚌 BusLink · 새 댓글";
         const widgets = [
           { decoratedText: { topLabel: "제목", text: after.title || "(제목 없음)" } },
           { decoratedText: { topLabel: isStatus ? "처리" : "작성자", text: `${h.byName || "-"}` } },
