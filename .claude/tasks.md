@@ -2,9 +2,10 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
-## 현재 상태 (2026-07-10 세션 종료)
+## 현재 상태 (2026-07-13 세션 종료)
 > 이 저장소가 작업 정본. **어느 PC든** `git pull`(origin/master) + `.env.local`(↓부트스트랩, 카카오 키 `58bf34`)이면 빌드·배포 가능.
-> prod 라이브 = **`main.d42c1bcb.js`**(2026-07-10 curl 실측·4 서브도메인) + CF 23종. 기사앱 빌드마커 `v2026-06-09-livegps`. 옛 세션 로그는 @.claude/tasks-log.md.
+> prod 라이브 = **`main.4ac4d558.js`**(2026-07-13 curl 실측) + CF 27종. 기사앱 빌드마커 `v2026-06-09-livegps`. 옛 세션 로그는 @.claude/tasks-log.md.
+> **2026-07-13 세션(대량·전부 배포·커밋 완료)**: ① 🔴 **정적 QR 권한오류** — 익명 진입점(직원앱 스캐너·폰카메라)이 admin/driver 잠금 배차를 쿼리→거부. CF 위임 `resolveStaticBoarding`/`boardStatic`(Admin SDK·rules 무변경). ② **device GPS 운행 시간창** — 상시신호 단말을 노선 `departTime`+정류장 `offsetMin` 창(`computeGpsWindow`, dep−30~+offset+60분·미설정=게이트없음)으로 폴러가 게이트. ③ **깜빡 마커 위로**(요약바·노선도 스트립 −4px). ④ **개선 요청 게시판**(YDYOPS 이식) — AdminApp "개선 요청" 탭(인덱스 12·companyId 스코프)·`improvement_requests` 컬렉션·상태전이(superadmin)·댓글·**구글챗 알림**(CF 2종·웹훅=Functions 시크릿 `GCHAT_WEBHOOK_URL` 우선→`config/improvementBoard` 폴백·카드 "🚌 BusLink" 구분)·**본문 인라인 이미지**(리치 텍스트·data URI·DOMPurify sanitize 2회+svg차단 훅·총량 800KB 캡). rules `improvement_requests`+`config` 추가·인덱스 1개. 상세 issues.md/backend.md/functions.md/architecture.md. **커밋 62f3886~856b558 · 별도 웹훅 3e081f0.**
 > **2026-07-10 세션(prod 배포 `--only hosting`)**: 최우석 문의·점검·요청 3건. ① **문의(고정 QR)** — 유비칸 차량은 차량관리 고정 QR 사용이 맞음(2026-07-09 신설 기능의 정확한 용도). 답변만. ② **🔴 점검(스캔 오류)** — 고정 QR 을 직원앱 인앱 스캐너로 찍으면 `Paths must not contain //`. 근인=인앱 스캐너가 `?t=` 동적 토큰만 파싱(폰 기본 카메라는 원래 정상). `resolveStaticDispatch` 추출 + 3분기 파싱 + `includes("/")` 가드. ③ **요청(노선 순서)** — `routes` 조회에 정렬 부재(문서ID 순=무작위). `src/lib/routeOrder.js` 신설(order→departTime→name) + 관리자 "표시 순서" 입력·목록 ▲▼(레거시 0..n-1 백필). rules/indexes/CF 변경 0·신규 경고 0(HEAD 대조)·격리 node 테스트 통과. 상세 issues.md.
 > ⚠ **배포 검증 함정(이번 세션 실측)**: 경고 대조용 `git stash` → `npm run build`(HEAD) 하면 **`build/` 가 옛 번들로 덮인다**(build/ 는 gitignore 라 `stash pop` 이 안 되돌림). 그 상태로 배포하면 "Deploy complete" 인데 **prod 번들 해시 불변**. 배포 후 `curl | grep main.*.js` 로 **해시가 실제로 바뀌었는지** 반드시 확인(첫 배포가 no-op 이라 회귀는 없었음).
 > **2026-07-09 세션(prod 배포·앱 코드 무변경)**: 카카오T 마케팅 콜라보 문의 대응. 카카오측 "개인정보(사번/전화번호) 연동 전달로 무로그인 유지 가능?" → **연동 불필요**(자체 세션 무기한 유지)·평문 사번 파라미터 수용 불가로 답변. 인앱 웹뷰 제약을 코드로 실측 = 푸시 사망 + **QR 탑승확인 `getUserMedia` 가 더 치명적**(boardings→탑승통계·정류장매핑 연쇄). 진단 페이지 `public/webview-check.html` 신설·`--only hosting` 배포(정적 단일파일, **재빌드 없이 `build/` 에 cp** → 번들 해시 불변·회귀 0). 미팅 다음주 화/수 — 확답 3가지는 issues.md `[미해결]`. 문서: issues.md(171줄) → `issues-patterns.md` 토픽분할, tasks.md 옛 로그 tasks-log.md 아카이브.
