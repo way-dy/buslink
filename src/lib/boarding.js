@@ -1,7 +1,10 @@
 import { db } from "../firebase";
 import {
-  doc, setDoc, getDoc, getDocs, addDoc, collection, query, where, serverTimestamp, Timestamp
+  doc, setDoc, getDoc, addDoc, collection, serverTimestamp, Timestamp
 } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
+
+const functions = getFunctions(undefined, "us-central1");
 
 // ─── 토큰 생성 ───────────────────────────────────────────
 export async function createBoardingToken({ companyId, routeId, routeName, vehicleId, vehicleNo, driverId }) {
@@ -208,79 +211,27 @@ export function getStaticBoardingUrl({ companyId, vehicleId }) {
 // 탑승 기록(validateAndBoardStatic) 과 스캔 직후 확인 화면(직원앱 ScanTab) 이 함께 쓴다.
 // 배차 없으면 throw — 어느 노선 탑승인지 결정 불가.
 export async function resolveStaticDispatch({ companyId, vehicleId }) {
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
-
-  const dispSnap = await getDocs(
-    query(collection(db, "companies", companyId, "dispatches", today, "list"), where("vehicleId", "==", vehicleId))
-  );
-  if (dispSnap.empty) throw new Error("오늘 이 차량은 운행 배차가 없습니다\n관리자에게 문의하세요");
-
-  const disp = dispSnap.docs[0].data();
-  let vehicleNo = disp.vehicleNo || "";
-  // 배차에 vehicleNo 없으면 vehicles/{vehicleId}.plateNo 폴백.
-  if (!vehicleNo) {
-    try {
-      const vSnap = await getDoc(doc(db, "companies", companyId, "vehicles", vehicleId));
-      if (vSnap.exists()) vehicleNo = vSnap.data().plateNo || "";
-    } catch (_) { /* 권한/네트워크 오류 → vehicleNo 빈 문자열, 탑승 자체는 진행 */ }
-  }
-
-  return {
-    today,
-    routeId: disp.routeId || "",
-    routeName: disp.routeName || "",
-    driverId: disp.driverId || "",
-    vehicleNo,
-  };
+  // 배차 읽기 규칙은 admin/driver 잠금 → 익명 진입점은 쿼리 거부됨.
+  // CF resolveStaticBoarding(Admin SDK)이 서버에서 배차 해석(반환 shape 동일).
+  const { data } = await httpsCallable(functions, "resolveStaticBoarding")({ companyId, vehicleId });
+  return data; // { today, routeId, routeName, driverId, vehicleNo }
 }
 
 // ─── 정적 QR 검증 + 탑승 기록 ────────────────────────────
 // 만료/소각 없음(재사용 가능). 중복 방지 = 멱등(직원 1인 × 차량 × 당일 1건).
 // boardings 스키마는 validateAndBoard 와 100% 동일(통계 화면 무영향) + via:"static" 만 추가.
 export async function validateAndBoardStatic({ companyId, vehicleId, empNo, name }) {
-  if (!empNo || !empNo.trim()) throw new Error("사번을 입력해주세요");
+  if (!empNo || !empNo.trim()) throw new Error("사번을 입력해주세요"); // 빠른 UX 가드(클라)
 
-  const { today, routeId, routeName, driverId, vehicleNo } = await resolveStaticDispatch({ companyId, vehicleId });
-
-  // partnerCode 자동 채움 — validateAndBoard 와 동일 패턴(협력사별 통계용).
-  let partnerCode = null;
-  try {
-    const passSnap = await getDoc(doc(db, "companies", companyId, "passengers", empNo.trim()));
-    if (passSnap.exists()) partnerCode = passSnap.data().partnerCode || null;
-  } catch (_) { /* 권한/네트워크 오류는 partnerCode 부재로 처리 — 탑승 기록 자체는 진행 */ }
-
-  // 차량 GPS 위치 캡처 — validateAndBoard 와 동일 패턴(정류장 매핑용).
-  let vehicleLat = null, vehicleLng = null, vehicleSpeed = null;
-  try {
-    const gpsSnap = await getDoc(doc(db, "gps", `${companyId}_${vehicleId}`));
-    if (gpsSnap.exists()) {
-      const g = gpsSnap.data();
-      vehicleLat = typeof g.lat === "number" ? g.lat : null;
-      vehicleLng = typeof g.lng === "number" ? g.lng : null;
-      vehicleSpeed = typeof g.speed === "number" ? g.speed : null;
-    }
-  } catch (_) { /* GPS 미수신/권한 → null 처리, 탑승 자체는 진행 */ }
-
-  // 멱등 boarding — 결정적 doc id(직원 1인 × 차량 × 당일 1건). 이미 있으면 첫 스캔 보존.
-  const boardingRef = doc(db, "companies", companyId, "boardings", today, "list", `${empNo.trim()}__${vehicleId}`);
-  const existing = await getDoc(boardingRef);
-  if (existing.exists()) {
-    return { routeName, vehicleNo, dispatchDate: today, alreadyBoarded: true };
-  }
-
-  await setDoc(boardingRef, {
-    empNo: empNo.trim(),
-    name: name?.trim() || "",
-    tokenId: "",           // 정적 QR 은 토큰 없음(스키마 자리 유지)
-    companyId, routeId, routeName,
-    vehicleId, vehicleNo, driverId,
-    stopId: "",
-    stopName: "",
-    partnerCode,
-    vehicleLat, vehicleLng, vehicleSpeed,
-    via: "static",         // 정적 QR 탑승 식별(통계 read 호환·옵셔널)
-    boardedAt: serverTimestamp(),
+  // 배차 재해석·partnerCode/GPS 캡처·멱등 boarding 생성은 서버(CF boardStatic·Admin SDK)에 위임.
+  // 익명 진입점이 배차 읽기 규칙(admin/driver 잠금)에서 거부되던 문제 회피. 반환 계약 보존.
+  const { data } = await httpsCallable(functions, "boardStatic")({
+    companyId, vehicleId, empNo: empNo.trim(), name: name || "",
   });
-
-  return { routeName, vehicleNo, dispatchDate: today, alreadyBoarded: false };
+  return {
+    routeName: data.routeName,
+    vehicleNo: data.vehicleNo,
+    dispatchDate: data.dispatchDate,
+    alreadyBoarded: !!data.alreadyBoarded,
+  };
 }

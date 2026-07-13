@@ -436,6 +436,139 @@ exports.recordStopArrival = onCall(async (request) => {
 });
 
 // ════════════════════════════════════════════════════════
+// 정적(고정) QR 탑승 — CF 위임 (2026-07-13, onCall × 2)
+//
+// 배경: 정적 QR(`/board?c={cid}&v={vid}`) 탑승은 오늘 배차를
+//   companies/{cid}/dispatches/{today}/list where vehicleId==X 로 읽어야 하는데,
+//   호출 진입점(EmployeeApp 인앱 스캐너·BoardingApp 폰카메라)이 모두 익명 인증이라
+//   배차 읽기 규칙(admin/driver 한정)에서 쿼리 전체가 거부됨(Missing or insufficient permissions).
+// 해결: 배차 읽기 rules 는 잠금 유지하고, 이 두 onCall(Admin SDK)이 서버에서 배차를 해석.
+//   클라 boarding.js 의 resolveStaticDispatch·validateAndBoardStatic 로직을 그대로 미러.
+//   익명 직원이 호출하므로 assertAdmin 류 검증은 붙이지 않음(request.auth 존재만 확인).
+//
+// firestore.rules 변경 없음 — Admin SDK 가 우회. 배차 admin/driver 잠금 유지가 이 방식의 핵심.
+// ════════════════════════════════════════════════════════
+
+// 오늘(KST) 이 차량 배차 해석 — 두 onCall 공용(로직 중복 0).
+// 배차 없으면 failed-precondition(클라 확인/오류 화면이 그대로 메시지 표시).
+async function resolveStaticDispatchAdmin(db, companyId, vehicleId) {
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
+
+  const listSnap = await db
+    .collection("companies").doc(companyId)
+    .collection("dispatches").doc(today)
+    .collection("list")
+    .where("vehicleId", "==", vehicleId).get();
+  if (listSnap.empty) {
+    throw new HttpsError("failed-precondition", "오늘 이 차량은 운행 배차가 없습니다\n관리자에게 문의하세요");
+  }
+
+  const disp = listSnap.docs[0].data() || {};
+  let vehicleNo = disp.vehicleNo || "";
+  // 배차에 vehicleNo 없으면 vehicles/{vehicleId}.plateNo 폴백.
+  if (!vehicleNo) {
+    try {
+      const vSnap = await db
+        .collection("companies").doc(companyId)
+        .collection("vehicles").doc(vehicleId).get();
+      if (vSnap.exists) vehicleNo = (vSnap.data() || {}).plateNo || "";
+    } catch (_) { /* 권한/네트워크 오류 → vehicleNo 빈 문자열, 탑승 자체는 진행 */ }
+  }
+
+  return {
+    today,
+    routeId: disp.routeId || "",
+    routeName: disp.routeName || "",
+    driverId: disp.driverId || "",
+    vehicleNo,
+  };
+}
+
+// resolveStaticBoarding({ companyId, vehicleId }) — 읽기 전용(확인 화면 프리뷰용).
+// 반환: { today, routeId, routeName, driverId, vehicleNo }.
+exports.resolveStaticBoarding = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
+
+  const { companyId, vehicleId } = request.data || {};
+  if (!companyId || typeof companyId !== "string") {
+    throw new HttpsError("invalid-argument", "companyId가 필요합니다");
+  }
+  if (!vehicleId || typeof vehicleId !== "string") {
+    throw new HttpsError("invalid-argument", "vehicleId가 필요합니다");
+  }
+
+  const db = admin.firestore();
+  return await resolveStaticDispatchAdmin(db, companyId, vehicleId);
+});
+
+// boardStatic({ companyId, vehicleId, empNo, name }) — 배차 재해석 + 멱등 boarding 생성.
+// 서버가 배차를 다시 해석(클라 값 불신). 멱등 doc id = `${empNo}__${vehicleId}`.
+// 반환: { ok:true, alreadyBoarded, routeName, vehicleNo, dispatchDate }.
+exports.boardStatic = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
+
+  const { companyId, vehicleId, empNo, name } = request.data || {};
+  if (!companyId || !vehicleId || !empNo || !String(empNo).trim()) {
+    throw new HttpsError("invalid-argument", "사번을 입력해주세요");
+  }
+  const trimmedEmpNo = String(empNo).trim();
+
+  const db = admin.firestore();
+
+  // 오늘 배차 해석(비면 failed-precondition) — routeId/routeName/driverId/vehicleNo 확보.
+  const { today, routeId, routeName, driverId, vehicleNo } =
+    await resolveStaticDispatchAdmin(db, companyId, vehicleId);
+
+  // partnerCode 자동 채움 — passengers/{empNo}.partnerCode(협력사별 통계용).
+  let partnerCode = null;
+  try {
+    const passSnap = await db
+      .collection("companies").doc(companyId)
+      .collection("passengers").doc(trimmedEmpNo).get();
+    if (passSnap.exists) partnerCode = (passSnap.data() || {}).partnerCode || null;
+  } catch (_) { /* 권한/네트워크 오류는 partnerCode 부재로 처리 — 탑승 기록 자체는 진행 */ }
+
+  // 차량 GPS 위치 캡처 — 탑승 시점 좌표 보존(정류장 매핑용).
+  let vehicleLat = null, vehicleLng = null, vehicleSpeed = null;
+  try {
+    const gpsSnap = await db.collection("gps").doc(`${companyId}_${vehicleId}`).get();
+    if (gpsSnap.exists) {
+      const g = gpsSnap.data() || {};
+      vehicleLat = typeof g.lat === "number" ? g.lat : null;
+      vehicleLng = typeof g.lng === "number" ? g.lng : null;
+      vehicleSpeed = typeof g.speed === "number" ? g.speed : null;
+    }
+  } catch (_) { /* GPS 미수신/권한 → null 처리, 탑승 자체는 진행 */ }
+
+  // 멱등 boarding — 결정적 doc id(직원 1인 × 차량 × 당일 1건). 이미 있으면 첫 스캔 보존.
+  const boardingRef = db
+    .collection("companies").doc(companyId)
+    .collection("boardings").doc(today)
+    .collection("list").doc(`${trimmedEmpNo}__${vehicleId}`);
+  const existing = await boardingRef.get();
+  if (existing.exists) {
+    return { ok: true, alreadyBoarded: true, routeName, vehicleNo, dispatchDate: today };
+  }
+
+  await boardingRef.set({
+    empNo: trimmedEmpNo,
+    name: (name || "").trim(),
+    tokenId: "",           // 정적 QR 은 토큰 없음(스키마 자리 유지)
+    companyId, routeId, routeName,
+    vehicleId, vehicleNo, driverId,
+    stopId: "",
+    stopName: "",
+    partnerCode,
+    vehicleLat, vehicleLng, vehicleSpeed,
+    via: "static",         // 정적 QR 탑승 식별(통계 read 호환·옵셔널)
+    boardedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  console.log(`[boardStatic] cid=${companyId} veh=${vehicleId} emp=${trimmedEmpNo} route=${routeId}`);
+  return { ok: true, alreadyBoarded: false, routeName, vehicleNo, dispatchDate: today };
+});
+
+// ════════════════════════════════════════════════════════
 // SaaS Phase 1.4 (2026-05-29) — 협력사 공지 발송 (onCall)
 //
 // 협력사 인사 담당이 자기 직원에게 직접 공지 발송.
