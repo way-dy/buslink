@@ -1185,8 +1185,9 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
                     <div style={{ position: 'relative', width: '100%', height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {j > 0 && <span style={{ position: 'absolute', left: 0, right: '50%', top: '50%', height: 3, transform: 'translateY(-50%)', background: leftOn ? 'var(--color-primary)' : 'var(--color-line)' }} />}
                       {j < nodes.length - 1 && <span style={{ position: 'absolute', left: '50%', right: 0, top: '50%', height: 3, transform: 'translateY(-50%)', background: rightOn ? 'var(--color-primary)' : 'var(--color-line)' }} />}
-                      {n.current && <span style={{ position: 'absolute', left: '50%', top: '50%', width: 22, height: 22, transform: 'translate(-50%,-50%)', borderRadius: '50%', background: 'var(--color-primary)', opacity: 0.45, animation: 'buspulse 2s ease-out infinite', pointerEvents: 'none' }} />}
-                      <span style={{ position: 'relative', width: n.current ? 16 : 12, height: n.current ? 16 : 12, borderRadius: '50%', background: isReached ? 'var(--color-primary)' : 'var(--color-line)', border: '2px solid var(--color-bg)', boxShadow: n.current ? '0 0 0 3px rgba(0,102,255,.28)' : 'none' }} />
+                      {/* 현재(깜빡) 마커만 살짝 위로(-4px) — 사용자 점검 요청(2026-07-13). 연결선/정류장명 레이아웃 무영향(transform). */}
+                      {n.current && <span style={{ position: 'absolute', left: '50%', top: '50%', width: 22, height: 22, transform: 'translate(-50%,calc(-50% - 4px))', borderRadius: '50%', background: 'var(--color-primary)', opacity: 0.45, animation: 'buspulse 2s ease-out infinite', pointerEvents: 'none' }} />}
+                      <span style={{ position: 'relative', width: n.current ? 16 : 12, height: n.current ? 16 : 12, borderRadius: '50%', background: isReached ? 'var(--color-primary)' : 'var(--color-line)', border: '2px solid var(--color-bg)', boxShadow: n.current ? '0 0 0 3px rgba(0,102,255,.28)' : 'none', transform: n.current ? 'translateY(-4px)' : undefined }} />
                     </div>
                     {/* 정류장명 */}
                     <div style={{ fontSize: 12.5, fontWeight: n.current ? 800 : 700, marginTop: 5, maxWidth: '100%', color: nameColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.stop.name}</div>
@@ -1247,7 +1248,8 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
                       {/* 버스 아이콘 (이 정류장 근처) — 펄스 ring + 키운 크기 */}
                       <div style={{ height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 2 }}>
                         {isBusHere && (
-                          <div style={{ position: 'relative', width: 24, height: 24 }}>
+                          /* 버스(깜빡) 마커만 살짝 위로(-4px) — 사용자 점검 요청(2026-07-13). 연결선 marginTop 정렬 무영향(transform). */
+                          <div style={{ position: 'relative', width: 24, height: 24, transform: 'translateY(-4px)' }}>
                             <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'var(--color-primary)', opacity: 0.5, animation: 'buspulse 2s ease-out infinite', pointerEvents: 'none' }} />
                             <div style={{ position: 'absolute', inset: 0, background: 'var(--color-primary)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: '#fff', boxShadow: '0 0 0 4px rgba(0,102,255,.40), 0 4px 12px rgba(0,102,255,.45)' }}>🚌</div>
                           </div>
