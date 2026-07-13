@@ -2140,3 +2140,184 @@ exports.createDriverAuth = onCall(async (request) => {
     throw new HttpsError("internal", e.message);
   }
 });
+
+// ════════════════════════════════════════════════════════════════
+// 개선 요청 게시판 — 구글챗 알림 (2026-07-13, YDYOPS 패턴 이식)
+//
+// 웹훅 URL = config/improvementBoard 문서의 gchatWebhookUrl 필드(시크릿 아님).
+// 미설정(없거나 빈 문자열)이면 조용히 skip — 배포 후 슈퍼관리자 콘솔에서 입력하면
+// 재배포 없이 알림 활성화. serviceAccount 불요·best-effort try/catch·throw 금지.
+//
+// - onImprovementRequestCreate: 새 요청 생성 시 cardsV2 카드 발송(새 스레드).
+// - onImprovementRequestUpdate: history 길이 diff 로 신규 항목만 추출 → 같은
+//   threadKey 답글. 완료(statusTo==='done')는 skip(YDYOPS 동일). 변동 없으면 skip.
+//   두 트리거 모두 doc write 0 → 재귀 발화 없음.
+// ════════════════════════════════════════════════════════════════
+
+const IMPROVEMENT_STATUS_LABELS = {
+  requested: "요청",
+  reviewing: "검토",
+  in_progress: "반영중",
+  done: "완료",
+  rejected: "반려",
+};
+const IMPROVEMENT_ADMIN_URL = "https://admin.buslink.co.kr";
+
+/** node https 로 JSON POST(웹훅 발송). 2xx 만 성공. */
+function postJson(urlStr, bodyObj) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(urlStr);
+    const payload = Buffer.from(JSON.stringify(bodyObj), "utf8");
+    const lib = u.protocol === "https:" ? https : http;
+    const opts = {
+      hostname: u.hostname,
+      port: u.port || (u.protocol === "https:" ? 443 : 80),
+      path: u.pathname + u.search,
+      method: "POST",
+      timeout: 15000,
+      headers: {
+        "Content-Type": "application/json; charset=UTF-8",
+        "Content-Length": payload.length,
+      },
+    };
+    const req = lib.request(opts, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        if (res.statusCode >= 200 && res.statusCode < 300) resolve(text);
+        else reject(new Error(`HTTP ${res.statusCode} — ${text.slice(0, 200)}`));
+      });
+    });
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("timeout: " + u.hostname)); });
+    req.write(payload);
+    req.end();
+  });
+}
+
+/** config/improvementBoard.gchatWebhookUrl → http(s) URL 또는 null(미설정). */
+async function getImprovementWebhookUrl(db) {
+  try {
+    const snap = await db.collection("config").doc("improvementBoard").get();
+    if (!snap.exists) return null;
+    const url = (snap.data() || {}).gchatWebhookUrl;
+    return (typeof url === "string" && /^https?:\/\//.test(url.trim())) ? url.trim() : null;
+  } catch (e) {
+    console.warn("[개선요청] 웹훅 URL 조회 실패:", e.message);
+    return null;
+  }
+}
+
+/** companies/{companyId}.name → 회사명(없으면 companyId). */
+async function getImprovementCompanyName(db, companyId) {
+  try {
+    const snap = await db.collection("companies").doc(companyId).get();
+    const name = snap.exists && (snap.data() || {}).name;
+    return name || companyId || "-";
+  } catch {
+    return companyId || "-";
+  }
+}
+
+/** 웹훅 URL 에 스레드 옵션 쿼리 부착. reply=true 면 같은 스레드 답글. */
+function chatThreadUrl(baseUrl, reply) {
+  const u = new URL(baseUrl);
+  u.searchParams.set(
+    "messageReplyOption",
+    reply ? "REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD" : "MESSAGE_REPLY_OPTION_UNSPECIFIED"
+  );
+  return u.toString();
+}
+
+exports.onImprovementRequestCreate = onDocumentCreated(
+  { document: "improvement_requests/{id}", region: "us-central1" },
+  async (event) => {
+    try {
+      const db = admin.firestore();
+      const webhookUrl = await getImprovementWebhookUrl(db);
+      if (!webhookUrl) { console.log("[개선요청] 웹훅 미설정 — 생성 알림 skip"); return; }
+
+      const id = event.params.id;
+      const data = event.data?.data() || {};
+      const companyName = await getImprovementCompanyName(db, data.companyId);
+      const statusLabel = IMPROVEMENT_STATUS_LABELS[data.status] || data.status || "요청";
+      const preview = String(data.content || "").replace(/\s+/g, " ").trim().slice(0, 140) || "(내용 없음)";
+
+      const body = {
+        thread: { threadKey: "imp-" + id },
+        cardsV2: [{
+          cardId: "imp-" + id,
+          card: {
+            header: { title: "🛠 새 개선 요청", subtitle: companyName },
+            sections: [{
+              widgets: [
+                { decoratedText: { topLabel: "제목", text: data.title || "(제목 없음)" } },
+                { decoratedText: { topLabel: "요청자", text: `${data.requesterName || "-"} · 상태: ${statusLabel}` } },
+                { textParagraph: { text: preview } },
+                { buttonList: { buttons: [{ text: "개선 요청 게시판 열기", onClick: { openLink: { url: IMPROVEMENT_ADMIN_URL } } }] } },
+              ],
+            }],
+          },
+        }],
+      };
+      await postJson(chatThreadUrl(webhookUrl, false), body);
+      console.log(`[개선요청] 생성 알림 발송 id=${id}`);
+    } catch (e) {
+      console.warn("[개선요청] 생성 알림 실패:", e.message);
+    }
+  }
+);
+
+exports.onImprovementRequestUpdate = onDocumentUpdated(
+  { document: "improvement_requests/{id}", region: "us-central1" },
+  async (event) => {
+    try {
+      const before = event.data?.before?.data() || {};
+      const after = event.data?.after?.data() || {};
+      const beforeHist = Array.isArray(before.history) ? before.history : [];
+      const afterHist = Array.isArray(after.history) ? after.history : [];
+
+      // history 길이 diff 로 신규 항목만(arrayUnion 말미 append). 변동 없으면 skip.
+      if (afterHist.length <= beforeHist.length) return;
+      const newItems = afterHist.slice(beforeHist.length);
+      // 완료(done) 전이는 알림 skip(YDYOPS 동일). 코멘트/기타 상태전이는 발송.
+      const notifiable = newItems.filter((h) => h && h.statusTo !== "done");
+      if (notifiable.length === 0) return;
+
+      const db = admin.firestore();
+      const webhookUrl = await getImprovementWebhookUrl(db);
+      if (!webhookUrl) { console.log("[개선요청] 웹훅 미설정 — 업데이트 알림 skip"); return; }
+
+      const id = event.params.id;
+      const companyName = await getImprovementCompanyName(db, after.companyId);
+
+      for (const h of notifiable) {
+        const isStatus = !!h.statusTo;
+        const statusLabel = IMPROVEMENT_STATUS_LABELS[h.statusTo] || h.statusTo;
+        const headerTitle = isStatus ? `🔄 상태 변경 → ${statusLabel}` : "💬 새 댓글";
+        const widgets = [
+          { decoratedText: { topLabel: "제목", text: after.title || "(제목 없음)" } },
+          { decoratedText: { topLabel: isStatus ? "처리" : "작성자", text: `${h.byName || "-"}` } },
+        ];
+        if (h.comment) widgets.push({ textParagraph: { text: String(h.comment).slice(0, 200) } });
+        widgets.push({ buttonList: { buttons: [{ text: "게시판 열기", onClick: { openLink: { url: IMPROVEMENT_ADMIN_URL } } }] } });
+
+        const body = {
+          thread: { threadKey: "imp-" + id },
+          cardsV2: [{
+            cardId: `imp-${id}-${afterHist.length}`,
+            card: {
+              header: { title: headerTitle, subtitle: companyName },
+              sections: [{ widgets }],
+            },
+          }],
+        };
+        await postJson(chatThreadUrl(webhookUrl, true), body);
+      }
+      console.log(`[개선요청] 업데이트 알림 발송 id=${id} 건수=${notifiable.length}`);
+    } catch (e) {
+      console.warn("[개선요청] 업데이트 알림 실패:", e.message);
+    }
+  }
+);

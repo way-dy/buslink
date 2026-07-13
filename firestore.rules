@@ -182,5 +182,26 @@ service cloud.firestore {
       // update 는 Cloud Function 만 (Admin SDK 는 룰 우회).
       allow update: if false;
     }
+
+    // ─── 개선 요청 게시판 (2026-07-13) ───────────────────
+    // 회사 admin = 자기 회사 요청만, superadmin = 전 회사 요청.
+    // buslink rules 는 catch-all 이 없어 최상위 컬렉션마다 명시 블록 필수.
+    // admin 쿼리는 where companyId==X 라 isAdmin(X) 로 쿼리 단위 통과,
+    // superadmin 은 orderBy 만이라 isSuperAdmin 으로 통과.
+    // (issues.md '쿼리는 doc 하나라도 read 실패 시 전체 거부' 준수)
+    match /improvement_requests/{id} {
+      allow read:   if isSuperAdmin() || isAdmin(resource.data.companyId);
+      allow create: if isSuperAdmin() || isAdmin(request.resource.data.companyId);
+      allow update: if isSuperAdmin() || isAdmin(resource.data.companyId);
+      allow delete: if isSuperAdmin() || isAdmin(resource.data.companyId);
+    }
+
+    // ─── 앱 설정(개선 요청 구글챗 웹훅 URL 등) ─────────────
+    // config/improvementBoard.gchatWebhookUrl 를 슈퍼관리자 콘솔에서 입력.
+    // CF(Admin SDK)는 룰 우회로 읽음. 클라 write 는 superadmin 만.
+    match /config/{docId} {
+      allow read:  if isSuperAdmin();
+      allow write: if isSuperAdmin();
+    }
   }
 }

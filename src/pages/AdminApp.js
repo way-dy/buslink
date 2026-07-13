@@ -17,6 +17,12 @@ import { createPartnerCode, getBoardingUrl } from "../lib/partner";
 import { getStaticBoardingUrl } from "../lib/boarding";
 import { sendNotice } from "../lib/notifications";
 import { compressImageFile } from "../lib/image";
+// 개선 요청 게시판(2026-07-13) — 순수 data-access + 상수 + 인앱 안읽음(클라 전용)
+import {
+  improvementQuery, createRequest, updateRequestStatus, addRequestComment, deleteRequest,
+  IMPROVEMENT_STATUSES, IMPROVEMENT_STATUS_LABELS, IMPROVEMENT_STATUS_TONE,
+} from "../lib/improvementRequests";
+import { loadSeenMap, markSeen, isUnread } from "../lib/improvementSeen";
 import { planTimeForStop, offsetMinFromPlanTime, computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
 import { aggregateBoardingsByStop } from "../lib/stopMapping";
 // 리디자인 3단계 — 실시간 관제(MapTab) 라이트 리스킨 전용. 타 탭 미사용.
@@ -31,8 +37,10 @@ import { ErrorBoundary } from "../components/ErrorBoundary";
 import InstallPrompt from "../components/InstallPrompt";
 import { applyAppManifest } from "../lib/pwaManifest";
 
-const TABS = ["대시보드", "실시간 관제", "배차 관리", "배차 일정", "노선 관리", "기사 관리", "차량 관리", "시뮬레이터", "운행 이력", "탑승 통계", "협력사 관리", "공지 발송"];
-const TAB_ICONS = ["grid", "pin", "flag", "calendar", "route", "user", "bus", "play", "clock", "chart", "globe", "bell"];
+const TABS = ["대시보드", "실시간 관제", "배차 관리", "배차 일정", "노선 관리", "기사 관리", "차량 관리", "시뮬레이터", "운행 이력", "탑승 통계", "협력사 관리", "공지 발송", "개선 요청"];
+const TAB_ICONS = ["grid", "pin", "flag", "calendar", "route", "user", "bus", "play", "clock", "chart", "globe", "bell", "sparkle"];
+// "개선 요청"(인덱스 12) = 모든 admin/superadmin 노출(회사관리처럼 superadmin 한정 아님).
+// SUPER_TAB_INDEX 는 TABS.length 로 동적 계산 → 회사 관리 탭은 자동으로 13 으로 밀림.
 
 // SaaS Phase 1.2 (2026-05-28) — 슈퍼관리자 전용 추가 탭(인덱스 12).
 // 일반 admin 에는 노출하지 않으므로 TABS/TAB_ICONS 원본 배열은 절대 불변.
@@ -296,7 +304,8 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
         {tab === 9 && <ErrorBoundary label="탑승 통계"><BoardingStatsTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
         {tab === 10 && <ErrorBoundary label="협력사 관리"><PartnerTab companyId={activeCompanyId} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
         {tab === 11 && <ErrorBoundary label="공지 발송"><NoticeTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
-        {/* SaaS Phase 1.2 — 슈퍼관리자 전용 회사 관리 탭(인덱스 12). 일반 admin 비표시. */}
+        {tab === 12 && <ErrorBoundary label="개선 요청"><ImprovementTab companyId={activeCompanyId} user={user} role={role} companies={companies} /></ErrorBoundary>}
+        {/* SaaS Phase 1.2 — 슈퍼관리자 전용 회사 관리 탭(인덱스=TABS.length). 일반 admin 비표시. */}
         {isSuperAdmin && tab === SUPER_TAB_INDEX && (
           <ErrorBoundary label="회사 관리">
             <SuperCompanyTab
@@ -4826,6 +4835,376 @@ function NoticeTab({ companyId, allowed }) {
 // 리디자인 4단계 — 공유 S 객체를 tokens.css 변수 기반 라이트로 일괄 전환.
 // 키 이름·구조 100% 보존(전 9탭+전역 셸 동시 전파). MS(MapTab)와 동일 토큰 체계로 정합.
 // 다크 하드코딩(#0B1A2E/#112240/#1E3A5F/#00C2FF 등) 전면 제거.
+// ═══════════════════════════════════════════════════════
+// 탭12: 개선 요청 게시판 (2026-07-13)
+// 회사 admin=자기 회사 요청 등록/열람, superadmin=전 회사 답변·상태변경.
+// improvement_requests onSnapshot 실시간 구독 + 구글챗 알림(CF)·인앱 안읽음(클라).
+// ═══════════════════════════════════════════════════════
+function improveToneStyle(tone) {
+  switch (tone) {
+    case "info": return { background: "var(--color-primary-soft)", color: "var(--color-primary-deep)" };
+    case "warning": return { background: "#FFF3E0", color: "#B26A00" };
+    case "positive": return { background: "#E6F7EB", color: "#007A29" };
+    case "destructive": return { background: "#FCE5E5", color: "var(--color-destructive)" };
+    default: return { background: "var(--color-bg-soft)", color: "var(--color-label-mute)" };
+  }
+}
+function improveFmtTs(ts) {
+  if (!ts) return "";
+  let d;
+  if (ts.toDate) d = ts.toDate();
+  else if (ts.seconds) d = new Date(ts.seconds * 1000);
+  else d = new Date(ts);
+  if (!d || isNaN(d.getTime())) return "";
+  return new Intl.DateTimeFormat("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Seoul" }).format(d);
+}
+function ImproveStatusBadge({ status }) {
+  const label = IMPROVEMENT_STATUS_LABELS[status] || status;
+  const tone = IMPROVEMENT_STATUS_TONE[status] || "neutral";
+  return <span style={{ ...S.statusBadge, ...improveToneStyle(tone) }}>{label}</span>;
+}
+
+function ImprovementTab({ companyId, user, role, companies }) {
+  const isSuperAdmin = role === "superadmin";
+  const myUid = user?.uid;
+  const [list, setList] = useState([]);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [mineOnly, setMineOnly] = useState(false);
+  const [search, setSearch] = useState("");
+  const [seenMap, setSeenMap] = useState(() => loadSeenMap());
+  const [detailId, setDetailId] = useState(null);
+  const [createOpen, setCreateOpen] = useState(false);
+
+  // 실시간 구독. superadmin=전 회사(orderBy만), admin=자기 회사(where+orderBy).
+  useEffect(() => {
+    if (!companyId && !isSuperAdmin) return;
+    const unsub = onSnapshot(
+      improvementQuery({ companyId, isSuperAdmin }),
+      snap => setList(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      err => console.warn("[개선요청] 구독 오류:", err.message)
+    );
+    return unsub;
+  }, [companyId, isSuperAdmin]);
+
+  // 회사명 라벨(superadmin) — companies 목록에서 매핑.
+  const companyNameById = {};
+  (companies || []).forEach(c => { companyNameById[c.id] = c.name || c.id; });
+  const companyLabel = (cid) => companyNameById[cid] || cid;
+
+  // 검색 + 내 요청만 필터(상태 제외) → 상태 칩 카운트 기준.
+  const base = list.filter(r => {
+    if (mineOnly && r.requesterUid !== myUid) return false;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      const hay = `${r.title || ""} ${r.content || ""} ${r.requesterName || ""}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  const counts = { all: base.length };
+  IMPROVEMENT_STATUSES.forEach(s => { counts[s] = base.filter(r => r.status === s).length; });
+  const filtered = statusFilter === "all" ? base : base.filter(r => r.status === statusFilter);
+
+  const detail = detailId ? list.find(r => r.id === detailId) : null;
+  const openDetail = (r) => { setDetailId(r.id); setSeenMap(markSeen(r.id, seenMap)); };
+
+  const chip = (key, label, n) => (
+    <button key={key} onClick={() => setStatusFilter(key)}
+      style={{
+        border: "1px solid var(--color-line)", borderRadius: 20, padding: "5px 12px",
+        fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+        background: statusFilter === key ? "var(--color-primary)" : "var(--color-bg)",
+        color: statusFilter === key ? "#fff" : "var(--color-label-mute)",
+      }}>
+      {label} {n}
+    </button>
+  );
+
+  return (
+    <div style={S.panel}>
+      <div style={S.panelHeader}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: "var(--color-label)" }}>개선 요청</div>
+        <button style={S.addBtn} onClick={() => setCreateOpen(true)}>+ 요청 등록</button>
+      </div>
+
+      {/* 필터 바 */}
+      <div style={{ padding: "12px 20px", display: "flex", flexDirection: "column", gap: 10, borderBottom: "1px solid var(--color-line)", background: "var(--color-bg)", flexShrink: 0 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {chip("all", "전체", counts.all)}
+          {IMPROVEMENT_STATUSES.map(s => chip(s, IMPROVEMENT_STATUS_LABELS[s], counts[s]))}
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="제목·내용·요청자 검색"
+            style={{ ...S.input, width: 220, padding: "8px 12px", fontSize: 13 }} />
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--color-label-mute)", cursor: "pointer" }}>
+            <input type="checkbox" checked={mineOnly} onChange={e => setMineOnly(e.target.checked)} />
+            내 요청만
+          </label>
+        </div>
+      </div>
+
+      {/* 목록 */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "12px 20px 40px" }}>
+        {filtered.length === 0 && <div style={S.empty}>표시할 개선 요청이 없습니다.</div>}
+        {filtered.map(r => {
+          const unread = isUnread(r, myUid, seenMap);
+          const shots = Array.isArray(r.screenshots) ? r.screenshots.length : 0;
+          return (
+            <div key={r.id} onClick={() => openDetail(r)}
+              style={{ background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 12, padding: "12px 14px", marginBottom: 8, cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: "var(--color-label)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title || "(제목 없음)"}</span>
+                  {unread && <span style={{ background: "var(--color-destructive)", color: "#fff", fontSize: 10, fontWeight: 700, borderRadius: 10, padding: "1px 6px" }}>NEW</span>}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--color-label-mute)", display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <span>{r.requesterName || "-"}</span>
+                  <span>· {improveFmtTs(r.createdAt)}</span>
+                  {shots > 0 && <span>· 📎 {shots}</span>}
+                  {isSuperAdmin && <span>· {companyLabel(r.companyId)}</span>}
+                </div>
+              </div>
+              <ImproveStatusBadge status={r.status} />
+            </div>
+          );
+        })}
+      </div>
+
+      {createOpen && (
+        <ImprovementCreateModal
+          companyId={companyId} user={user}
+          onClose={() => setCreateOpen(false)}
+        />
+      )}
+      {detail && (
+        <ImprovementDetailModal
+          req={detail} user={user} isSuperAdmin={isSuperAdmin}
+          companyLabel={isSuperAdmin ? companyLabel(detail.companyId) : null}
+          onClose={() => setDetailId(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function ImprovementCreateModal({ companyId, user, onClose }) {
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [shots, setShots] = useState([]);   // { dataUrl, name, bytes }
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const MAX_SHOTS = 3;
+  const PER_LIMIT = 300 * 1024;
+  const TOTAL_LIMIT = 900 * 1024;
+
+  const onPick = async (e) => {
+    setErr("");
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";   // 같은 파일 재선택 허용
+    // 한 번에 여러 장 선택 시 stale state 대신 로컬 누적으로 개수·총량 판정.
+    const accepted = [...shots];
+    let msg = "";
+    for (const file of files) {
+      if (accepted.length >= MAX_SHOTS) { msg = `이미지는 최대 ${MAX_SHOTS}장까지 첨부할 수 있습니다`; break; }
+      try {
+        const { dataUri, bytes } = await compressImageFile(file);
+        if (bytes > PER_LIMIT) { msg = "이미지 1장이 너무 큽니다(300KB 초과) — 더 작은 이미지를 사용하세요"; continue; }
+        const totalNow = accepted.reduce((s, x) => s + x.bytes, 0);
+        if (totalNow + bytes > TOTAL_LIMIT) { msg = "첨부 이미지 총 용량이 큽니다(900KB 초과)"; continue; }
+        accepted.push({ dataUrl: dataUri, name: file.name || "image", bytes });
+      } catch (ex) {
+        msg = ex.message || "이미지 처리 실패";
+      }
+    }
+    setShots(accepted);
+    if (msg) setErr(msg);
+  };
+
+  const submit = async () => {
+    setErr("");
+    if (!title.trim()) { setErr("제목을 입력하세요"); return; }
+    if (!content.trim()) { setErr("내용을 입력하세요"); return; }
+    setSaving(true);
+    try {
+      await createRequest({
+        companyId,
+        title: title.trim(),
+        content,
+        requesterUid: user?.uid,
+        requesterName: user?.displayName || user?.email || "관리자",
+        requesterEmail: user?.email || "",
+        screenshots: shots.map(s => ({ dataUrl: s.dataUrl, name: s.name })),
+      });
+      onClose();
+    } catch (ex) {
+      setErr(ex.message || "등록 실패");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={S.modal} onClick={e => e.stopPropagation()}>
+        <div style={S.modalTitle}>개선 요청 등록</div>
+        <div style={S.label}>제목</div>
+        <input style={S.input} value={title} onChange={e => setTitle(e.target.value)} maxLength={100} placeholder="개선하고 싶은 내용을 한 줄로" />
+        <div style={S.label}>내용</div>
+        <textarea style={{ ...S.input, minHeight: 120, resize: "vertical", whiteSpace: "pre-wrap" }} value={content} onChange={e => setContent(e.target.value)} placeholder="자세한 설명을 적어주세요(개행 유지)" />
+        <div style={S.label}>이미지 첨부 (최대 3장 · 각 300KB)</div>
+        {shots.length > 0 && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {shots.map((s, i) => (
+              <div key={i} style={{ position: "relative" }}>
+                <img src={s.dataUrl} alt={s.name} style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 8, border: "1px solid var(--color-line)" }} />
+                <button onClick={() => setShots(prev => prev.filter((_, j) => j !== i))}
+                  style={{ position: "absolute", top: -6, right: -6, background: "var(--color-destructive)", color: "#fff", border: "none", borderRadius: "50%", width: 20, height: 20, cursor: "pointer", fontSize: 12, lineHeight: 1 }}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
+        {shots.length < 3 && (
+          <label style={{ ...S.editBtn, display: "inline-block", padding: "8px 12px", cursor: "pointer", width: "fit-content" }}>
+            + 이미지 선택
+            <input type="file" accept="image/*" multiple onChange={onPick} style={{ display: "none" }} />
+          </label>
+        )}
+        {err && <div style={{ background: "#FCE5E5", border: "1px solid #F6C9C9", color: "var(--color-destructive)", padding: "8px 12px", borderRadius: 8, fontSize: 12 }}>{err}</div>}
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <button style={{ ...S.closeBtn, flex: 1 }} onClick={onClose} disabled={saving}>취소</button>
+          <button style={{ ...S.addBtn, flex: 1, opacity: saving ? 0.6 : 1 }} onClick={submit} disabled={saving}>{saving ? "등록 중..." : "등록"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ImprovementDetailModal({ req, user, isSuperAdmin, companyLabel, onClose }) {
+  const [comment, setComment] = useState("");
+  const [resultNote, setResultNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const myUid = user?.uid;
+  const myName = user?.displayName || user?.email || "관리자";
+  const hist = Array.isArray(req.history) ? req.history : [];
+  const shots = Array.isArray(req.screenshots) ? req.screenshots : [];
+
+  const doComment = async () => {
+    if (!comment.trim()) return;
+    setBusy(true); setErr("");
+    try {
+      await addRequestComment({ id: req.id, comment: comment.trim(), byUid: myUid, byName: myName });
+      setComment("");
+    } catch (ex) { setErr(ex.message || "댓글 등록 실패"); }
+    setBusy(false);
+  };
+
+  const doStatus = async (status) => {
+    setBusy(true); setErr("");
+    try {
+      await updateRequestStatus({ id: req.id, status, byUid: myUid, byName: myName, resultNote: status === "done" ? resultNote : undefined });
+    } catch (ex) { setErr(ex.message || "상태 변경 실패"); }
+    setBusy(false);
+  };
+
+  const doDelete = async () => {
+    if (!window.confirm("이 개선 요청을 삭제할까요? 되돌릴 수 없습니다.")) return;
+    setBusy(true); setErr("");
+    try {
+      await deleteRequest(req.id);
+      onClose();
+    } catch (ex) { setErr(ex.message || "삭제 실패"); setBusy(false); }
+  };
+
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={{ ...S.modal, maxWidth: 560 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+          <div style={{ ...S.modalTitle, marginBottom: 0, flex: 1 }}>{req.title || "(제목 없음)"}</div>
+          <ImproveStatusBadge status={req.status} />
+        </div>
+        <div style={{ fontSize: 12, color: "var(--color-label-mute)", display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <span>{req.requesterName || "-"}</span>
+          <span>· {improveFmtTs(req.createdAt)}</span>
+          {companyLabel && <span>· {companyLabel}</span>}
+        </div>
+
+        <div style={{ whiteSpace: "pre-wrap", fontSize: 13, color: "var(--color-label)", background: "var(--color-bg-soft)", border: "1px solid var(--color-line)", borderRadius: 10, padding: "12px 14px", marginTop: 8 }}>
+          {req.content || "(내용 없음)"}
+        </div>
+
+        {shots.length > 0 && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+            {shots.map((s, i) => (
+              <a key={i} href={s.dataUrl} target="_blank" rel="noreferrer">
+                <img src={s.dataUrl} alt={s.name || "attachment"} style={{ maxWidth: 120, maxHeight: 120, borderRadius: 8, border: "1px solid var(--color-line)", objectFit: "cover" }} />
+              </a>
+            ))}
+          </div>
+        )}
+
+        {req.resultNote && (
+          <div style={{ marginTop: 8, fontSize: 13, color: "#007A29", background: "#E6F7EB", border: "1px solid #B7E6C7", borderRadius: 10, padding: "10px 12px" }}>
+            <b>처리 결과</b> · {req.resultNote}
+          </div>
+        )}
+
+        {/* 처리 이력 타임라인 */}
+        <div style={{ ...S.label, marginTop: 12 }}>처리 이력</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {hist.map((h, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12, padding: "6px 0", borderBottom: i < hist.length - 1 ? "1px solid var(--color-line-soft)" : "none" }}>
+              <span style={{ color: "var(--color-label-alt)", whiteSpace: "nowrap", minWidth: 78 }}>{improveFmtTs(h.at)}</span>
+              <span style={{ flex: 1, color: "var(--color-label)" }}>
+                {h.statusTo && <ImproveStatusBadge status={h.statusTo} />}{" "}
+                <b>{h.byName || "-"}</b>
+                {h.comment ? <div style={{ color: "var(--color-label-mute)", marginTop: 2, whiteSpace: "pre-wrap" }}>{h.comment}</div> : null}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* 댓글 입력(누구나) */}
+        <div style={{ ...S.label, marginTop: 12 }}>댓글</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input style={{ ...S.input, flex: 1 }} value={comment} onChange={e => setComment(e.target.value)} placeholder="댓글을 남기세요" onKeyDown={e => { if (e.key === "Enter") doComment(); }} />
+          <button style={S.addBtn} onClick={doComment} disabled={busy || !comment.trim()}>등록</button>
+        </div>
+
+        {/* 상태 전이(superadmin 한정) */}
+        {isSuperAdmin && (
+          <div style={{ marginTop: 12, borderTop: "1px solid var(--color-line)", paddingTop: 12 }}>
+            <div style={S.label}>상태 변경 (개발자 전용)</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {IMPROVEMENT_STATUSES.filter(s => s !== req.status).map(s => (
+                <button key={s} onClick={() => doStatus(s)} disabled={busy}
+                  style={{ ...S.editBtn, ...improveToneStyle(IMPROVEMENT_STATUS_TONE[s]) }}>
+                  → {IMPROVEMENT_STATUS_LABELS[s]}
+                </button>
+              ))}
+            </div>
+            {req.status !== "done" && (
+              <div style={{ marginTop: 8 }}>
+                <div style={S.label}>완료 처리 시 결과 메모(선택)</div>
+                <input style={S.input} value={resultNote} onChange={e => setResultNote(e.target.value)} placeholder="완료(→완료) 버튼과 함께 기록됩니다" />
+              </div>
+            )}
+          </div>
+        )}
+
+        {err && <div style={{ background: "#FCE5E5", border: "1px solid #F6C9C9", color: "var(--color-destructive)", padding: "8px 12px", borderRadius: 8, fontSize: 12, marginTop: 8 }}>{err}</div>}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <button style={{ ...S.delBtn, padding: "8px 14px" }} onClick={doDelete} disabled={busy}>삭제</button>
+          <div style={{ flex: 1 }} />
+          <button style={S.closeBtn} onClick={onClose}>닫기</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const S = {
   wrap:{display:"flex",height:"100dvh",background:"var(--color-bg-soft)",fontFamily:"var(--font-base)",color:"var(--color-label)",position:"relative",overflow:"hidden",fontSize:13},
   sidebar:{width:236,background:"var(--color-bg)",borderRight:"1px solid var(--color-line)",display:"flex",flexDirection:"column",padding:"18px 14px"},

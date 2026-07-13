@@ -20,6 +20,8 @@
 - `gpsHistory/{companyId}/{vehicleId}/{date}/points/{pointId}`
 - `boardingTokens/{tokenId}` — 5분 만료·1회 소각(`used` 플래그)
 - `partnerCodes/{code}` — 협력사 코드(1년 유효) + (선택, 2026-05-29 Phase 1.4) **`recentNoticeTimestamps:number[]`**(서버 시각 ms 배열, CF `sendPartnerNotice` 가 1시간 5건 rate-limit 용으로 옛 항목 정리 + now 추가. 부재=빈배열로 동작) + (선택, 2026-06-15) **`createdBy:uid`**(발급한 admin uid. `createPartnerCode` 가 기록 → 제한 admin 이 권한 부여 전에도 본인 생성 협력사 열람·관리. AdminApp PartnerTab·대시보드 가시범위 = `isAllAccess ? 전체 : allowed ∪ createdBy`. 부재=레거시, allowed 로만 노출)
+- **`improvement_requests/{autoId}`** — 개선 요청 게시판(2026-07-13). `title/content(평문·개행 유지)/companyId/requesterUid/requesterName/requesterEmail/status('requested'|'reviewing'|'in_progress'|'done'|'rejected')/screenshots:[{dataUrl,name}](압축 data URI·Storage 미사용)/history:[{statusTo?,byUid,byName,at:Timestamp,comment?}]/resultNote?/createdAt/updatedAt`. **history 배열 요소는 serverTimestamp 불가 → `Timestamp.now()`**. 하위 컬렉션 없음(댓글=history arrayUnion). 회사 admin=자기 회사만, superadmin=전 회사. 정본 data-access=`src/lib/improvementRequests.js`. 인앱 안읽음=`src/lib/improvementSeen.js`(localStorage, 백엔드 변경 0).
+- **`config/{docId}`** — 앱 설정(2026-07-13). `config/improvementBoard.gchatWebhookUrl`(개선 요청 구글챗 웹훅·시크릿 아님·슈퍼관리자 콘솔 입력·미설정이면 CF skip). read/write=superadmin만.
 - `fcmQueue/{queueId}` — CF 트리거 큐. `companyId/noticeId/title/body/type/partnerCode/status/totalTokens/successCount/failureCount/error`. status: pending→sent/no_tokens/error. admin은 자기회사 큐 read 가능(2026-05-21, 발송 결과 onSnapshot 구독용)
 
 ## 보안 규칙
@@ -32,7 +34,8 @@
 - `boardings/{date}/list/{id}`: read·create = `isAuth()`(2026-05-26 완화 — 협력사 포털 통계 view 위해 admin→isAuth), update/delete는 admin. ⚠ BoardingApp·EmployeeApp·PassengerApp·PartnerApp·DriverApp 모든 진입점이 `signInAnonymously` 호출 필요(인증 누락 시 silent create 차단 → 통계 결측, 2026-05-26 BoardingApp 결함 사례 참조).
 - `partnerCodes`: read 공개, create/update = `isAuth()`, delete = `isAdmin(resource.data.companyId)`(2026-05-26 — admin이 자기 회사 협력사 영구 삭제 가능, UI는 비활성 상태에서만 허용).
 - `fcmQueue`: create만 인증, read는 admin(자기 회사 companyId 일치), update는 `false`(CF 전용). admin read 필요 이유=NoticeTab이 발송 결과(status/successCount/totalTokens) 실시간 onSnapshot 구독.
+- `improvement_requests`(2026-07-13): read/create/update/delete = `isSuperAdmin() || isAdmin(companyId)`(create 는 request.resource.data.companyId, 나머지는 resource.data.companyId). `config/{docId}`: read/write=`isSuperAdmin()`. catch-all 없어 명시 블록 필수.
 - ⚠️ `src/firestore.rules`는 **오래된 사본** — @.claude/issues.md.
 
 ## 인덱스
-신규 복합 쿼리 추가 시 `firestore.indexes.json` 갱신. 현재: list(driverId+departTime, empNo+boardedAt), passengers(partnerCode+active), partnerCodes(companyId+createdAt), notices(active+createdAt).
+신규 복합 쿼리 추가 시 `firestore.indexes.json` 갱신. 현재: list(driverId+departTime, empNo+boardedAt), passengers(partnerCode+active), partnerCodes(companyId+createdAt), notices(active+createdAt), **improvement_requests(companyId+createdAt DESC)**(회사 admin 스코프 쿼리용·superadmin 은 orderBy createdAt 단일필드라 자동 인덱스).
