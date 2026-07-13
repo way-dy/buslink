@@ -23,6 +23,9 @@ import {
   IMPROVEMENT_STATUSES, IMPROVEMENT_STATUS_LABELS, IMPROVEMENT_STATUS_TONE,
 } from "../lib/improvementRequests";
 import { loadSeenMap, markSeen, isUnread } from "../lib/improvementSeen";
+// 개선 요청 본문 리치 텍스트(인라인 이미지 data URI) — 정화·유틸 + 경량 에디터
+import { sanitizeContentHtml, looksLikeHtml, htmlToPlainText, htmlByteSize, contentHasImage } from "../lib/richText";
+import RichTextEditor from "../components/RichTextEditor";
 import { planTimeForStop, offsetMinFromPlanTime, computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
 import { aggregateBoardingsByStop } from "../lib/stopMapping";
 // 리디자인 3단계 — 실시간 관제(MapTab) 라이트 리스킨 전용. 타 탭 미사용.
@@ -5026,29 +5029,24 @@ function ImprovementCreateModal({ companyId, user, onClose }) {
     await addImageFiles(files);
   };
 
-  // 본문에 이미지 붙여넣기(Ctrl+V) — 스크린샷을 파일선택 없이 바로 첨부.
-  // 이미지 클립보드 항목이 있을 때만 가로채고(preventDefault), 일반 텍스트 붙여넣기는 그대로 둔다.
-  const onPasteContent = async (e) => {
-    const items = Array.from(e.clipboardData?.items || []);
-    const files = items
-      .filter(it => it.kind === "file" && it.type && it.type.startsWith("image/"))
-      .map(it => it.getAsFile())
-      .filter(Boolean);
-    if (files.length === 0) return;   // 텍스트 붙여넣기 등은 기본 동작 유지
-    e.preventDefault();
-    await addImageFiles(files);
-  };
-
   const submit = async () => {
     setErr("");
     if (!title.trim()) { setErr("제목을 입력하세요"); return; }
-    if (!content.trim()) { setErr("내용을 입력하세요"); return; }
+    // 본문은 리치 HTML — 저장 직전 정화(재sanitize) 후 유효성·총량 판정.
+    const clean = sanitizeContentHtml(content);
+    if (!htmlToPlainText(clean).trim() && !contentHasImage(clean)) { setErr("내용을 입력하세요"); return; }
+    // 제출 총량 캡(1MB doc 한도 - history/기타 여유). 인라인 이미지 + 별도 첨부 합산.
+    const shotsBytes = shots.reduce((s, x) => s + (x.bytes || 0), 0);
+    if (htmlByteSize(clean) + shotsBytes > 800 * 1024) {
+      setErr("이미지가 많아 저장할 수 없습니다. 개수를 줄이거나 크기를 낮춰주세요");
+      return;
+    }
     setSaving(true);
     try {
       await createRequest({
         companyId,
         title: title.trim(),
-        content,
+        content: clean,
         requesterUid: user?.uid,
         requesterName: user?.displayName || user?.email || "관리자",
         requesterEmail: user?.email || "",
@@ -5068,7 +5066,12 @@ function ImprovementCreateModal({ companyId, user, onClose }) {
         <div style={S.label}>제목</div>
         <input style={S.input} value={title} onChange={e => setTitle(e.target.value)} maxLength={100} placeholder="개선하고 싶은 내용을 한 줄로" />
         <div style={S.label}>내용</div>
-        <textarea style={{ ...S.input, minHeight: 120, resize: "vertical", whiteSpace: "pre-wrap" }} value={content} onChange={e => setContent(e.target.value)} onPaste={onPasteContent} placeholder="자세한 설명을 적어주세요(개행 유지) · 스크린샷은 여기에 붙여넣기(Ctrl+V) 하면 첨부됩니다" />
+        <RichTextEditor
+          value={content}
+          onChange={setContent}
+          onImageError={setErr}
+          placeholder="자세한 설명 · 스크린샷은 본문에 Ctrl+V 로 인라인 삽입됩니다"
+        />
         <div style={S.label}>이미지 첨부 (최대 3장 · 각 300KB · 본문에 Ctrl+V 붙여넣기 가능)</div>
         {shots.length > 0 && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -5148,9 +5151,16 @@ function ImprovementDetailModal({ req, user, isSuperAdmin, companyLabel, onClose
           {companyLabel && <span>· {companyLabel}</span>}
         </div>
 
-        <div style={{ whiteSpace: "pre-wrap", fontSize: 13, color: "var(--color-label)", background: "var(--color-bg-soft)", border: "1px solid var(--color-line)", borderRadius: 10, padding: "12px 14px", marginTop: 8 }}>
-          {req.content || "(내용 없음)"}
-        </div>
+        {/* 리치 HTML(인라인 이미지)이면 표시 직전 재sanitize 후 렌더, 레거시 평문은 pre-wrap 폴백 */}
+        {looksLikeHtml(req.content) ? (
+          <div className="imp-content"
+            style={{ color: "var(--color-label)", background: "var(--color-bg-soft)", border: "1px solid var(--color-line)", borderRadius: 10, padding: "12px 14px", marginTop: 8 }}
+            dangerouslySetInnerHTML={{ __html: sanitizeContentHtml(req.content) }} />
+        ) : (
+          <div style={{ whiteSpace: "pre-wrap", fontSize: 13, color: "var(--color-label)", background: "var(--color-bg-soft)", border: "1px solid var(--color-line)", borderRadius: 10, padding: "12px 14px", marginTop: 8 }}>
+            {req.content || "(내용 없음)"}
+          </div>
+        )}
 
         {shots.length > 0 && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>

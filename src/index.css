@@ -15,6 +15,26 @@ code {
     monospace;
 }
 
+/* ── 개선 요청 게시판 — 리치 텍스트(인라인 이미지) (2026-07-13) ── */
+/* 에디터 내부/렌더 모두 img 폭을 컨테이너로 제어(style 속성 미허용 대응). */
+.rte-editor img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin: 4px 0;
+}
+.imp-content {
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+.imp-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin: 4px 0;
+}
+
 /* ── BusLink Admin 모바일 최적화 ── */
 @media (max-width: 767px) {
   /* 테이블 가로 스크롤 */
