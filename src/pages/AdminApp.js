@@ -4998,11 +4998,10 @@ function ImprovementCreateModal({ companyId, user, onClose }) {
   const PER_LIMIT = 300 * 1024;
   const TOTAL_LIMIT = 900 * 1024;
 
-  const onPick = async (e) => {
+  // 파일 목록 → 압축·개수/용량 판정 후 첨부에 누적(파일선택·붙여넣기 공용).
+  const addImageFiles = async (files) => {
     setErr("");
-    const files = Array.from(e.target.files || []);
-    e.target.value = "";   // 같은 파일 재선택 허용
-    // 한 번에 여러 장 선택 시 stale state 대신 로컬 누적으로 개수·총량 판정.
+    // 한 번에 여러 장 처리 시 stale state 대신 로컬 누적으로 개수·총량 판정.
     const accepted = [...shots];
     let msg = "";
     for (const file of files) {
@@ -5019,6 +5018,25 @@ function ImprovementCreateModal({ companyId, user, onClose }) {
     }
     setShots(accepted);
     if (msg) setErr(msg);
+  };
+
+  const onPick = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";   // 같은 파일 재선택 허용
+    await addImageFiles(files);
+  };
+
+  // 본문에 이미지 붙여넣기(Ctrl+V) — 스크린샷을 파일선택 없이 바로 첨부.
+  // 이미지 클립보드 항목이 있을 때만 가로채고(preventDefault), 일반 텍스트 붙여넣기는 그대로 둔다.
+  const onPasteContent = async (e) => {
+    const items = Array.from(e.clipboardData?.items || []);
+    const files = items
+      .filter(it => it.kind === "file" && it.type && it.type.startsWith("image/"))
+      .map(it => it.getAsFile())
+      .filter(Boolean);
+    if (files.length === 0) return;   // 텍스트 붙여넣기 등은 기본 동작 유지
+    e.preventDefault();
+    await addImageFiles(files);
   };
 
   const submit = async () => {
@@ -5050,8 +5068,8 @@ function ImprovementCreateModal({ companyId, user, onClose }) {
         <div style={S.label}>제목</div>
         <input style={S.input} value={title} onChange={e => setTitle(e.target.value)} maxLength={100} placeholder="개선하고 싶은 내용을 한 줄로" />
         <div style={S.label}>내용</div>
-        <textarea style={{ ...S.input, minHeight: 120, resize: "vertical", whiteSpace: "pre-wrap" }} value={content} onChange={e => setContent(e.target.value)} placeholder="자세한 설명을 적어주세요(개행 유지)" />
-        <div style={S.label}>이미지 첨부 (최대 3장 · 각 300KB)</div>
+        <textarea style={{ ...S.input, minHeight: 120, resize: "vertical", whiteSpace: "pre-wrap" }} value={content} onChange={e => setContent(e.target.value)} onPaste={onPasteContent} placeholder="자세한 설명을 적어주세요(개행 유지) · 스크린샷은 여기에 붙여넣기(Ctrl+V) 하면 첨부됩니다" />
+        <div style={S.label}>이미지 첨부 (최대 3장 · 각 300KB · 본문에 Ctrl+V 붙여넣기 가능)</div>
         {shots.length > 0 && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {shots.map((s, i) => (
