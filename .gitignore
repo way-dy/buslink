@@ -35,3 +35,8 @@ yarn-error.log*
 
 # Firebase 배포 캐시(로컬 산출물)
 /.firebase/
+
+# 서비스 계정 키 (개선요청 게시판 CLI scripts/board.cjs 용 — 절대 커밋 금지)
+/key/
+*serviceAccount*.json
+*-adminsdk-*.json
