@@ -5060,7 +5060,7 @@ function ImprovementCreateModal({ companyId, user, onClose }) {
   };
 
   return (
-    <div style={S.overlay} onClick={onClose}>
+    <div style={S.overlay}>{/* 배경 클릭 닫힘 제거 — 작성 중 내용 소실 방지(2026-07-14 점검). 닫기는 취소 버튼으로만 */}
       <div style={S.modal} onClick={e => e.stopPropagation()}>
         <div style={S.modalTitle}>개선 요청 등록</div>
         <div style={S.label}>제목</div>
@@ -5139,7 +5139,7 @@ function ImprovementDetailModal({ req, user, isSuperAdmin, companyLabel, onClose
   };
 
   return (
-    <div style={S.overlay} onClick={onClose}>
+    <div style={S.overlay}>{/* 배경 클릭 닫힘 제거 — 작성 중 댓글/메모 소실 방지(2026-07-14 점검). 닫기는 닫기 버튼으로만 */}
       <div style={{ ...S.modal, maxWidth: 560 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
           <div style={{ ...S.modalTitle, marginBottom: 0, flex: 1 }}>{req.title || "(제목 없음)"}</div>
