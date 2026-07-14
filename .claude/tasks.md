@@ -24,7 +24,7 @@
 3. `firebase deploy --only hosting` (rules 변경 시 `--only firestore:rules,hosting`) → curl 검증.
 4. 회귀 시 가설-재배포 금지 → 콘솔 Hosting 롤백 먼저, 재현은 localhost.
 
-> **2026-07-14 세션**: ① 개선요청 게시판 사용자 점검(배시현) — 작성/상세 모달 **배경 클릭 시 닫힘→작성 내용 소실** 수정(오버레이 `onClick={onClose}` 제거·닫기는 버튼만, prod `main.8bf320a8.js`·커밋 `0cb7531`). ② **개선요청 게시판 CLI** `scripts/board.cjs`(Admin SDK·`list`/`done`/`status`/`comment`) 신설 — buslink 는 로컬 prod 접근 수단 없어 `/board` 읽기·완료처리를 이 CLI 로. **`app/buslink/key/*.json` 서비스 계정 키 필요**(콘솔 다운로드·`.gitignore` 로 커밋 차단·`functions/node_modules/firebase-admin` 재사용·project_id 검증). 키 있으면 `/board` 가 이 채널로 자동 읽고 완료버튼도 CLI 로 누름.
+> **2026-07-14 세션**: ⓪ **게시판 코멘트 규칙 강제**(way 재지적) — 완료 코멘트는 `반영완료되었습니다` 한 줄·처리자는 **"시스템 관리자"**·시스템 용어 금지. `scripts/board.cjs` 에서 자유 메모 인자 제거(상태별 고정 문구만 write) + prod 기존 doc resultNote/history/byName 소급 교정. 앱 코드·배포 무관(CLI+Firestore 데이터). ① 개선요청 게시판 사용자 점검(배시현) — 작성/상세 모달 **배경 클릭 시 닫힘→작성 내용 소실** 수정(오버레이 `onClick={onClose}` 제거·닫기는 버튼만, prod `main.8bf320a8.js`·커밋 `0cb7531`). ② **개선요청 게시판 CLI** `scripts/board.cjs`(Admin SDK·`list`/`done`/`status`/`comment`) 신설 — buslink 는 로컬 prod 접근 수단 없어 `/board` 읽기·완료처리를 이 CLI 로. **`app/buslink/key/*.json` 서비스 계정 키 필요**(콘솔 다운로드·`.gitignore` 로 커밋 차단·`functions/node_modules/firebase-admin` 재사용·project_id 검증). 키 있으면 `/board` 가 이 채널로 자동 읽고 완료버튼도 CLI 로 누름.
 
 ## 다음 할 일
 - [ ] **RQ/20260708 승객앱 개편 묶음 (이미지 참조 파일 대기 중)**: 회의(`RQ/20260708/`) 요청 — ① 거래처 우선 진입 흐름(업체코드 대신 거래처 선택) ② 승객앱 거래처 데이터 격리(노선/하단메뉴/공지 전부 자기 거래처만) ③ 홈 직관화(진입 즉시 도착정보) ④ 홈 스크롤 안 내려가는 버그 ⑤ 지하철식 진척 시각화 ⑥ **거리뷰 연동(=아래 프로토타입 완료·정식반영 대기)** ⑦ 앱명 "승객" 노출 확인 + 기사앱 유비칸 GPS/고정QR/세션분리 등. **이미지 참조 오면** 정식 UI에 얹어 일괄 진행.

@@ -7,9 +7,13 @@
 //
 // 사용:
 //   node scripts/board.cjs list                  — 미처리 요청(요청/검토/반영중) 목록 + 문서 id
-//   node scripts/board.cjs done <id> [결과메모]    — 완료 처리(status:done + history + resultNote)
-//   node scripts/board.cjs status <id> <상태> [메모] — 상태 전이(reviewing|in_progress|done|rejected)
-//   node scripts/board.cjs comment <id> <내용>     — 댓글(history) 추가
+//   node scripts/board.cjs done <id>             — 완료 처리(status:done + history + resultNote)
+//   node scripts/board.cjs status <id> <상태>     — 상태 전이(reviewing|in_progress|rejected)
+//   node scripts/board.cjs comment <id> <내용>     — 댓글(history) 추가. 사용자 용어만.
+//
+// ⚠ 게시판은 고객이 보는 화면이다. 완료 코멘트는 항상 "반영완료되었습니다" 로 고정하고
+//   변경 상세·빌드 해시·파일명 등 시스템 용어는 절대 남기지 않는다(자유 메모 인자 없음).
+//   기술 기록은 .claude/tasks.md 에, 사용법 안내는 사용자에게 대화로 전달.
 //
 // 안전: project_id 를 buslink-prod 로 검증. firebase-admin 은 functions/node_modules 재사용.
 const fs = require("fs");
@@ -18,8 +22,10 @@ const admin = require(path.join(__dirname, "..", "functions", "node_modules", "f
 
 const COL = "improvement_requests";
 const BYUID = "claude-cli";
-const BYNAME = "개발자";
-const STATUSES = ["requested", "reviewing", "in_progress", "done", "rejected"];
+const BYNAME = "시스템 관리자";
+const DONE_NOTE = "반영완료되었습니다";
+const STATUS_NOTE = { reviewing: "확인 중입니다", in_progress: "반영 중입니다", rejected: "반영이 어렵습니다", done: DONE_NOTE };
+const STATUSES = Object.keys(STATUS_NOTE).concat("requested");
 
 const kd = path.join(__dirname, "..", "key");
 const kf = fs.existsSync(kd) && fs.readdirSync(kd).find((f) => f.endsWith(".json"));
@@ -77,16 +83,17 @@ const arg = rest.join(" ");
       return;
     }
 
-    const status = cmd === "done" ? "done" : id && rest[0];
-    const note = cmd === "done" ? arg : rest.slice(1).join(" ");
+    const status = cmd === "done" ? "done" : rest[0];
     if (!STATUSES.includes(status)) { console.error(`상태값 오류: ${status} (${STATUSES.join("|")})`); process.exit(1); }
+    // 코멘트는 상태별 고정 문구(사용자 용어). 자유 메모를 받지 않는다 — 시스템 용어 유출 차단.
+    const note = STATUS_NOTE[status] || "";
     const upd = { status, updatedAt: serverTimestamp(), history: arrayUnion(histEntry(status, note)) };
-    if (status === "done" && note) upd.resultNote = note;
+    if (status === "done") upd.resultNote = DONE_NOTE;
     await ref.update(upd);
-    console.log(`✅ [${id}] ${s.data().title} → ${status}` + (note ? ` · 메모: ${note}` : ""));
+    console.log(`✅ [${id}] ${s.data().title} → ${status}` + (note ? ` · 코멘트: ${note}` : ""));
     return;
   }
 
-  console.error("usage: node scripts/board.cjs list | done <id> [메모] | status <id> <상태> [메모] | comment <id> <내용>");
+  console.error("usage: node scripts/board.cjs list | done <id> | status <id> <상태> | comment <id> <내용>");
   process.exit(1);
 })().catch((e) => { console.error(e.message); process.exit(1); });
