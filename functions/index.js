@@ -2226,6 +2226,36 @@ async function getImprovementCompanyName(db, companyId) {
   }
 }
 
+/**
+ * 개선요청 본문 → 웹훅 미리보기 평문. 본문이 리치 HTML(인라인 base64 <img> 포함,
+ * 2026-07-13 리치텍스트 도입분)이면 태그를 벗기고 이미지는 "이미지 N장" 라벨로 치환.
+ * (2026-07-16 way 신고: base64 원문이 챗 카드에 그대로 노출되어 깨져 보임.)
+ * HTML 판별 정규식은 클라 정본 src/lib/richText.js looksLikeHtml 미러 — 레거시 평문은
+ * 태그 판별 실패 시 기존 그대로(공백 정리 + slice)라 회귀 0.
+ */
+function improvementPreviewText(content, max) {
+  const raw = String(content || "");
+  const isHtml = /<(p|div|br|img|span|ul|ol|li|h[1-3]|blockquote|a|b|strong|em|i|u)\b/i.test(raw);
+  let text = raw;
+  let imgCount = 0;
+  if (isHtml) {
+    imgCount = (raw.match(/<img\b/gi) || []).length;
+    text = raw
+      .replace(/<img\b[^>]*>/gi, " ")
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, "\"")
+      .replace(/&#39;/g, "'");
+  }
+  text = text.replace(/\s+/g, " ").trim().slice(0, max);
+  const label = imgCount > 0 ? `🖼 이미지 ${imgCount}장 첨부` : "";
+  if (!text) return label || "(내용 없음)";
+  return label ? `${text} · ${label}` : text;
+}
+
 /** 웹훅 URL 에 스레드 옵션 쿼리 부착. reply=true 면 같은 스레드 답글. */
 function chatThreadUrl(baseUrl, reply) {
   const u = new URL(baseUrl);
@@ -2248,7 +2278,7 @@ exports.onImprovementRequestCreate = onDocumentCreated(
       const data = event.data?.data() || {};
       const companyName = await getImprovementCompanyName(db, data.companyId);
       const statusLabel = IMPROVEMENT_STATUS_LABELS[data.status] || data.status || "요청";
-      const preview = String(data.content || "").replace(/\s+/g, " ").trim().slice(0, 140) || "(내용 없음)";
+      const preview = improvementPreviewText(data.content, 140);
 
       const body = {
         thread: { threadKey: "imp-" + id },
