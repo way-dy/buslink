@@ -32,8 +32,8 @@
 
 ## 다음 할 일
 - [ ] **RQ/20260716 추가개선사항미팅 6건** (정본=`meetings/2026-07-16_추가개선사항미팅.md`·원 전사 `RQ/20260716/meeting.txt`):
-  - [ ] **#1 🔴 QR 오탑승 차단 + 선택 노선 매핑**: 현재 정적 QR(`boardStatic`)은 차량의 오늘 배차에서 노선을 서버 해석 — 승객 선택 노선 무시. 결정=차량 고정 바코드 유지 + **승객이 앱에서 선택한 노선으로 적재** + 선택 노선↔태깅 차량 배차 불일치 시 "해당 노선의 QR이 아닙니다" 차단. 같은 차량 하루 다중 배차(7:10/7:50) 구분도 선택 노선으로 해석. 대상: `boarding.js`/`boardStatic`/`resolveStaticBoarding`/EmployeeApp ScanTab·BoardingApp.
-  - [ ] **#2 운행 중 표시 시간 창 — 점검 완료·결함 확인(수정 대기)**: write측 창은 존재(`computeGpsWindow` dep−30~+60, device 폴러 한정)하나 **표시측 신선도 게이트 부재** — EmployeeApp RoutesTab `gpsData`(1610행, 신선도 무검사 카운트)·HomeTab `rawBuses`(640행, 전 gps 문서) → device(유비칸) 차량은 gps 문서 잔존이라 종료 후에도 "운행중". 수정 후보: ⓐ 폴러가 창 종료 시 자기 gps 문서 삭제(mobile clearGPS 대응물·소비자 코드 0 변경) ⓑ 표시측 isGpsFresh 게이트(runStatus 미러). ⓐ 권장.
+  - [x] **#1 🔴 QR 오탑승 차단 + 선택 노선 매핑 (2026-07-16 prod 배포 `main.ab0d10a9.js` + CF `resolveStaticBoarding`/`boardStatic`·커밋 `2de00df`)**: `resolveStaticDispatchAdmin` selectedRouteId 매칭(불일치=차단·다중 회차=현재시각 근접)·직원앱 스캐너 session.routeId 전달·BoardingApp 무변경. 격리 7 assertion·신규 경고 0. **사용자 실기기 검증 대기**(카메라 스캔 자동화 불가): 7:10 선택→7:50 차량 태깅 시 "선택한 노선의 차량이 아닙니다" 확인. 상세 issues.md `[패턴]`.
+  - [x] **#2 운행 중 표시 잔존 해소 (2026-07-16 prod 배포 CF `pollDeviceVehicleGps`·커밋 `f462f2e`)**: 폴러가 창 밖/미배차 시 device gps 문서 삭제(`cleanupDeviceGpsDoc`·mobile 보호) + POST 창 60→30(회의 결정 30/30). 격리 10 assertion. **운영 확인**: 내일 셔틀 종료 30분 후 노선탭 "운행중" 꺼지는지. 상세 issues.md `[패턴]`.
   - [ ] **#3 협력사 포탈 차량 운행 현황(노선도) + 협력사별 노출 옵션**: OperationsMode 에 실시간 지도는 이미 있음(Phase 1.3) — 정류장 진행 노선도 뷰 추가 + `partnerCodes` 옵션 필드로 노출 on/off(기본 off? 회의="기본은 놔두고 선택").
   - [ ] **#4 그룹(관리회사) 설정 구조** — 노선·차량·바코드=그룹 통합, 탑승자 관리·협력사 어드민·탑승 현황=서브 회사 분리(다우디지털스퀘어 3입주사). **way 기초 설계 후 진행**.
   - [ ] **#5 거래처별 UI 커스터마이징**: 메인 컬러 코드 + 로고(위치·사이즈 조정).
