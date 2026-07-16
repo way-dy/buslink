@@ -2,6 +2,8 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
+> **2026-07-16 세션 3건(전부 prod 배포·커밋)**: ① 개선요청 웹훅 카드 base64 원문 노출 fix(CF `onImprovementRequestCreate`·`improvementPreviewText` 헬퍼·`8dfc3d3`) ② 배시현 게시판 요청 — 직원앱 내 정류장 카드 "운행 종료" 표기(`lib/runStatus.js` 순수 판정·`fb28514`·prod `main.7fd830f5.js`·게시판 done) ③ 개선요청 게시판 ↻ 새로고침 버튼(ImprovementTab — MapTab #2 `forceReconnect`+refreshTick 패턴 미러·stale 리스너 수동 재구독·prod `main.cbbabc98.js`). rules/indexes 변경 0.
+
 ## 현재 상태 (2026-07-13 세션 종료)
 > 이 저장소가 작업 정본. **어느 PC든** `git pull`(origin/master) + `.env.local`(↓부트스트랩, 카카오 키 `58bf34`)이면 빌드·배포 가능.
 > prod 라이브 = **`main.4ac4d558.js`**(2026-07-13 curl 실측) + CF 27종. 기사앱 빌드마커 `v2026-06-09-livegps`. 옛 세션 로그는 @.claude/tasks-log.md.

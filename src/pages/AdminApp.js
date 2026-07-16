@@ -4877,6 +4877,18 @@ function ImprovementTab({ companyId, user, role, companies }) {
   const [seenMap, setSeenMap] = useState(() => loadSeenMap());
   const [detailId, setDetailId] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [refreshTick, setRefreshTick] = useState(0); // 새로고침 버튼 → 재연결·재구독 (MapTab #2 패턴 미러)
+  const [refreshing, setRefreshing] = useState(false);
+
+  // 새로고침(2026-07-16) — 오프라인 전이·장시간 대기 후 onSnapshot 리스너가 stale 해져
+  // 새 요청/댓글이 안 보일 때 수동 재연결·재구독. 목록 state 는 유지(silent 재조회).
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    await forceReconnect();
+    setRefreshTick(t => t + 1);
+    setTimeout(() => setRefreshing(false), 600);
+  };
 
   // 실시간 구독. superadmin=전 회사(orderBy만), admin=자기 회사(where+orderBy).
   useEffect(() => {
@@ -4887,7 +4899,8 @@ function ImprovementTab({ companyId, user, role, companies }) {
       err => console.warn("[개선요청] 구독 오류:", err.message)
     );
     return unsub;
-  }, [companyId, isSuperAdmin]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, isSuperAdmin, refreshTick]);
 
   // 회사명 라벨(superadmin) — companies 목록에서 매핑.
   const companyNameById = {};
@@ -4927,7 +4940,16 @@ function ImprovementTab({ companyId, user, role, companies }) {
     <div style={S.panel}>
       <div style={S.panelHeader}>
         <div style={{ fontSize: 15, fontWeight: 800, color: "var(--color-label)" }}>개선 요청</div>
-        <button style={S.addBtn} onClick={() => setCreateOpen(true)}>+ 요청 등록</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* 새로고침(2026-07-16) — stale 리스너 수동 재연결·재구독 (MapTab #2 버튼 미러) */}
+          <button onClick={handleRefresh} disabled={refreshing}
+            title="개선 요청 목록을 즉시 다시 불러옵니다"
+            style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 8, border: "1px solid var(--color-line)", background: "var(--color-bg-soft)", color: "var(--color-label-mute)", cursor: refreshing ? "default" : "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, opacity: refreshing ? 0.6 : 1 }}>
+            <span style={{ display: "inline-block", animation: refreshing ? "blspin 0.8s linear infinite" : "none" }}>↻</span>
+            {refreshing ? "새로고침 중" : "새로고침"}
+          </button>
+          <button style={S.addBtn} onClick={() => setCreateOpen(true)}>+ 요청 등록</button>
+        </div>
       </div>
 
       {/* 필터 바 */}
