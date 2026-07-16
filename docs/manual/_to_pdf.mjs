@@ -26,6 +26,9 @@ const DOCS = [
   ["ADMIN_GUIDE.md", "BusLink_관리자매뉴얼.pdf", "BusLink 관리자 매뉴얼", "동영관광 통근버스 관제 시스템 · 관리자용"],
   ["DRIVER_GUIDE.md", "BusLink_기사매뉴얼.pdf", "BusLink 기사 매뉴얼", "동영관광 통근버스 관제 시스템 · 기사용"],
   ["EMPLOYEE_GUIDE.md", "BusLink_직원매뉴얼.pdf", "BusLink 직원(승객) 매뉴얼", "동영관광 통근버스 관제 시스템 · 직원용"],
+  // 2026-07-16 회의 #6 — 협력사 포탈·승객앱 요약본(최소 분량, 반출 고려)
+  ["PARTNER_GUIDE.md", "BusLink_협력사포탈가이드.pdf", "협력사 포탈 요약 가이드", "동영관광 통근버스 관제 시스템 · 협력사 담당자용"],
+  ["PASSENGER_QUICK.md", "BusLink_승객앱가이드.pdf", "승객 앱 요약 가이드", "동영관광 통근버스 관제 시스템 · 승객용"],
 ];
 
 // 이미지 src(assets/...) → base64 data URI 로 인라인 (이미지가 PDF 에 박히도록).

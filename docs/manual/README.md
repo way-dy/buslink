@@ -7,9 +7,11 @@
 - `BusLink_관리자매뉴얼.pdf` — AdminApp(`admin.buslink.co.kr`, 데스크톱)
 - `BusLink_기사매뉴얼.pdf` — DriverApp(`d.buslink.co.kr`, 모바일)
 - `BusLink_직원매뉴얼.pdf` — EmployeeApp(`p.buslink.co.kr`, 모바일·사번+PIN)
+- `BusLink_협력사포탈가이드.pdf` — PartnerApp(`partner.buslink.co.kr`, 업체코드) **요약본**(2026-07-16 회의 #6, 최소 분량·반출 고려, 3쪽)
+- `BusLink_승객앱가이드.pdf` — EmployeeApp **요약본**(동일 회의, 3쪽. 상세본=직원매뉴얼과 별개 공존)
 
 ## 소스
-- `ADMIN_GUIDE.md` / `DRIVER_GUIDE.md` / `EMPLOYEE_GUIDE.md` — 매뉴얼 본문(MD)
+- `ADMIN_GUIDE.md` / `DRIVER_GUIDE.md` / `EMPLOYEE_GUIDE.md` / `PARTNER_GUIDE.md` / `PASSENGER_QUICK.md` — 매뉴얼 본문(MD)
 - `_to_pdf.mjs` — MD→A4 PDF 변환(marked + 시스템 Chrome). 모노 템플릿·`#0066FF` 액센트 내장.
 - 스크린샷은 **재캡처 없이** `../manual-ppt/assets/{admin,driver,employee}/*.png` 재사용.
 
