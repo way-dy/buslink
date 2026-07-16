@@ -56,7 +56,8 @@ async function clickMainTab(page, label) {
   // 섹션별 element 캡처(긴 페이지 fullPage 금지)
   const secShot = async (headerText, file) => {
     try {
-      const sec = page.locator("div").filter({ has: page.locator(`span:has-text("${headerText}")`) }).last();
+      // 섹션 헤더가 span(자사 노선 등) 또는 div(🚏 노선도) 둘 다 있음 — 직계 자식 매칭으로 카드 div 특정.
+      const sec = page.locator(`div:has(> div:has-text("${headerText}")), div:has(> div > span:has-text("${headerText}"))`).last();
       await sec.scrollIntoViewIfNeeded();
       await sleep(1200);
       await sec.screenshot({ path: path.join(OUT, file) });
