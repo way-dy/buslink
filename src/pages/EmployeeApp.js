@@ -27,6 +27,8 @@ import InstallPrompt, { InstallGuide } from "../components/InstallPrompt";
 import { applyAppManifest } from "../lib/pwaManifest";
 import PermissionGate from "../components/PermissionGate";
 import { resolveCompanyIdForAnon } from "../lib/companyResolver";
+// 거래처 브랜딩(2026-07-16 회의 #5) — 메인 컬러 CSS 변수 + 헤더 로고. 미설정=기본 테마.
+import { applyPartnerBranding, clearPartnerBranding, fetchPartnerBranding, logoHeightOf } from "../lib/partnerBranding";
 import { useExitConfirm } from "../lib/useExitConfirm";
 
 // ── 경로 진행 판정 임계값 (작업2, 2026-05-18) ──
@@ -347,6 +349,20 @@ export default function EmployeeApp() {
     return () => unsubFn();
   }, [session?.empNo, session?.companyId, session?.partnerCode]);
 
+  // ── 거래처 브랜딩(2026-07-16 회의 #5) — 로그인 직원의 partnerCode 로 컬러·로고 적용 ──
+  const [branding, setBranding] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    const pc = session?.partnerCode;
+    if (!pc) { clearPartnerBranding(); setBranding(null); return; }
+    fetchPartnerBranding(pc).then(b => {
+      if (cancelled) return;
+      setBranding(b);
+      applyPartnerBranding(b);
+    });
+    return () => { cancelled = true; clearPartnerBranding(); };
+  }, [session?.partnerCode]);
+
   if (!ready) return (
     <div style={S.fullCenter}>
       <div style={S.spinner} />
@@ -393,7 +409,7 @@ export default function EmployeeApp() {
         {tab === "home"     && (
           <>
             <PermissionGate containerStyle={{ flexShrink: 0, padding: "8px 12px 0" }} />
-            <HomeTab companyId={companyId} session={session} onScanTab={() => setTab("scan")} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />
+            <HomeTab companyId={companyId} session={session} branding={branding} onScanTab={() => setTab("scan")} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />
           </>
         )}
         {tab === "routes"   && <RoutesTab companyId={companyId} session={session} onSessionUpdate={(s) => { saveSession({...session,...s}); setSession(p=>({...p,...s})); }} />}
@@ -487,7 +503,7 @@ function LoginScreen({ companyId, onLogin }) {
 // ════════════════════════════════════════════════════════
 // 홈 탭 — 내 노선 버스 위치 + ETA
 // ════════════════════════════════════════════════════════
-function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
+function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
   const [routes, setRoutes]         = useState([]);
   const [activeRouteId, setActiveRouteId] = useState(session.routeId || null);
   const [stops, setStops]           = useState([]);
@@ -910,6 +926,10 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
 
       {/* ── 상단 헤더 ── */}
       <div style={{ background: 'var(--color-bg)', padding: '10px 14px', flexShrink: 0, borderBottom: '1px solid var(--color-line)' }}>
+        {/* 거래처 로고(브랜딩·2026-07-16 회의 #5) — 관리자가 협력사 관리 > 포탈 설정에서 등록 */}
+        {branding?.logo && (
+          <img src={branding.logo} alt="" style={{ height: logoHeightOf(branding), maxWidth: 140, objectFit: 'contain', display: 'block', marginBottom: 6 }} />
+        )}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-label)' }}>
             {session.name}

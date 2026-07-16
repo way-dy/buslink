@@ -34,6 +34,8 @@ import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 import { PartnerFilter } from "../components/PartnerFilter";
 // Phase B(2026-06-08) admin별 협력사 권한 게이팅 헬퍼(순수)
 import { resolveAllowed, isAllAccess, partnerCodeAllowed } from "../lib/partnerAccess";
+// 포탈 설정 모달(협력사 브랜딩 검증·미리보기) — 2026-07-16 회의 #3·#5
+import { isValidHexColor, mixHex } from "../lib/partnerBranding";
 // 탭 단위 에러 경계 — 자식 throw 시 흰 화면 방지 + 에러 메시지 가시화
 import { ErrorBoundary } from "../components/ErrorBoundary";
 // 관제도 PWA 설치 자동 안내(2026-05-27) — PC Chrome 에서 "앱 설치" 버튼 노출.
@@ -4170,6 +4172,13 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
   const [modeEditTarget, setModeEditTarget] = useState(null); // partnerCodes doc | null
   const [modeEditValue, setModeEditValue] = useState("driver-qr");
   const [modeEditLoading, setModeEditLoading] = useState(false);
+  // 포탈 설정 모달 — 관제(운행 현황) 노출 + 브랜딩(컬러·로고) (2026-07-16 회의 #3·#5)
+  const [portalEditTarget, setPortalEditTarget] = useState(null); // partnerCodes doc | null
+  const [pOps, setPOps] = useState(true);
+  const [pColor, setPColor] = useState("");        // "" = 기본 테마
+  const [pLogo, setPLogo] = useState(null);         // data URI | null
+  const [pLogoHeight, setPLogoHeight] = useState(28);
+  const [pLoading, setPLoading] = useState(false);
 
   useEffect(() => {
     if (!companyId) return;
@@ -4231,6 +4240,47 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
       alert("오류: " + (e?.message || String(e)));
     }
     setModeEditLoading(false);
+  };
+
+  // 포탈 설정 모달 열기/저장 (2026-07-16 회의 #3·#5)
+  const openPortalEdit = (code) => {
+    setPortalEditTarget(code);
+    setPOps(code.opsControlEnabled !== false); // 부재=true(현행 유지)
+    const b = code.branding || {};
+    setPColor(isValidHexColor(b.primaryColor) ? b.primaryColor : "");
+    setPLogo(b.logo || null);
+    setPLogoHeight(Number(b.logoHeight) >= 20 && Number(b.logoHeight) <= 56 ? Number(b.logoHeight) : 28);
+  };
+
+  // 로고 파일 — 투명 PNG 보존 위해 재압축 없이 data URI 로 그대로 저장(200KB 제한·Firestore 1MB doc 여유).
+  const handleLogoFile = (file) => {
+    if (!file) return;
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type)) return alert("PNG/JPG/WebP 이미지만 가능합니다");
+    if (file.size > 200 * 1024) return alert("로고는 200KB 이하 파일만 가능합니다\n(이미지 크기를 줄여 다시 시도하세요)");
+    const reader = new FileReader();
+    reader.onload = () => setPLogo(String(reader.result));
+    reader.readAsDataURL(file);
+  };
+
+  const handlePortalSave = async () => {
+    if (!portalEditTarget) return;
+    if (pColor && !isValidHexColor(pColor)) return alert("메인 컬러는 #RRGGBB 형식으로 입력하세요 (예: #D80027)");
+    setPLoading(true);
+    try {
+      await updateDoc(doc(db, "partnerCodes", portalEditTarget.id), {
+        opsControlEnabled: pOps,
+        branding: {
+          primaryColor: pColor || null,
+          logo: pLogo || null,
+          logoHeight: pLogoHeight,
+        },
+      });
+      setPortalEditTarget(null);
+      alert(`'${portalEditTarget.partnerName}' 포탈 설정이 저장되었습니다.\n\n협력사 포탈은 즉시, 승객 앱은 다음 접속부터 반영됩니다.`);
+    } catch (e) {
+      alert("오류: " + (e?.message || String(e)));
+    }
+    setPLoading(false);
   };
 
   const handleDeactivate = async (code) => {
@@ -4354,6 +4404,9 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
                       <button style={{ ...S.editBtn, padding: "4px 10px", fontSize: 11 }} onClick={() => openModeEdit(c)}>
                         QR 방향
                       </button>
+                      <button style={{ ...S.editBtn, padding: "4px 10px", fontSize: 11 }} onClick={() => openPortalEdit(c)}>
+                        ⚙️ 포탈 설정
+                      </button>
                       {c.active ? (
                         <button style={S.delBtn} onClick={() => handleDeactivate(c)}>비활성화</button>
                       ) : (
@@ -4462,6 +4515,68 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
               {modeEditLoading ? "저장 중..." : "저장"}
             </button>
             <button style={{ ...S.closeBtn, flex: 1 }} onClick={() => setModeEditTarget(null)}>취소</button>
+          </div>
+        </div></div>
+      )}
+
+      {/* ── 포탈 설정 모달 — 관제 노출 + 브랜딩 (2026-07-16 회의 #3·#5) ── */}
+      {portalEditTarget && (
+        <div style={S.overlay}><div style={{ ...S.modal, maxHeight: "88vh", overflowY: "auto" }}>
+          <div style={S.modalTitle}>⚙️ 포탈 설정 — {portalEditTarget.partnerName}</div>
+
+          <label style={S.label}>차량 운행 현황(관제) 노출</label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-label)", cursor: "pointer", marginBottom: 4 }}>
+            <input type="checkbox" checked={pOps} onChange={e => setPOps(e.target.checked)} />
+            협력사 포탈에 실시간 지도·노선도 표시
+          </label>
+          <div style={{ background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#003A99", lineHeight: 1.5 }}>
+            ⓘ 끄면 이 협력사 포탈에서 실시간 버스 위치·노선도 섹션이 숨겨집니다(노선 카드·탑승 현황·공지는 유지).
+          </div>
+
+          <label style={{ ...S.label, marginTop: 12 }}>메인 컬러 (선택 — 비우면 기본 테마)</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="color" value={isValidHexColor(pColor) ? pColor : "#0066FF"}
+              onChange={e => setPColor(e.target.value)}
+              style={{ width: 42, height: 34, padding: 2, border: "1px solid var(--color-line)", borderRadius: 6, background: "var(--color-bg)", cursor: "pointer" }} />
+            <input style={{ ...S.input, flex: 1, marginBottom: 0 }} placeholder="#0066FF" value={pColor}
+              onChange={e => setPColor(e.target.value.trim())} />
+            {pColor && (
+              <button style={{ ...S.editBtn, padding: "6px 10px", fontSize: 11 }} onClick={() => setPColor("")}>기본으로</button>
+            )}
+          </div>
+
+          <label style={{ ...S.label, marginTop: 12 }}>로고 (선택 — PNG/JPG/WebP, 200KB 이하)</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <input type="file" accept="image/png,image/jpeg,image/webp"
+              onChange={e => { handleLogoFile(e.target.files?.[0]); e.target.value = ""; }}
+              style={{ fontSize: 12 }} />
+            {pLogo && (
+              <button style={{ ...S.delBtn, padding: "4px 10px", fontSize: 11 }} onClick={() => setPLogo(null)}>로고 제거</button>
+            )}
+          </div>
+          {pLogo && (
+            <>
+              <label style={{ ...S.label, marginTop: 10 }}>로고 크기 — {pLogoHeight}px</label>
+              <input type="range" min={20} max={56} step={2} value={pLogoHeight}
+                onChange={e => setPLogoHeight(Number(e.target.value))} style={{ width: "100%" }} />
+            </>
+          )}
+
+          {/* 미리보기 — 승객 앱 헤더 근사 */}
+          <label style={{ ...S.label, marginTop: 12 }}>미리보기</label>
+          <div style={{ border: "1px solid var(--color-line)", borderRadius: 10, padding: "10px 14px", background: "#fff" }}>
+            {pLogo && <img src={pLogo} alt="" style={{ height: pLogoHeight, maxWidth: 140, objectFit: "contain", display: "block", marginBottom: 6 }} />}
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#111" }}>홍길동 <span style={{ fontSize: 11, color: "#888", fontWeight: 500 }}>운영팀</span></div>
+            <div style={{ marginTop: 8, display: "inline-block", padding: "5px 13px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: isValidHexColor(pColor) ? mixHex(pColor, "#ffffff", 0.9) : "var(--color-primary-soft)", color: isValidHexColor(pColor) ? mixHex(pColor, "#000000", 0.25) : "var(--color-primary-deep)", border: `1px solid ${isValidHexColor(pColor) ? pColor : "var(--color-primary)"}` }}>
+              🔄 노선 변경
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <button style={{ ...S.addBtn, flex: 1, opacity: pLoading ? 0.6 : 1 }} onClick={handlePortalSave} disabled={pLoading}>
+              {pLoading ? "저장 중..." : "저장"}
+            </button>
+            <button style={{ ...S.closeBtn, flex: 1 }} onClick={() => setPortalEditTarget(null)}>취소</button>
           </div>
         </div></div>
       )}

@@ -18,6 +18,8 @@ import { Map as KakaoMap, MapMarker, Polyline, CustomOverlayMap } from "react-ka
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { useWakeTick } from "../lib/useWakeTick";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
+// 거래처 브랜딩(2026-07-16 회의 #5) — 메인 컬러 CSS 변수 덮어쓰기(포탈 진입 시 적용·이탈 시 복원).
+import { applyPartnerBranding, clearPartnerBranding } from "../lib/partnerBranding";
 
 const STEPS = { CODE:"code", MAIN:"main", DONE:"done", MANAGE:"manage" };
 const REG_MODES = { FILE:"file", SINGLE:"single", MULTI:"multi" };
@@ -1546,12 +1548,16 @@ function OperationsMode({ codeData, code, routes }) {
 
   // partnerCodes 의 recentNoticeTimestamps onSnapshot 으로 현재 남은 발송 횟수 표시
   // (CF write 후 자동 반영 + 다른 세션 발송도 즉시 가시화).
+  // + 라이브 doc 전체 캡처(2026-07-16 회의 #3) — opsControlEnabled 토글이 재로그인 없이 반영되게.
+  const [liveCodeData, setLiveCodeData] = useState(null);
   useEffect(() => {
     if (!code) return;
     return onSnapshot(
       doc(db, "partnerCodes", code),
       snap => {
-        const arr = snap.exists() ? (snap.data().recentNoticeTimestamps || []) : [];
+        const data = snap.exists() ? snap.data() : null;
+        setLiveCodeData(data);
+        const arr = (data && data.recentNoticeTimestamps) || [];
         const cutoff = Date.now() - 60 * 60 * 1000;
         const inWindow = arr.filter(ts => typeof ts === "number" && ts > cutoff);
         const remaining = Math.max(0, PARTNER_NOTICE_LIMIT_PER_HOUR - inWindow.length);
@@ -1560,6 +1566,55 @@ function OperationsMode({ codeData, code, routes }) {
       err => console.warn("[OperationsMode] partnerCodes 구독 오류:", err.message)
     );
   }, [code, wakeTick, recoverTick]);
+
+  // 관제(운행 현황) 노출 옵션(2026-07-16 회의 #3) — 협력사별 on/off. 부재=true(현행 유지).
+  // 정보 과다 노출 → 불필요 CS 우려 대응. AdminApp 협력사 관리 "포탈 설정"에서 토글.
+  const opsEnabled = ((liveCodeData ?? codeData) || {}).opsControlEnabled !== false;
+
+  // 거래처 브랜딩(2026-07-16 회의 #5) — 메인 컬러를 포탈에도 적용(라이브 반영·언마운트 시 복원).
+  useEffect(() => {
+    applyPartnerBranding(((liveCodeData ?? codeData) || {}).branding);
+    return () => clearPartnerBranding();
+  }, [liveCodeData, codeData]);
+
+  // 노선도(정류장 진행) — 버스의 현재 위치를 가장 가까운 정류장으로 매핑(표시 전용).
+  // stops 좌표는 number/string/GeoPoint/nested 혼재(issues toLatLng 규칙) → coercion 필수.
+  const stripRoutes = useMemo(() => {
+    const toLL = (s) => {
+      const lat = Number(s?.lat ?? s?.latitude ?? s?.location?.latitude);
+      const lng = Number(s?.lng ?? s?.longitude ?? s?.location?.longitude);
+      return (isFinite(lat) && isFinite(lng)) ? { lat, lng } : null;
+    };
+    const distM = (a, b) => {
+      const R = 6371000, rad = x => x * Math.PI / 180;
+      const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+      const s = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(s));
+    };
+    return myRoutesList
+      .filter(r => !routeFilter || r.id === routeFilter)
+      .map(r => {
+        const stops = (stopsByRoute[r.id] || []).map(s => ({ id: s.id, name: s.name || "", ll: toLL(s) }));
+        // 이 노선 배차들의 실측 도착(stopArrivals) 합집합 = 통과 정류장
+        const passed = new window.Set();
+        filteredDispatches.filter(d => d.routeId === r.id).forEach(d => {
+          Object.keys(d.stopArrivals || {}).forEach(sid => passed.add(sid));
+        });
+        // 이 노선 버스 → 가장 가까운 정류장 인덱스
+        const busAt = new window.Map(); // stopIdx -> [vehicleNo...]
+        filteredBuses.filter(b => b.routeId === r.id && b.lat && b.lng).forEach(b => {
+          let best = -1, bestD = Infinity;
+          stops.forEach((s, i) => {
+            if (!s.ll) return;
+            const dd = distM({ lat: b.lat, lng: b.lng }, s.ll);
+            if (dd < bestD) { bestD = dd; best = i; }
+          });
+          if (best >= 0) busAt.set(best, [...(busAt.get(best) || []), b.vehicleNo || "버스"]);
+        });
+        return { id: r.id, name: r.name, stops, passed, busAt };
+      })
+      .filter(r => r.stops.length >= 2);
+  }, [myRoutesList, routeFilter, stopsByRoute, filteredDispatches, filteredBuses]);
 
   const noticeTitleLen = noticeTitle.trim().length;
   const noticeBodyLen = noticeBody.trim().length;
@@ -1660,7 +1715,8 @@ function OperationsMode({ codeData, code, routes }) {
         )}
       </div>
 
-      {/* ── 섹션 B: 실시간 버스 위치 (카카오맵) ────────── */}
+      {/* ── 섹션 B: 실시간 버스 위치 (카카오맵) — 협력사별 노출 옵션(opsControlEnabled) ── */}
+      {opsEnabled && (
       <div style={{ background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 10, overflow: "hidden" }}>
         <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--color-line-soft)", fontSize: 12, fontWeight: 700, color: "var(--color-label)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span>📍 실시간 버스 위치</span>
@@ -1731,6 +1787,64 @@ function OperationsMode({ codeData, code, routes }) {
           </div>
         )}
       </div>
+      )}
+
+      {/* ── 섹션 B2: 차량 운행 현황 — 노선도(정류장 진행) (2026-07-16 회의 #3) ── */}
+      {opsEnabled && (
+      <div style={{ background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 10, overflow: "hidden" }}>
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--color-line-soft)", fontSize: 12, fontWeight: 700, color: "var(--color-label)" }}>
+          🚏 차량 운행 현황 (노선도)
+        </div>
+        {stripRoutes.length === 0 ? (
+          <div style={{ padding: 20, textAlign: "center", color: "var(--color-label-mute)", fontSize: 12 }}>
+            표시할 노선(정류장 2개 이상)이 없습니다
+          </div>
+        ) : (
+          <div style={{ padding: "12px 0", display: "flex", flexDirection: "column", gap: 14 }}>
+            {stripRoutes.map(r => (
+              <div key={r.id}>
+                <div style={{ padding: "0 14px 8px", fontSize: 12, fontWeight: 800, color: "var(--color-label)" }}>
+                  {r.name}
+                  <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 600, color: r.busAt.size > 0 ? "var(--color-positive)" : "var(--color-label-alt)" }}>
+                    {r.busAt.size > 0 ? "운행 중" : "대기"}
+                  </span>
+                </div>
+                {/* 가로 스크롤 정류장 스트립 — 통과=파랑 ✓ · 현재 버스 위치=🚌 */}
+                <div style={{ overflowX: "auto", padding: "14px 14px 4px", WebkitOverflowScrolling: "touch" }}>
+                  <div style={{ display: "flex", alignItems: "flex-start" }}>
+                    {r.stops.map((s, i) => {
+                      const isPassed = r.passed.has(s.id);
+                      const busesHere = r.busAt.get(i) || [];
+                      return (
+                        <div key={s.id} style={{ display: "flex", alignItems: "flex-start", flexShrink: 0 }}>
+                          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 64, position: "relative" }}>
+                            {busesHere.length > 0 && (
+                              <div style={{ position: "absolute", top: -14, fontSize: 14, lineHeight: 1 }} title={busesHere.join(", ")}>🚌</div>
+                            )}
+                            <div style={{
+                              width: 14, height: 14, borderRadius: 999, boxSizing: "border-box",
+                              background: isPassed ? "var(--color-primary)" : "var(--color-bg)",
+                              border: `2px solid ${isPassed ? "var(--color-primary)" : "var(--color-line)"}`,
+                              color: "#fff", fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center",
+                            }}>{isPassed ? "✓" : ""}</div>
+                            <div style={{ marginTop: 4, fontSize: 10, fontWeight: isPassed ? 700 : 500, color: isPassed ? "var(--color-primary-deep)" : "var(--color-label-mute)", textAlign: "center", width: 62, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.name}>
+                              {s.name}
+                            </div>
+                          </div>
+                          {i < r.stops.length - 1 && (
+                            <div style={{ width: 26, height: 2, marginTop: 6, flexShrink: 0, background: isPassed ? "var(--color-primary)" : "var(--color-line)" }} />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      )}
 
       {/* ── 섹션 C: 오늘 탑승 현황 ─────────────────────── */}
       <div style={{ background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 10, overflow: "hidden" }}>
