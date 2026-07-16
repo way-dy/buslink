@@ -1887,7 +1887,7 @@ async function loadRouteMeta(db, cid, routeId, cache) {
 // 창 = [departTime − PRE, (departTime + 마지막 정류장 offset) + POST]. 운영자는 노선 출발시각·
 // 정류장 offsetMin(노선설정) 으로 이 창을 통제한다(별도 입력 필드 불필요).
 const GPS_WINDOW_PRE_MIN = 30;              // 출발 전 여유(예열·조기 출발)
-const GPS_WINDOW_POST_MIN = 60;             // 마지막 정류장 도착 후 여유(지연·회차)
+const GPS_WINDOW_POST_MIN = 30;             // 마지막 정류장 도착 후 여유 — 2026-07-16 회의 결정 30/30
 const GPS_WINDOW_DEFAULT_DURATION_MIN = 120; // 정류장 offsetMin 이 전무할 때 기본 운행 소요
 
 /** 노선 메타 → GPS 수신 허용 분(minute-of-day) 창 { startMin, endMin } 또는 null.
@@ -1909,6 +1909,20 @@ function computeGpsWindow(meta) {
   if (startMin < 0) startMin = 0;          // 자정 이전 클램프
   if (endMin > 1439) endMin = 1439;        // 자정 넘김 클램프(그날 끝까지 허용)
   return { startMin, endMin };
+}
+
+// 창 밖/미배차 device 차량의 잔존 gps 문서 삭제 — mobile clearGPS(운행 종료 버튼) 대응물.
+// device 단말은 종료 버튼이 없어 문서가 영구 잔존 → 직원앱 노선탭 "N대 운행중"·홈탭 마커가
+// 운행 전/후에도 계속 표시되던 결함(2026-07-16 회의 #2). source==="device" 인 문서만 삭제
+// (mobile 문서 오삭제 방지 — 기사앱 운행 중 차량 보호). 문서 없으면 no-op(read 1회).
+async function cleanupDeviceGpsDoc(db, companyId, vehicleId) {
+  try {
+    const ref = db.collection("gps").doc(`${companyId}_${vehicleId}`);
+    const snap = await ref.get();
+    if (snap.exists && (snap.data() || {}).source === "device") await ref.delete();
+  } catch (e) {
+    console.warn(`[pollDeviceVehicleGps] gps 문서 정리 실패(${companyId}_${vehicleId}): ${e.message}`);
+  }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -2019,7 +2033,13 @@ exports.pollDeviceVehicleGps = onSchedule(
           targets++;
           try {
             const disp = dispByVehicle[vehicleId];
-            if (!disp) { skipped++; continue; } // 오늘 미운행 — routeId 없으면 승객앱 표시 불가
+            if (!disp) {
+              // 오늘 미운행 — routeId 없으면 승객앱 표시 불가. 잔존 device gps 문서가 있으면
+              // 삭제(어제 창 종료 시점에 폴러가 안 돌았던 경우 등) — 없으면 no-op.
+              await cleanupDeviceGpsDoc(db, cid, vehicleId);
+              skipped++;
+              continue;
+            }
 
             // 운행 시간 창 게이트 — 노선 시간표 밖(운행 전/후) 상시신호 좌표 차단.
             // win=null(노선 departTime 미설정) 이면 게이트 없음 = 기존 동작 보존.
@@ -2027,8 +2047,12 @@ exports.pollDeviceVehicleGps = onSchedule(
             const meta = await loadRouteMeta(db, cid, disp.routeId, routeMetaCache);
             const win = computeGpsWindow(meta);
             if (win && (nowMin < win.startMin || nowMin > win.endMin)) {
+              // 창 밖 = 운행 종료/전. mobile 의 "운행 종료 → clearGPS(문서 삭제)" 대응물 —
+              // device 차량은 사람이 종료 버튼을 안 누르므로 폴러가 여기서 문서를 지워야
+              // 직원/승객/관제 앱의 "운행중" 표시가 꺼진다(2026-07-16 회의 #2, 소비자 코드 0 변경).
+              await cleanupDeviceGpsDoc(db, cid, vehicleId);
               skipped++;
-              continue; // 운행 시간대 아님 — busin 조회·gps write 모두 skip
+              continue; // busin 조회·gps write 모두 skip
             }
 
             const rows = await fetchVehicleLocations(carId, today);
