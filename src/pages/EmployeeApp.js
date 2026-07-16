@@ -13,6 +13,7 @@ import { calcETA } from "../lib/gps";
 import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom } from "../lib/routeProgress";
 import { computeStopEstimates, formatDelayLabel, formatPassengerEta, describeEtaSource } from "../lib/stopSchedule";
 import { useSmoothedEta } from "../lib/useSmoothedEta";
+import { computeRunEnded } from "../lib/runStatus";
 import { useWakeTick } from "../lib/useWakeTick";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
 import { forceReconnect } from "../lib/forceReconnect";
@@ -741,6 +742,18 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
   });
   const estByStopId = Object.fromEntries(stopEstimates.map(e => [e.stopId, e]));
   const myStopEst = myStop ? estByStopId[myStop.id] : null;
+
+  // ── 운행 종료 판정(표시 전용, 2026-07-16 배시현 개선요청) ───────────
+  // clearGPS 후에도 stopArrivals 잔존으로 내 정류장 카드가 "이미 지나침" 영구 표시되던 것을
+  // "운행 종료"로 교체하기 위한 파생값. 기존 구독(todayDispatch/stops/rawBuses)만 사용 — 신규 구독 0.
+  // rawBuses = 이 노선 gps 원본 문서(updatedAt 포함 — buses 는 rAF 보간 사본이라 원본 사용).
+  // 1초 tick(setTick) 재렌더로 GPS stale 전이도 자연 반영. 판정 로직은 lib/runStatus.js(순수).
+  const runEnded = computeRunEnded({
+    hasTodayDispatch: !!todayDispatch,
+    stopArrivals: todayDispatch?.stopArrivals,
+    stops,
+    gpsDocs: rawBuses,
+  });
   // [DIAG-ETA 제거예정] URL ?debug=1 일 때만 노출. prod 영향 0.
   const diagEnabled = getParam("debug") === "1";
   // [/DIAG-ETA]
@@ -1307,6 +1320,19 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
               <div style={{ fontSize: 11, color: 'var(--color-label-mute)', marginBottom: 2, fontWeight: 600 }}>
                 📍 {myStop.name}
               </div>
+              {runEnded ? (
+                /* 운행 종료(2026-07-16) — "이미 지나침"/지연 잔존 대신 중립 회색 표기.
+                   카드의 다른 요소(QR 탑승·정류장 변경 버튼)는 보존. */
+                <>
+                  <div style={{ fontSize: 24, fontWeight: 900, color: 'var(--color-label-mute)', lineHeight: 1.1 }}>
+                    운행 종료
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--color-label-alt)', marginTop: 3, fontWeight: 600 }}>
+                    오늘 운행이 종료되었습니다
+                  </div>
+                </>
+              ) : (
+              <>
               <div style={{ fontSize: 24, fontWeight: 900, color: etaDisplayColor, lineHeight: 1.1 }}>
                 {etaStatus.type === 'passed'
                   ? (isDestStop ? '목적지 도착 완료' : '이미 지나침')
@@ -1365,6 +1391,8 @@ function HomeTab({ companyId, session, onScanTab, onSessionUpdate }) {
                     return <> · <span style={{ color, fontWeight: 700 }}>{lab.label}</span></>;
                   })()}
                 </div>
+              )}
+              </>
               )}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flexShrink: 0 }}>
