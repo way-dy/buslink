@@ -34,10 +34,10 @@
 - [ ] **RQ/20260716 추가개선사항미팅 6건** (정본=`meetings/2026-07-16_추가개선사항미팅.md`·원 전사 `RQ/20260716/meeting.txt`):
   - [x] **#1 🔴 QR 오탑승 차단 + 선택 노선 매핑 (2026-07-16 prod 배포 `main.ab0d10a9.js` + CF `resolveStaticBoarding`/`boardStatic`·커밋 `2de00df`)**: `resolveStaticDispatchAdmin` selectedRouteId 매칭(불일치=차단·다중 회차=현재시각 근접)·직원앱 스캐너 session.routeId 전달·BoardingApp 무변경. 격리 7 assertion·신규 경고 0. **사용자 실기기 검증 대기**(카메라 스캔 자동화 불가): 7:10 선택→7:50 차량 태깅 시 "선택한 노선의 차량이 아닙니다" 확인. 상세 issues.md `[패턴]`.
   - [x] **#2 운행 중 표시 잔존 해소 (2026-07-16 prod 배포 CF `pollDeviceVehicleGps`·커밋 `f462f2e`)**: 폴러가 창 밖/미배차 시 device gps 문서 삭제(`cleanupDeviceGpsDoc`·mobile 보호) + POST 창 60→30(회의 결정 30/30). 격리 10 assertion. **운영 확인**: 내일 셔틀 종료 30분 후 노선탭 "운행중" 꺼지는지. 상세 issues.md `[패턴]`.
-  - [ ] **#3 협력사 포탈 차량 운행 현황(노선도) + 협력사별 노출 옵션**: OperationsMode 에 실시간 지도는 이미 있음(Phase 1.3) — 정류장 진행 노선도 뷰 추가 + `partnerCodes` 옵션 필드로 노출 on/off(기본 off? 회의="기본은 놔두고 선택").
-  - [ ] **#4 그룹(관리회사) 설정 구조** — 노선·차량·바코드=그룹 통합, 탑승자 관리·협력사 어드민·탑승 현황=서브 회사 분리(다우디지털스퀘어 3입주사). **way 기초 설계 후 진행**.
-  - [ ] **#5 거래처별 UI 커스터마이징**: 메인 컬러 코드 + 로고(위치·사이즈 조정).
-  - [ ] **#6 협력사 포탈·승객앱 요약 매뉴얼**: manual-writer, 최소 분량.
+  - [x] **#3 협력사 포탈 노선도 + 노출 옵션 (2026-07-16 prod `main.b37d3f9c.js`·커밋 `5d15ed6`)**: 섹션 B2 정류장 스트립(통과 ✓·버스 위치) + `partnerCodes.opsControlEnabled`(부재=true) 게이팅 + AdminApp "⚙️ 포탈 설정" 토글. 상세 issues.md `[패턴]`.
+  - [ ] **#4 그룹(관리회사) 설정 구조** — **설계안 초안 완료**: `.claude/group-design-draft.md`(partnerGroups 컬렉션+routes.groupId+가시성 4지점·G1~G3 단계·결정 3건). **way 검토·확정 후 구현**.
+  - [x] **#5 거래처별 UI 커스터마이징 (2026-07-16 prod `main.b37d3f9c.js`·커밋 `5d15ed6`)**: `partnerCodes.branding{primaryColor,logo,logoHeight}` — 신규 `lib/partnerBranding.js`(CSS 변수 3종 덮어쓰기·mixHex 파생), 승객앱 헤더 로고+테마·포탈 테마, AdminApp 포탈 설정 모달(컬러 픽커·로고 200KB·크기 슬라이더·미리보기). 로고 위치 조정은 v2 후보(요청 시). 상세 issues.md `[패턴]`.
+  - [ ] **#6 협력사 포탈·승객앱 요약 매뉴얼**: manual-writer 진행 중(2026-07-16).
 - [ ] **RQ/20260708 승객앱 개편 묶음 (이미지 참조 파일 대기 중)**: 회의(`RQ/20260708/`) 요청 — ① 거래처 우선 진입 흐름(업체코드 대신 거래처 선택) ② 승객앱 거래처 데이터 격리(노선/하단메뉴/공지 전부 자기 거래처만) ③ 홈 직관화(진입 즉시 도착정보) ④ 홈 스크롤 안 내려가는 버그 ⑤ 지하철식 진척 시각화 ⑥ **거리뷰 연동(=아래 프로토타입 완료·정식반영 대기)** ⑦ 앱명 "승객" 노출 확인 + 기사앱 유비칸 GPS/고정QR/세션분리 등. **이미지 참조 오면** 정식 UI에 얹어 일괄 진행.
   - [x] **거리뷰(로드뷰) 적용 가능 검증 + 프로토타입 (2026-07-08 커밋, 미배포)**: 카카오 JS SDK 로드뷰=코어(libraries 추가 0·무료)·`react-kakao-maps-sdk@1.2.1` `Roadview` export 확인. EmployeeApp(`/p`) 정류장 정보 카드(`stopInfo`)에 좌표 기반 로드뷰 패널 추가 — 반경 60m 파노라마 있으면 실사, 없으면 `onErrorGetNearestPanoId`→기존 사진 폴백(`rvOk` state·정류장 바뀔 때 리셋). localhost 실사 확인 완료. **정식반영 시**: 승객앱(`/bus`)·관리자 정류장 편집 미리보기 등으로 확장. 좌표 혼재(string/GeoPoint) 정식 대응은 issues.md `toLatLng` 헬퍼 재사용(프로토타입은 Number+isFinite 가드).
   - [ ] **승객앱 UI 개선 (RQ/20260708 PDF 목업 4건) — Phase 1·2 배포완료·Phase 3 대기**: 참조 `RQ/20260708/BusLink_UI_개선_제안.pdf`. EmployeeApp(`/p`) 단독·rules/CF/indexes 변경 0.
