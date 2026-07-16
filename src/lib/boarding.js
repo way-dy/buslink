@@ -210,23 +210,26 @@ export function getStaticBoardingUrl({ companyId, vehicleId }) {
 // 차량ID만 있는 고정 QR 은 "오늘 이 차량이 어느 노선을 뛰는가"를 배차에서 읽어야 한다.
 // 탑승 기록(validateAndBoardStatic) 과 스캔 직후 확인 화면(직원앱 ScanTab) 이 함께 쓴다.
 // 배차 없으면 throw — 어느 노선 탑승인지 결정 불가.
-export async function resolveStaticDispatch({ companyId, vehicleId }) {
+// selectedRouteId(옵션): 승객이 앱에서 선택한 노선 — 있으면 서버가 그 노선 배차만 매칭,
+// 불일치 시 차단(오탑승 방지, 2026-07-16 회의 #1). 없으면 기존 동작(전체 배차 해석).
+export async function resolveStaticDispatch({ companyId, vehicleId, selectedRouteId }) {
   // 배차 읽기 규칙은 admin/driver 잠금 → 익명 진입점은 쿼리 거부됨.
   // CF resolveStaticBoarding(Admin SDK)이 서버에서 배차 해석(반환 shape 동일).
-  const { data } = await httpsCallable(functions, "resolveStaticBoarding")({ companyId, vehicleId });
+  const { data } = await httpsCallable(functions, "resolveStaticBoarding")({ companyId, vehicleId, selectedRouteId: selectedRouteId || null });
   return data; // { today, routeId, routeName, driverId, vehicleNo }
 }
 
 // ─── 정적 QR 검증 + 탑승 기록 ────────────────────────────
 // 만료/소각 없음(재사용 가능). 중복 방지 = 멱등(직원 1인 × 차량 × 당일 1건).
 // boardings 스키마는 validateAndBoard 와 100% 동일(통계 화면 무영향) + via:"static" 만 추가.
-export async function validateAndBoardStatic({ companyId, vehicleId, empNo, name }) {
+export async function validateAndBoardStatic({ companyId, vehicleId, empNo, name, selectedRouteId }) {
   if (!empNo || !empNo.trim()) throw new Error("사번을 입력해주세요"); // 빠른 UX 가드(클라)
 
   // 배차 재해석·partnerCode/GPS 캡처·멱등 boarding 생성은 서버(CF boardStatic·Admin SDK)에 위임.
   // 익명 진입점이 배차 읽기 규칙(admin/driver 잠금)에서 거부되던 문제 회피. 반환 계약 보존.
+  // selectedRouteId 있으면 서버가 선택 노선 배차만 매칭(불일치=차단·적재 노선=선택 노선).
   const { data } = await httpsCallable(functions, "boardStatic")({
-    companyId, vehicleId, empNo: empNo.trim(), name: name || "",
+    companyId, vehicleId, empNo: empNo.trim(), name: name || "", selectedRouteId: selectedRouteId || null,
   });
   return {
     routeName: data.routeName,

@@ -454,7 +454,12 @@ exports.recordStopArrival = onCall(async (request) => {
 
 // 오늘(KST) 이 차량 배차 해석 — 두 onCall 공용(로직 중복 0).
 // 배차 없으면 failed-precondition(클라 확인/오류 화면이 그대로 메시지 표시).
-async function resolveStaticDispatchAdmin(db, companyId, vehicleId) {
+// selectedRouteId(옵션, 2026-07-16 회의 #1): 승객이 앱에서 선택한 노선.
+//  - 있으면 그 노선 배차만 매칭 — 불일치 시 탑승 차단(오탑승 방지·적재 노선=선택 노선 보장).
+//  - 없으면(폰 기본카메라 BoardingApp 등 선택 정보 없는 진입점) 전체 배차에서 해석(하위호환).
+// 같은 차량 하루 다중 배차(7:10/7:50)는 departTime 이 현재 시각과 가장 가까운 회차 선택
+// (기존 docs[0] 임의 선택의 모호성 제거 — 단일 배차 차량은 결과 동일).
+async function resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRouteId) {
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
 
   const listSnap = await db
@@ -466,7 +471,29 @@ async function resolveStaticDispatchAdmin(db, companyId, vehicleId) {
     throw new HttpsError("failed-precondition", "오늘 이 차량은 운행 배차가 없습니다\n관리자에게 문의하세요");
   }
 
-  const disp = listSnap.docs[0].data() || {};
+  const all = listSnap.docs.map((d) => d.data() || {});
+  let pool = all;
+  if (selectedRouteId && typeof selectedRouteId === "string") {
+    pool = all.filter((d) => d.routeId === selectedRouteId);
+    if (!pool.length) {
+      const names = [...new Set(all.map((d) => d.routeName || d.routeId).filter(Boolean))].join(", ");
+      throw new HttpsError(
+        "failed-precondition",
+        `선택한 노선의 차량이 아닙니다\n이 차량의 오늘 운행 노선: ${names || "미상"}\n앱에서 노선을 확인한 뒤 다시 스캔해주세요`
+      );
+    }
+  }
+
+  // 다중 회차 — departTime(HH:MM)이 현재 KST 와 가장 가까운 배차. 미설정 배차는 뒤로.
+  const nowHM = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false,
+  }).format(new Date());
+  const nowMin = hhmmToMinutes(nowHM);
+  const gap = (d) => {
+    const m = hhmmToMinutes(d.departTime);
+    return (m === null || nowMin === null) ? Infinity : Math.abs(m - nowMin);
+  };
+  const disp = pool.reduce((best, d) => (gap(d) < gap(best) ? d : best), pool[0]);
   let vehicleNo = disp.vehicleNo || "";
   // 배차에 vehicleNo 없으면 vehicles/{vehicleId}.plateNo 폴백.
   if (!vehicleNo) {
@@ -487,12 +514,12 @@ async function resolveStaticDispatchAdmin(db, companyId, vehicleId) {
   };
 }
 
-// resolveStaticBoarding({ companyId, vehicleId }) — 읽기 전용(확인 화면 프리뷰용).
+// resolveStaticBoarding({ companyId, vehicleId, selectedRouteId? }) — 읽기 전용(확인 화면 프리뷰용).
 // 반환: { today, routeId, routeName, driverId, vehicleNo }.
 exports.resolveStaticBoarding = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
 
-  const { companyId, vehicleId } = request.data || {};
+  const { companyId, vehicleId, selectedRouteId } = request.data || {};
   if (!companyId || typeof companyId !== "string") {
     throw new HttpsError("invalid-argument", "companyId가 필요합니다");
   }
@@ -501,7 +528,7 @@ exports.resolveStaticBoarding = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  return await resolveStaticDispatchAdmin(db, companyId, vehicleId);
+  return await resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRouteId);
 });
 
 // boardStatic({ companyId, vehicleId, empNo, name }) — 배차 재해석 + 멱등 boarding 생성.
@@ -510,7 +537,7 @@ exports.resolveStaticBoarding = onCall(async (request) => {
 exports.boardStatic = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
 
-  const { companyId, vehicleId, empNo, name } = request.data || {};
+  const { companyId, vehicleId, empNo, name, selectedRouteId } = request.data || {};
   if (!companyId || !vehicleId || !empNo || !String(empNo).trim()) {
     throw new HttpsError("invalid-argument", "사번을 입력해주세요");
   }
@@ -519,8 +546,9 @@ exports.boardStatic = onCall(async (request) => {
   const db = admin.firestore();
 
   // 오늘 배차 해석(비면 failed-precondition) — routeId/routeName/driverId/vehicleNo 확보.
+  // selectedRouteId 있으면 선택 노선 매칭 강제(불일치=차단, 2026-07-16 회의 #1).
   const { today, routeId, routeName, driverId, vehicleNo } =
-    await resolveStaticDispatchAdmin(db, companyId, vehicleId);
+    await resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRouteId);
 
   // partnerCode 자동 채움 — passengers/{empNo}.partnerCode(협력사별 통계용).
   let partnerCode = null;

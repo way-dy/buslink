@@ -2468,10 +2468,13 @@ function ScanTabDriverQR({ companyId, session }) {
 
       // 차량 부착 고정 QR(`/board?c={companyId}&v={vehicleId}`, 2026-07-09) — 토큰 없음.
       // 유비칸 등 기사앱 미사용 차량용. 폰 기본 카메라(BoardingApp)와 이 인앱 스캐너 둘 다 지원.
+      // 승객이 앱에서 선택한 노선(session.routeId)을 서버에 전달 — 선택 노선 배차만 매칭,
+      // 다른 노선 차량이면 서버가 차단(오탑승 방지, 2026-07-16 회의 #1). 미선택 직원은 기존 동작.
       if (!t && c && v) {
         if (companyId && c !== companyId) throw new Error("다른 회사의 QR코드입니다");
-        const info = await resolveStaticDispatch({ companyId: c, vehicleId: v });
-        setStaticQr({ companyId: c, vehicleId: v });
+        const selectedRouteId = session?.routeId || null;
+        const info = await resolveStaticDispatch({ companyId: c, vehicleId: v, selectedRouteId });
+        setStaticQr({ companyId: c, vehicleId: v, selectedRouteId });
         setTokenData({ routeName: info.routeName, vehicleNo: info.vehicleNo });
         setStep("confirm");
         return;
