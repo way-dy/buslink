@@ -2,7 +2,7 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
-> **2026-07-16 회의 전사 환각 의심 — 커밋 보류·사용자 확인 대기**: dev_recording 「추가개선사항미팅」(20분·최우석) 전사 결과 요약(운수사/배차 5건)과 전문(지불/계정 109건·순열반복 퇴행)이 상호 모순 + 두 도메인 모두 buslink 코드에 부재 → 환각 판정, `meetings/2026-07-16_추가개선사항미팅.md`(+.full.md) **repo 커밋 보류**. 실제 안건은 사용자(way) 확인 후 재점검(원음은 Storage 영구 보존·md 상단 링크). 점검 절차는 설정저장소 `/meetings` 스킬.
+> **2026-07-16 회의 전사 환각 — 진단 확정·정본 교체 완료**: dev_recording 녹음이 **무음**(295KB/20분=250B/s, Gemini 검청 "말소리 없음") → 요약·전문 둘 다 환각(운수사 5건/지불 109건, 실안건과 겹침 0). 환각 md 폐기, **정본 = 사용자 제공 전사(`RQ/20260716/`) 기반 `meetings/2026-07-16_추가개선사항미팅.md` 재작성**. Firestore doc status:error 마킹·sync.js 무음 게이트(<1,000B/s 전사 차단) 추가(dev_recording repo). 실안건 6건은 "다음 할 일" 최상단.
 > **2026-07-16 세션 3건(전부 prod 배포·커밋)**: ① 개선요청 웹훅 카드 base64 원문 노출 fix(CF `onImprovementRequestCreate`·`improvementPreviewText` 헬퍼·`8dfc3d3`) ② 배시현 게시판 요청 — 직원앱 내 정류장 카드 "운행 종료" 표기(`lib/runStatus.js` 순수 판정·`fb28514`·prod `main.7fd830f5.js`·게시판 done) ③ 개선요청 게시판 ↻ 새로고침 버튼(ImprovementTab — MapTab #2 `forceReconnect`+refreshTick 패턴 미러·stale 리스너 수동 재구독·prod `main.cbbabc98.js`). rules/indexes 변경 0.
 
 ## 현재 상태 (2026-07-13 세션 종료)
@@ -31,6 +31,13 @@
 > **2026-07-14 세션**: ⓪ **게시판 코멘트 규칙 강제**(way 재지적) — 완료 코멘트는 `반영완료되었습니다` 한 줄·처리자는 **"시스템 관리자"**·시스템 용어 금지. `scripts/board.cjs` 에서 자유 메모 인자 제거(상태별 고정 문구만 write) + prod 기존 doc resultNote/history/byName 소급 교정. 앱 코드·배포 무관(CLI+Firestore 데이터). ① 개선요청 게시판 사용자 점검(배시현) — 작성/상세 모달 **배경 클릭 시 닫힘→작성 내용 소실** 수정(오버레이 `onClick={onClose}` 제거·닫기는 버튼만, prod `main.8bf320a8.js`·커밋 `0cb7531`). ② **개선요청 게시판 CLI** `scripts/board.cjs`(Admin SDK·`list`/`done`/`status`/`comment`) 신설 — buslink 는 로컬 prod 접근 수단 없어 `/board` 읽기·완료처리를 이 CLI 로. **`app/buslink/key/*.json` 서비스 계정 키 필요**(콘솔 다운로드·`.gitignore` 로 커밋 차단·`functions/node_modules/firebase-admin` 재사용·project_id 검증). 키 있으면 `/board` 가 이 채널로 자동 읽고 완료버튼도 CLI 로 누름.
 
 ## 다음 할 일
+- [ ] **RQ/20260716 추가개선사항미팅 6건** (정본=`meetings/2026-07-16_추가개선사항미팅.md`·원 전사 `RQ/20260716/meeting.txt`):
+  - [ ] **#1 🔴 QR 오탑승 차단 + 선택 노선 매핑**: 현재 정적 QR(`boardStatic`)은 차량의 오늘 배차에서 노선을 서버 해석 — 승객 선택 노선 무시. 결정=차량 고정 바코드 유지 + **승객이 앱에서 선택한 노선으로 적재** + 선택 노선↔태깅 차량 배차 불일치 시 "해당 노선의 QR이 아닙니다" 차단. 같은 차량 하루 다중 배차(7:10/7:50) 구분도 선택 노선으로 해석. 대상: `boarding.js`/`boardStatic`/`resolveStaticBoarding`/EmployeeApp ScanTab·BoardingApp.
+  - [ ] **#2 운행 중 표시 시간 창 — 점검 완료·결함 확인(수정 대기)**: write측 창은 존재(`computeGpsWindow` dep−30~+60, device 폴러 한정)하나 **표시측 신선도 게이트 부재** — EmployeeApp RoutesTab `gpsData`(1610행, 신선도 무검사 카운트)·HomeTab `rawBuses`(640행, 전 gps 문서) → device(유비칸) 차량은 gps 문서 잔존이라 종료 후에도 "운행중". 수정 후보: ⓐ 폴러가 창 종료 시 자기 gps 문서 삭제(mobile clearGPS 대응물·소비자 코드 0 변경) ⓑ 표시측 isGpsFresh 게이트(runStatus 미러). ⓐ 권장.
+  - [ ] **#3 협력사 포탈 차량 운행 현황(노선도) + 협력사별 노출 옵션**: OperationsMode 에 실시간 지도는 이미 있음(Phase 1.3) — 정류장 진행 노선도 뷰 추가 + `partnerCodes` 옵션 필드로 노출 on/off(기본 off? 회의="기본은 놔두고 선택").
+  - [ ] **#4 그룹(관리회사) 설정 구조** — 노선·차량·바코드=그룹 통합, 탑승자 관리·협력사 어드민·탑승 현황=서브 회사 분리(다우디지털스퀘어 3입주사). **way 기초 설계 후 진행**.
+  - [ ] **#5 거래처별 UI 커스터마이징**: 메인 컬러 코드 + 로고(위치·사이즈 조정).
+  - [ ] **#6 협력사 포탈·승객앱 요약 매뉴얼**: manual-writer, 최소 분량.
 - [ ] **RQ/20260708 승객앱 개편 묶음 (이미지 참조 파일 대기 중)**: 회의(`RQ/20260708/`) 요청 — ① 거래처 우선 진입 흐름(업체코드 대신 거래처 선택) ② 승객앱 거래처 데이터 격리(노선/하단메뉴/공지 전부 자기 거래처만) ③ 홈 직관화(진입 즉시 도착정보) ④ 홈 스크롤 안 내려가는 버그 ⑤ 지하철식 진척 시각화 ⑥ **거리뷰 연동(=아래 프로토타입 완료·정식반영 대기)** ⑦ 앱명 "승객" 노출 확인 + 기사앱 유비칸 GPS/고정QR/세션분리 등. **이미지 참조 오면** 정식 UI에 얹어 일괄 진행.
   - [x] **거리뷰(로드뷰) 적용 가능 검증 + 프로토타입 (2026-07-08 커밋, 미배포)**: 카카오 JS SDK 로드뷰=코어(libraries 추가 0·무료)·`react-kakao-maps-sdk@1.2.1` `Roadview` export 확인. EmployeeApp(`/p`) 정류장 정보 카드(`stopInfo`)에 좌표 기반 로드뷰 패널 추가 — 반경 60m 파노라마 있으면 실사, 없으면 `onErrorGetNearestPanoId`→기존 사진 폴백(`rvOk` state·정류장 바뀔 때 리셋). localhost 실사 확인 완료. **정식반영 시**: 승객앱(`/bus`)·관리자 정류장 편집 미리보기 등으로 확장. 좌표 혼재(string/GeoPoint) 정식 대응은 issues.md `toLatLng` 헬퍼 재사용(프로토타입은 Number+isFinite 가드).
   - [ ] **승객앱 UI 개선 (RQ/20260708 PDF 목업 4건) — Phase 1·2 배포완료·Phase 3 대기**: 참조 `RQ/20260708/BusLink_UI_개선_제안.pdf`. EmployeeApp(`/p`) 단독·rules/CF/indexes 변경 0.
