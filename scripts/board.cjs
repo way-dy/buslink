@@ -22,7 +22,7 @@ const admin = require(path.join(__dirname, "..", "functions", "node_modules", "f
 
 const COL = "improvement_requests";
 const BYUID = "claude-cli";
-const BYNAME = "시스템 관리자";
+const BYNAME = "WAY"; // 처리자 표기 = 계정 이름(2026-07-16 way — "시스템 관리자" 금지)
 const DONE_NOTE = "반영완료되었습니다";
 const STATUS_NOTE = { reviewing: "확인 중입니다", in_progress: "반영 중입니다", rejected: "반영이 어렵습니다", done: DONE_NOTE };
 const STATUSES = Object.keys(STATUS_NOTE).concat("requested");
