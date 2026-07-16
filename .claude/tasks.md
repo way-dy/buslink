@@ -2,6 +2,7 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
+> **2026-07-16 회의 전사 환각 의심 — 커밋 보류·사용자 확인 대기**: dev_recording 「추가개선사항미팅」(20분·최우석) 전사 결과 요약(운수사/배차 5건)과 전문(지불/계정 109건·순열반복 퇴행)이 상호 모순 + 두 도메인 모두 buslink 코드에 부재 → 환각 판정, `meetings/2026-07-16_추가개선사항미팅.md`(+.full.md) **repo 커밋 보류**. 실제 안건은 사용자(way) 확인 후 재점검(원음은 Storage 영구 보존·md 상단 링크). 점검 절차는 설정저장소 `/meetings` 스킬.
 > **2026-07-16 세션 3건(전부 prod 배포·커밋)**: ① 개선요청 웹훅 카드 base64 원문 노출 fix(CF `onImprovementRequestCreate`·`improvementPreviewText` 헬퍼·`8dfc3d3`) ② 배시현 게시판 요청 — 직원앱 내 정류장 카드 "운행 종료" 표기(`lib/runStatus.js` 순수 판정·`fb28514`·prod `main.7fd830f5.js`·게시판 done) ③ 개선요청 게시판 ↻ 새로고침 버튼(ImprovementTab — MapTab #2 `forceReconnect`+refreshTick 패턴 미러·stale 리스너 수동 재구독·prod `main.cbbabc98.js`). rules/indexes 변경 0.
 
 ## 현재 상태 (2026-07-13 세션 종료)
