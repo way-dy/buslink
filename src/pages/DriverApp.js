@@ -96,6 +96,9 @@ export default function DriverApp({ companyId: propCompanyId }) {
   // 배정 차량의 위치 신호 방식(RQ/20260708 #2) — "device" 면 GPS 단말로 서버 자동 추적,
   // 앱은 startGPS 호출 안 함. companies/{cid}/vehicles/{vehicleId}.gpsSource 1회 getDoc.
   const [deviceGps, setDeviceGps] = useState(false);
+  // 도착 감지 반경(m) — 회사 설정값(companies/{cid}.stopArriveRadiusM). 미설정=100m(기존 동작).
+  // startGPS 가 이 값으로 정류장 도착을 판정. 관리자가 운행 이력 화면에서 조정.
+  const arriveRadiusRef = useRef(100);
   const wakeLockRef = useRef(null);
   const currentStopRowRef = useRef(null);
   // ETA 자동 진단 로깅(2026-05-29) — 운행 1회 단위 runId. 운행 시작 시 산출, 종료 시 null.
@@ -605,6 +608,16 @@ export default function DriverApp({ companyId: propCompanyId }) {
     return () => { alive = false; };
   }, [companyId, driver?.vehicleId]);
 
+  // 회사 도착 감지 반경(companies/{cid}.stopArriveRadiusM) 1회 로드 → ref.
+  // 미설정/비정상이면 100m 유지(기존 동작). startGPS 가 운행 시작 시 이 값을 캡처.
+  useEffect(() => {
+    if (!companyId) return;
+    getDoc(doc(db, "companies", companyId)).then(snap => {
+      const v = snap.data()?.stopArriveRadiusM;
+      if (typeof v === "number" && isFinite(v) && v > 0) arriveRadiusRef.current = v;
+    }).catch(() => {});
+  }, [companyId]);
+
   const handleStart = async () => {
     if (!driver.vehicleId) {
       alert("배정된 차량이 없습니다.\n관리자에게 차량 배정을 요청하세요.");
@@ -669,6 +682,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
       // 읽어 백필이 항상 작동(로드 타이밍 경합 무관). gps.js 가 매 감지 시 호출.
       getStops: () => stopsRef.current,
       getRoutePath: () => routePathRef.current,
+      arriveRadiusM: arriveRadiusRef.current, // 회사 도착 감지 반경(미설정=100m)
       onStopReached: async (stop, dist, viaBackfill) => {
         // 백필이 한 콜백에서 여러 정류장을 순차 호출할 수 있음 → Math.max로 역행 방지
         // (옛 정류장 인덱스가 현재값을 끌어내리지 않도록).

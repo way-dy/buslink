@@ -99,13 +99,17 @@ export async function clearGPS({ companyId, vehicleId }) {
 //   stops/routePath 가 비동기 로드 전이면 위 인자는 빈배열로 캡처돼 백필이 영영 비활성
 //   (2일 연속 도착 0건의 근인). getter 가 있으면 매 감지 시 최신값을 읽어 로드 타이밍과
 //   무관하게 백필 작동. 미제공 시 위 인자값으로 폴백(하위호환).
-export function startGPS({ companyId, vehicleId, vehicleNo, driverId, driverName, routeId, routeName, stops = [], routePath = [], onStopReached, onGpsError, getStops, getRoutePath }) {
+export function startGPS({ companyId, vehicleId, vehicleNo, driverId, driverName, routeId, routeName, stops = [], routePath = [], onStopReached, onGpsError, getStops, getRoutePath, arriveRadiusM }) {
   // 상태 격리: 모듈 전역이 아닌 startGPS 클로저 지역 변수 (다중 watch·해제 시 누수 방지)
   let lastPos = null;
   let lastSentTime = 0;
   let trailingTimer = null; // 스로틀로 버려진 마지막 좌표의 지연 전송 타이머
   let watchRestarted = false; // TIMEOUT 시 watch 1회 재시작 가드 (재시작 무한루프 방지)
   const visitedStops = new Set(); // 이미 도착 처리된 정류장 ID
+  // 도착 감지 반경(m) — 회사 설정값(arriveRadiusM) 우선, 미설정/비정상이면 기본 STOP_ARRIVE_M(100).
+  // 관리자가 운행 이력 화면에서 조정(50~300m). 운행 시작 시점 값 캡처(변경 시 다음 운행부터 반영).
+  const effArriveM = (typeof arriveRadiusM === "number" && isFinite(arriveRadiusM) && arriveRadiusM > 0)
+    ? arriveRadiusM : STOP_ARRIVE_M;
 
   // ── 통신장애 정류장 누락 백필 준비 (2026-05-22) ──────────────────────────
   // 문제: watchPosition 콜백이 GPS 끊김(터널·약전계)으로 끊기면 버스가 정류장
@@ -176,7 +180,7 @@ export function startGPS({ companyId, vehicleId, vehicleNo, driverId, driverName
       const ll = toLatLng(stop);
       if (!ll) return;
       const dist = getDistance(curr, ll);
-      if (dist <= STOP_ARRIVE_M) {
+      if (dist <= effArriveM) {
         visitedStops.add(stop.id);
         onStopReached(stop, Math.round(dist), false);
       }

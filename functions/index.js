@@ -2022,6 +2022,12 @@ exports.pollDeviceVehicleGps = onSchedule(
 
     for (const c of companiesSnap.docs) {
       const cid = c.id;
+      // 회사 도착 감지 반경(companies/{cid}.stopArriveRadiusM). 미설정/비정상=100m(STOP_ARRIVE_M).
+      // 모바일 gps.js 와 동일 설정값을 서버 감지에도 적용(단말/유비칸 차량).
+      const arriveRadius = (() => {
+        const v = (c.data() || {}).stopArriveRadiusM;
+        return (typeof v === "number" && isFinite(v) && v > 0) ? v : STOP_ARRIVE_M;
+      })();
       try {
         const vehSnap = await db
           .collection("companies").doc(cid)
@@ -2122,7 +2128,7 @@ exports.pollDeviceVehicleGps = onSchedule(
                 for (const st of meta.stops) {
                   if (arrivals[st.id]) continue; // 멱등: 이미 도착 기록 있으면 첫 도착 보존
                   const d = distMeters(latest.lat, latest.lng, st.lat, st.lng);
-                  if (d > STOP_ARRIVE_M) continue;
+                  if (d > arriveRadius) continue;
                   const plannedAt = planTimeFromDepart(meta.departTime, st.offsetMin);
                   let delaySec = null;
                   if (plannedAt) {

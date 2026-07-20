@@ -55,6 +55,18 @@ const SUPER_TAB_INDEX = TABS.length;   // 12
 const functions = getFunctions(undefined, "us-central1");
 const getToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 
+// "YYYY-MM-DD" → 그 날짜 로컬 시작시각(00:00:00) millis.
+// 과거 배차 조회 시 computeStopEstimates 의 계획시각 앵커(now 의 날짜)를 조회 날짜에
+// 맞추기 위함 — 안 맞추면 계획(오늘 날짜)−실측(과거 날짜) 절대차가 며칠짜리 "조기도착
+// 수천분" 으로 표시된다. 시작시각(자정)을 쓰는 이유 = 미통과 정류장의 과거금지 클램프
+// (est ≥ now)가 그 날 계획/체인값을 밀어올리지 않게 함(자정 기준이라 그날 내내 미래).
+// 형식 불량 시 오늘(Date.now) 폴백.
+const parseDateStartMs = (dateStr) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr || "");
+  if (!m) return Date.now();
+  return new Date(+m[1], +m[2] - 1, +m[3], 0, 0, 0, 0).getTime();
+};
+
 function useVehicles(companyId) {
   const [vehicles, setVehicles] = useState([]);
   useEffect(() => {
@@ -976,6 +988,8 @@ function RouteTimelineView({ companyId, routes, routeStops, dispatches, vehicles
             route={routes.find(r => r.id === d.routeId)}
             stops={routeStops[d.routeId] || []}
             vehicle={vehicles.find(v => v.vehicleId === d.vehicleId)}
+            selectedDate={selectedDate}
+            isPastDate={isPastDate}
             tick={tick}
           />
         ))}
@@ -984,9 +998,19 @@ function RouteTimelineView({ companyId, routes, routeStops, dispatches, vehicles
   );
 }
 
-function RouteTimelineCard({ dispatch, route, stops, vehicle }) {
+function RouteTimelineCard({ dispatch, route, stops, vehicle, selectedDate, isPastDate }) {
   // stops가 아직 로딩 중이면 스켈레톤 노출.
   const loading = stops.length === 0;
+  // 운행 기준 시각 — 오늘은 실시간(Date.now), 과거 조회는 그 날짜 시작시각(자정).
+  //   plannedMs 는 이 시각의 "날짜"에 앵커링되므로(computeStopEstimates→hhmmToTodayMillis),
+  //   조회 날짜와 같은 날에 맞춰야 지연(delaySec)이 그 날 시간대 기준으로 정확하다.
+  const nowMs = isPastDate ? parseDateStartMs(selectedDate) : Date.now();
+  // 운행 날짜 창(로컬 자정~자정) — 이 창 밖의 stopArrivals 는 "다른 날 기록"이라
+  //   같은 배차의 유효 도착으로 취급하지 않는다. 근인 = 다른 날짜에서 복제되었거나
+  //   과거 회차가 잔존한 stopArrivals(actualAt 이 며칠 전)를 오늘/조회일 도착으로
+  //   오인해 "조기도착 수천분"(계획−실측 절대차가 며칠) 으로 표시되던 결함 원천 차단.
+  const dayStartMs = (() => { const d = new Date(nowMs); d.setHours(0, 0, 0, 0); return d.getTime(); })();
+  const dayEndMs = dayStartMs + 24 * 60 * 60 * 1000;
   // 계획·실측/예상 산출. dispatch.stopArrivals = { [stopId]: { actualAt: serverTimestamp, ... } } → millis.
   const actualArrivals = {};
   const sa = dispatch.stopArrivals || {};
@@ -994,7 +1018,8 @@ function RouteTimelineCard({ dispatch, route, stops, vehicle }) {
     const a = sa[k];
     const ms = a?.actualAt?.toMillis ? a.actualAt.toMillis()
       : (typeof a?.actualAt === "number" ? a.actualAt : null);
-    if (ms != null) actualArrivals[k] = ms;
+    // 운행 날짜 창 안의 도착만 유효(다른 날 기록은 무시 — 위 주석 참조).
+    if (ms != null && ms >= dayStartMs && ms < dayEndMs) actualArrivals[k] = ms;
   }
   const estimates = computeStopEstimates({
     stops,
@@ -1003,7 +1028,7 @@ function RouteTimelineCard({ dispatch, route, stops, vehicle }) {
     vehiclePos: vehicle && typeof vehicle.lat === "number" ? { lat: vehicle.lat, lng: vehicle.lng } : null,
     speed: vehicle?.speed,
     routePath: Array.isArray(route?.routePath) ? route.routePath : null,
-    now: Date.now(),
+    now: nowMs,
   });
   const estByStopId = Object.fromEntries(estimates.map(e => [e.stopId, e]));
 
@@ -3386,7 +3411,33 @@ function HistoryTab({ companyId, vehicles, allowed }) {
   const [stopsByRoute, setStopsByRoute] = useState({}); // routeId → stops[]
   const [showStopMarkers, setShowStopMarkers] = useState(true);
   const [showStopRadius, setShowStopRadius] = useState(true);
+  // 도착 감지 반경(회사 설정 companies/{cid}.stopArriveRadiusM, 미설정=100m). 관리자가 조정 →
+  // 모바일 gps.js·서버 폴러가 이 값으로 정류장 도착 판정. 아래 반경 원 시각화도 이 값 사용.
+  const [arriveRadius, setArriveRadius] = useState(100); // 저장된 값(원·감지)
+  const [radiusInput, setRadiusInput] = useState(100);   // 슬라이더 로컬 입력값
+  const [radiusSaving, setRadiusSaving] = useState(false);
   const vehicle = vehicles.find(v=>v.id===vehicleId);
+
+  // 회사 도착 감지 반경 구독 — 저장 즉시 반영.
+  useEffect(() => {
+    if (!companyId) return;
+    return onSnapshot(doc(db, "companies", companyId), snap => {
+      const v = snap.data()?.stopArriveRadiusM;
+      const r = (typeof v === "number" && isFinite(v) && v > 0) ? v : 100;
+      setArriveRadius(r); setRadiusInput(r);
+    });
+  }, [companyId]);
+
+  const saveArriveRadius = async () => {
+    const r = Math.max(50, Math.min(300, Math.round(radiusInput || 100)));
+    setRadiusSaving(true);
+    try {
+      await updateDoc(doc(db, "companies", companyId), { stopArriveRadiusM: r });
+    } catch (e) {
+      alert("반경 저장 실패: " + (e?.message || e));
+    }
+    setRadiusSaving(false);
+  };
 
   useEffect(() => {
     if (!companyId) return;
@@ -3728,7 +3779,7 @@ function HistoryTab({ companyId, vehicles, allowed }) {
                   <Circle
                     key={`circle-${stop.id}`}
                     center={{lat:stop.lat,lng:stop.lng}}
-                    radius={100}
+                    radius={arriveRadius}
                     strokeWeight={1}
                     strokeColor={passed ? "#0066FF" : "#666666"}
                     strokeOpacity={0.6}
@@ -3776,12 +3827,31 @@ function HistoryTab({ companyId, vehicles, allowed }) {
           }}>
             <label style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",color:"var(--color-label)"}}>
               <input type="checkbox" checked={showStopRadius} onChange={e=>setShowStopRadius(e.target.checked)} />
-              <span>🎯 정류장 반경 100m</span>
+              <span>🎯 정류장 반경 {arriveRadius}m</span>
             </label>
             <label style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",color:"var(--color-label)"}}>
               <input type="checkbox" checked={showStopMarkers} onChange={e=>setShowStopMarkers(e.target.checked)} />
               <span>📍 정류장 마커</span>
             </label>
+            {/* 도착 감지 반경 조정(회사 전체 공통) — 슬라이더 + 저장. 저장 시 모바일·서버 감지에 반영. */}
+            <div style={{display:"flex",alignItems:"center",gap:7,borderLeft:"1px solid var(--color-line)",paddingLeft:12}}>
+              <span style={{color:"var(--color-label)",fontWeight:600,whiteSpace:"nowrap"}}>감지 반경</span>
+              <input type="range" min={50} max={300} step={10} value={radiusInput}
+                onChange={e=>setRadiusInput(Number(e.target.value))}
+                style={{width:96,accentColor:"var(--color-primary)"}} />
+              <span style={{fontFamily:"var(--font-mono)",fontWeight:700,color:"var(--color-primary)",minWidth:44,textAlign:"right"}}>{radiusInput}m</span>
+              <button onClick={saveArriveRadius}
+                disabled={radiusSaving || radiusInput===arriveRadius}
+                style={{
+                  padding:"3px 10px",borderRadius:8,border:"1px solid var(--color-primary)",
+                  background: (radiusSaving||radiusInput===arriveRadius) ? "var(--color-bg)" : "var(--color-primary)",
+                  color: (radiusSaving||radiusInput===arriveRadius) ? "var(--color-label-mute)" : "#fff",
+                  fontWeight:700,fontSize:12,
+                  cursor:(radiusSaving||radiusInput===arriveRadius)?"default":"pointer",whiteSpace:"nowrap",
+                }}>
+                {radiusSaving ? "저장 중…" : radiusInput===arriveRadius ? "저장됨" : "저장"}
+              </button>
+            </div>
           </div>
         )}
         {/* 범례 — 좌측 하단 */}
@@ -3799,7 +3869,7 @@ function HistoryTab({ companyId, vehicles, allowed }) {
             <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
               <span style={{width:9,height:9,borderRadius:"50%",background:"#aaaaaa"}}/>미통과
             </span>
-            <span style={{color:"var(--color-label-alt)"}}>· 반경 100m</span>
+            <span style={{color:"var(--color-label-alt)"}}>· 반경 {arriveRadius}m</span>
           </div>
         )}
         {selected&&(
