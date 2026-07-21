@@ -2,6 +2,8 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
+> **2026-07-21 세션 C(뒤로가기 종료 팝업 복구·prod 배포·게시판 done)**: 배시현 개선요청 `jJsU8M6QDoNvCPVPRWkL` "뒤로가기 종료 확인 팝업이 없어졌다". 배포 유실·코드 삭제 아님(prod 번들에 문자열 실재·데스크톱은 정상) → 근인=마운트 시점 `pushState` 발판을 **안드로이드 크롬이 제스처 없는 항목으로 보고 뒤로가기 때 건너뜀**. `lib/useExitConfirm.js` 단독 수정 — 첫 제스처 후 발판 push·발판 1개 유지·취소 시 재무장·"확인" 시 `history.back()` 1회 추가(예전엔 확인해도 안 나가던 결함). 헤드리스 4시나리오 통과·prod `main.1bfc9e62.js`. 3앱(승객/기사/직원) 동시 적용. 상세 issues.md `[해결]`.
+
 > **2026-07-21 세션 B(알림 딥링크 + 공용계정 PIN 잠금·전부 prod 배포·게시판 done)**: ① way 요청 — 개선요청 구글챗 알림 링크가 해당 요청으로 바로 열리게. CF 2종 카드 버튼 URL `?imp=<id>` + AdminApp 딥링크 소비(탭 자동선택·상세 자동오픈·주소창 정리·미발견 배너). prod `main.4fc23452.js` + `functions:onImprovementRequestCreate,onImprovementRequestUpdate`. ② 배시현 개선요청 `KqeN2wUNat2QnlWbkr0l` "통합관제 계정 PIN 변경 잠금" — prod 실측으로 공용 계정 다수 확인(chadwick/chad2542/yuhan) + 전부 `pinInitial:true` 라 승객앱이 PIN 변경을 독촉하던 구조 확인. `passengers.pinLocked`(옵셔널·부재=기존) 신설 → 승객앱 설정 탭 실측 게이팅 + 협력사 포털 등록/수정 체크박스·목록 배지 + importEmployees 조건부 기록(대량등록 보존). prod `main.c1cc69af.js`(`--only hosting`). rules/indexes 변경 0·신규 경고 0·헤드리스 실로드 검증. **운영 후속**: 실제 잠금은 협력사 포털에서 해당 공용 계정 체크 필요. 상세 issues.md `[패턴]` 2건.
 
 > **2026-07-21 세션 A(게시판 1건·prod 배포·게시판 done)**: 배시현 개선요청 `F6Y2FrYum6A6T2R6qztF` "노선복사 후 노선순서 ▲▼ 안 바뀜". 근인=`handleCopy` 가 원본 `order` 그대로 복제→중복, `moveRoute` 는 인접 값 교환(swap)이라 같은 값끼리=무효. 백필은 order 없을 때만 실행돼 전부 숫자면 중복 영구 잔존. 수정=① moveRoute 백필 트리거에 중복 감지(`new Set(numericOrders).size!==length`)→기존 중복도 첫 ▲▼ 시 0..n-1 정규화 치유 ② handleCopy 복사본 `order:null`(맨 뒤·신규 중복 차단). AdminApp RoutesTab 단독·rules/indexes/CF 변경 0·격리 node 7케이스 통과·신규 경고 0·prod `main.32bec07a.js`(`--only hosting`·curl 확인). 상세 issues.md `[해결]`. **git 커밋 미실행**(세션 끝 커밋 대기).
