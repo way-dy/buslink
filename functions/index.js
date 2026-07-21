@@ -2224,6 +2224,15 @@ const IMPROVEMENT_STATUS_LABELS = {
 };
 const IMPROVEMENT_ADMIN_URL = "https://admin.buslink.co.kr";
 
+/**
+ * 알림 카드 버튼용 딥링크 — 관제 콘솔이 `?imp=<요청id>` 로 진입하면 개선 요청 탭을
+ * 자동 선택하고 그 요청 상세를 연다(AdminApp `readImproveDeepLinkId` 가 소비).
+ * 파라미터 없는 기존 URL 도 그대로 게시판 첫 화면이라 하위호환 100%.
+ */
+function improvementDeepLink(id) {
+  return `${IMPROVEMENT_ADMIN_URL}/?imp=${encodeURIComponent(id)}`;
+}
+
 /** node https 로 JSON POST(웹훅 발송). 2xx 만 성공. */
 function postJson(urlStr, bodyObj) {
   return new Promise((resolve, reject) => {
@@ -2349,7 +2358,7 @@ exports.onImprovementRequestCreate = onDocumentCreated(
                 { decoratedText: { topLabel: "제목", text: data.title || "(제목 없음)" } },
                 { decoratedText: { topLabel: "요청자", text: `${data.requesterName || "-"} · 상태: ${statusLabel}` } },
                 { textParagraph: { text: preview } },
-                { buttonList: { buttons: [{ text: "개선 요청 게시판 열기", onClick: { openLink: { url: IMPROVEMENT_ADMIN_URL } } }] } },
+                { buttonList: { buttons: [{ text: "이 요청 열기", onClick: { openLink: { url: improvementDeepLink(id) } } }] } },
               ],
             }],
           },
@@ -2395,7 +2404,7 @@ exports.onImprovementRequestUpdate = onDocumentUpdated(
           { decoratedText: { topLabel: isStatus ? "처리" : "작성자", text: `${h.byName || "-"}` } },
         ];
         if (h.comment) widgets.push({ textParagraph: { text: String(h.comment).slice(0, 200) } });
-        widgets.push({ buttonList: { buttons: [{ text: "게시판 열기", onClick: { openLink: { url: IMPROVEMENT_ADMIN_URL } } }] } });
+        widgets.push({ buttonList: { buttons: [{ text: "이 요청 열기", onClick: { openLink: { url: improvementDeepLink(id) } } }] } });
 
         const body = {
           thread: { threadKey: "imp-" + id },

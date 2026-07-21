@@ -142,6 +142,11 @@ export async function importEmployees({ companyId, partnerCode, partnerName, emp
         ? (routeMap[emp.routeCode] || emp.routeCode)
         : (existing.exists() ? existing.data().routeId : "");
 
+      // PIN 변경 잠금(2026-07-21) — 여러 사람이 함께 쓰는 공용/통합 계정용.
+      // emp 에 boolean 으로 들어올 때만 기록한다. 파일·다중 등록처럼 값을 안 넘기는
+      // 경로에서는 undefined → 필드 미기록 → 기존 잠금 설정 보존(회귀 0).
+      const hasPinLocked = typeof emp.pinLocked === "boolean";
+
       const data = {
         empNo: emp.empNo,
         name: emp.name,
@@ -154,6 +159,7 @@ export async function importEmployees({ companyId, partnerCode, partnerName, emp
         companyId,
         updatedAt: serverTimestamp(),
       };
+      if (hasPinLocked) data.pinLocked = emp.pinLocked;
 
       if (!existing.exists()) {
         // 신규: 초기 PIN 생성 (생년월일 대신 임시 PIN - 관리자가 별도 전달)
@@ -169,6 +175,7 @@ export async function importEmployees({ companyId, partnerCode, partnerName, emp
           routeId, routeCode: emp.routeCode,
           active: emp.active,
           partnerCode, partnerName, updatedAt: serverTimestamp(),
+          ...(hasPinLocked ? { pinLocked: emp.pinLocked } : {}),
         });
         if (!emp.active && existing.data().active) results.deactivated++;
         else results.updated++;

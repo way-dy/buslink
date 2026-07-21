@@ -335,7 +335,7 @@ function FileUploadMode({ codeData, code, routes, onDone }) {
 // 개별 등록 모드
 // ════════════════════════════════════════════════════════
 function SingleRegMode({ codeData, code, routes, onDone }) {
-  const empty = { empNo:"", name:"", dept:"", routeCode:"", active:true };
+  const empty = { empNo:"", name:"", dept:"", routeCode:"", active:true, pinLocked:false };
   const [form, setForm] = useState(empty);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -347,7 +347,7 @@ function SingleRegMode({ codeData, code, routes, onDone }) {
     try {
       const res = await importEmployees({
         companyId: codeData.companyId, partnerCode: code, partnerName: codeData.partnerName,
-        employees: [{ ...form, empNo: form.empNo.trim(), name: form.name.trim(), dept: form.dept.trim(), active: form.active }],
+        employees: [{ ...form, empNo: form.empNo.trim(), name: form.name.trim(), dept: form.dept.trim(), active: form.active, pinLocked: !!form.pinLocked }],
         routes,
       });
       onDone(res);
@@ -384,6 +384,13 @@ function SingleRegMode({ codeData, code, routes, onDone }) {
         <input type="checkbox" checked={form.active} onChange={e=>setForm({...form,active:e.target.checked})}
           style={{ accentColor:"var(--color-primary)", width:16, height:16, cursor:"pointer" }} />
         <span style={{ fontSize:13, color:"var(--color-label)", fontWeight:500 }}>재직 중 (체크 해제 시 비활성화)</span>
+      </label>
+      {/* 공용/통합 계정 보호(2026-07-21) — 여러 명이 함께 쓰는 계정은 한 사람이 PIN 을
+          바꾸면 나머지가 전부 못 들어온다. 체크 시 승객앱 설정에서 PIN 변경 숨김. */}
+      <label style={S.checkBox}>
+        <input type="checkbox" checked={form.pinLocked} onChange={e=>setForm({...form,pinLocked:e.target.checked})}
+          style={{ accentColor:"var(--color-primary)", width:16, height:16, cursor:"pointer" }} />
+        <span style={{ fontSize:13, color:"var(--color-label)", fontWeight:500 }}>PIN 변경 잠금 (여러 명이 함께 쓰는 공용 계정)</span>
       </label>
       {error && <div style={S.errorMsg}>{error}</div>}
       <div style={{ display:"flex", gap:8 }}>
@@ -521,7 +528,7 @@ function EmployeeManageMode({ codeData, code, routes }) {
 
   const openEdit = (emp) => {
     setEditEmp(emp);
-    setEditForm({ name: emp.name||"", dept: emp.dept||"", routeCode: emp.routeCode||"", active: emp.active });
+    setEditForm({ name: emp.name||"", dept: emp.dept||"", routeCode: emp.routeCode||"", active: emp.active, pinLocked: !!emp.pinLocked });
     setMsg(null);
   };
 
@@ -531,7 +538,7 @@ function EmployeeManageMode({ codeData, code, routes }) {
       const routeId = routes.find(r => r.code === editForm.routeCode || r.id === editForm.routeCode)?.id || editForm.routeCode;
       await updateDoc(
         doc(db, "companies", codeData.companyId, "passengers", editEmp.id),
-        { name: editForm.name.trim(), dept: editForm.dept.trim(), routeCode: editForm.routeCode, routeId, active: editForm.active, updatedAt: serverTimestamp() }
+        { name: editForm.name.trim(), dept: editForm.dept.trim(), routeCode: editForm.routeCode, routeId, active: editForm.active, pinLocked: !!editForm.pinLocked, updatedAt: serverTimestamp() }
       );
       setMsg({ type: "success", text: "저장되었습니다" });
       setTimeout(() => { setEditEmp(null); setMsg(null); }, 800);
@@ -600,7 +607,8 @@ function EmployeeManageMode({ codeData, code, routes }) {
                     <span style={{ fontSize:14, fontWeight:700, color:"var(--color-label)" }}>{emp.name}</span>
                     <span style={{ fontSize:10, fontFamily:"monospace", color:"var(--color-label-mute)", background:"var(--color-bg-soft)", padding:"1px 6px", borderRadius:4 }}>{emp.empNo}</span>
                     <Pill tone={emp.active?"positive":"danger"} dot>{emp.active?"재직":"퇴사"}</Pill>
-                    {emp.pinInitial && <Pill tone="warn">PIN미변경</Pill>}
+                    {emp.pinInitial && !emp.pinLocked && <Pill tone="warn">PIN미변경</Pill>}
+                    {emp.pinLocked && <Pill tone="primary">🔒 PIN잠금</Pill>}
                   </div>
                   <div style={{ fontSize:12, color:"var(--color-label-mute)" }}>
                     {emp.dept || "부서없음"} · {emp.routeCode || "노선없음"}
@@ -640,6 +648,17 @@ function EmployeeManageMode({ codeData, code, routes }) {
                 style={{ accentColor:"var(--color-primary)", width:16, height:16, cursor:"pointer" }} />
               <span style={{ fontSize:13, color:"var(--color-label)", fontWeight:500 }}>재직 중 (체크 해제 시 퇴사 처리)</span>
             </label>
+
+            {/* 공용/통합 계정 보호(2026-07-21) — 체크 시 승객앱 설정에서 PIN 변경이 사라진다.
+                PIN 이 바뀌면 같은 계정을 쓰는 전원이 로그인 못 하는 사고 방지. */}
+            <label style={S.checkBox}>
+              <input type="checkbox" checked={!!editForm.pinLocked} onChange={e=>setEditForm({...editForm,pinLocked:e.target.checked})}
+                style={{ accentColor:"var(--color-primary)", width:16, height:16, cursor:"pointer" }} />
+              <span style={{ fontSize:13, color:"var(--color-label)", fontWeight:500 }}>PIN 변경 잠금 (여러 명이 함께 쓰는 공용 계정)</span>
+            </label>
+            <div style={{ fontSize:11, color:"var(--color-label-alt)", lineHeight:1.5 }}>
+              잠그면 승객앱 설정에서 PIN 변경 항목이 보이지 않습니다. PIN 재설정이 필요하면 목록의 “PIN초기화”를 사용하세요.
+            </div>
 
             {msg && (
               <div style={{

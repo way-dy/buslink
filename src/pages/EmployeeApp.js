@@ -466,7 +466,7 @@ function LoginScreen({ companyId, onLogin }) {
       if (!p.active) throw new Error("비활성화된 계정입니다");
       const hashed = await hashPin(pin);
       if (p.pinHash !== hashed) throw new Error("PIN이 올바르지 않습니다");
-      onLogin({ empNo: p.empNo, name: p.name, dept: p.dept, routeId: p.routeId, partnerCode: p.partnerCode || null, partnerName: p.partnerName || null, pinHash: hashed, pinInitial: p.pinInitial, favorites: p.favorites || [] });
+      onLogin({ empNo: p.empNo, name: p.name, dept: p.dept, routeId: p.routeId, partnerCode: p.partnerCode || null, partnerName: p.partnerName || null, pinHash: hashed, pinInitial: p.pinInitial, pinLocked: !!p.pinLocked, favorites: p.favorites || [] });
     } catch (e) {
       setError(e.message);
     }
@@ -2653,6 +2653,35 @@ function SettingsTab({ companyId, session, onLogout, onSessionUpdate }) {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState(session.pinInitial ? { type:"warn", text:"초기 PIN(000000)을 사용 중입니다. 변경해주세요." } : null);
 
+  // ── PIN 변경 잠금(2026-07-21) ──
+  // 여러 명이 함께 쓰는 공용/통합 계정(예: 학교 통합관제 ID)은 한 사람이 PIN 을 바꾸면
+  // 나머지 전원이 로그인 못 한다. 협력사 포털에서 `passengers/{empNo}.pinLocked` 를 켜면
+  // 이 화면의 PIN 변경 항목을 감춘다. 필드 부재 = false = 기존 동작 그대로(회귀 0).
+  //
+  // 세션(localStorage)에는 이 필드가 없는 기기가 이미 많으므로 저장된 값에 기대지 않고
+  // 설정 탭 진입 시 승객 문서를 1회 실측한다(로그인 이후 관리자가 잠가도 즉시 반영).
+  const [pinLocked, setPinLocked] = useState(!!session.pinLocked);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "companies", companyId, "passengers", session.empNo));
+        if (!alive || !snap.exists()) return;
+        const locked = !!snap.data().pinLocked;
+        setPinLocked(locked);
+        if (locked) {
+          setShowPinChange(false);
+          setMsg(prev => (prev && prev.type === "warn" ? null : prev));   // 초기PIN 변경 독촉 제거
+        }
+        if (locked !== !!session.pinLocked) onSessionUpdate({ pinLocked: locked });
+      } catch (e) {
+        console.warn("[설정] PIN 잠금 조회 실패(무시):", e.message);
+      }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, session.empNo]);
+
   // 배터리 절전 안내 카드(작업B) — 안드로이드만, 삼성/일반 분기. iOS·데스크톱은 null.
   const batteryPlatform = detectBatteryGuidePlatform();
   // 앱 설치 가이드 재노출(작업C) — 설정에서 언제든 설치 진입 가능(3일 스누즈 무관).
@@ -2714,6 +2743,8 @@ function SettingsTab({ companyId, session, onLogout, onSessionUpdate }) {
       : { bg:"var(--color-bg-soft)", fg:"var(--color-label-mute)", border:"var(--color-line)", text:"미선택" };
 
   const handlePinChange = async () => {
+    // 잠긴 공용 계정은 UI 자체가 안 보이지만, 상태 경합 대비 최종 가드.
+    if (pinLocked) return setMsg({ type:"error", text:"공용으로 사용하는 계정이라 PIN을 변경할 수 없습니다" });
     if (newPin.length < 4) return setMsg({ type:"error", text:"PIN은 4자리 이상이어야 합니다" });
     if (newPin !== confirmPin) return setMsg({ type:"error", text:"새 PIN이 일치하지 않습니다" });
     setLoading(true); setMsg(null);
@@ -2852,6 +2883,15 @@ function SettingsTab({ companyId, session, onLogout, onSessionUpdate }) {
           )}
         </div>
 
+        {/* PIN 변경 — 공용 계정(pinLocked)은 항목 자체를 감추고 안내만 표시(2026-07-21) */}
+        {pinLocked ? (
+          <div style={{ background: "var(--color-bg)", borderRadius: "var(--radius-16)", padding: "14px 18px", border: "1px solid var(--color-line)", boxShadow: "var(--shadow-emphasize)" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-label)", marginBottom: 6 }}>🔒 PIN 변경 제한</div>
+            <div style={{ fontSize: 12, color: "var(--color-label-mute)", lineHeight: 1.6 }}>
+              여러 분이 함께 사용하는 계정이라 PIN을 변경할 수 없습니다. PIN 재설정이 필요하면 담당자에게 문의해주세요.
+            </div>
+          </div>
+        ) : (
         <div style={{ background: "var(--color-bg)", borderRadius: "var(--radius-16)", overflow: "hidden", border: "1px solid var(--color-line)", boxShadow: "var(--shadow-emphasize)" }}>
           <button onClick={() => setShowPinChange(p => !p)}
             style={{ width: "100%", padding: "14px 18px", background: "transparent", border: "none", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", fontFamily: "inherit", color: "var(--color-label)" }}>
@@ -2872,6 +2912,7 @@ function SettingsTab({ companyId, session, onLogout, onSessionUpdate }) {
             </div>
           )}
         </div>
+        )}
 
         {/* 로그아웃 */}
         <button style={{ background: "var(--color-bg)", border: "1px solid #F6C9C9", borderRadius: "var(--radius-12)", padding: "14px", color: "var(--color-destructive)", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", boxShadow: "var(--shadow-emphasize)" }}

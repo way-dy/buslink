@@ -52,6 +52,25 @@ const TAB_ICONS = ["grid", "pin", "flag", "calendar", "route", "user", "bus", "p
 const SUPER_TAB_LABEL = "회사 관리";
 const SUPER_TAB_ICON = "globe";
 const SUPER_TAB_INDEX = TABS.length;   // 12
+const IMPROVE_TAB_INDEX = TABS.indexOf("개선 요청");   // 12
+
+// 구글챗 알림 딥링크(2026-07-21) — 알림 카드의 "이 요청 열기" 버튼이
+// `https://admin.buslink.co.kr/?imp=<요청id>` 로 들어온다. 진입 시 개선 요청 탭을
+// 자동 선택하고 그 요청 상세를 연 뒤 주소창 파라미터를 지운다(새로고침 시 재오픈 방지).
+// 파라미터가 없으면 기존 동작 100%(탭 0 대시보드) — 회귀 0.
+function readImproveDeepLinkId() {
+  try {
+    return (new URLSearchParams(window.location.search).get("imp") || "").trim() || null;
+  } catch { return null; }
+}
+function clearImproveDeepLinkParam() {
+  try {
+    const u = new URL(window.location.href);
+    if (!u.searchParams.has("imp")) return;
+    u.searchParams.delete("imp");
+    window.history.replaceState({}, "", u.pathname + u.search + u.hash);
+  } catch { /* 주소창 정리는 부가 기능 — 실패해도 무시 */ }
+}
 const functions = getFunctions(undefined, "us-central1");
 const getToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 
@@ -115,7 +134,9 @@ function isGpsFresh(updatedAt) {
 
 // ═══════════════════════════════════════════════════════
 export default function AdminApp({ user, companyId, role, allowedPartnerCodes }) {
-  const [tab, setTab] = useState(0);
+  // 구글챗 알림 딥링크(?imp=<요청id>) — 있으면 개선 요청 탭으로 바로 진입.
+  const [improveDeepLinkId, setImproveDeepLinkId] = useState(readImproveDeepLinkId);
+  const [tab, setTab] = useState(() => (readImproveDeepLinkId() ? IMPROVE_TAB_INDEX : 0));
   // 대시보드 '거래처별 노선관리' → 노선 관리 탭으로 이동하며 그 거래처로 필터 고정(2026-06-15).
   const [routesFocusPartner, setRoutesFocusPartner] = useState(null);
   // Phase B(2026-06-08): 로그인 admin 의 협력사 권한 범위 정규화.
@@ -321,7 +342,7 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
         {tab === 9 && <ErrorBoundary label="탑승 통계"><BoardingStatsTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
         {tab === 10 && <ErrorBoundary label="협력사 관리"><PartnerTab companyId={activeCompanyId} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
         {tab === 11 && <ErrorBoundary label="공지 발송"><NoticeTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
-        {tab === 12 && <ErrorBoundary label="개선 요청"><ImprovementTab companyId={activeCompanyId} user={user} role={role} companies={companies} /></ErrorBoundary>}
+        {tab === 12 && <ErrorBoundary label="개선 요청"><ImprovementTab companyId={activeCompanyId} user={user} role={role} companies={companies} deepLinkId={improveDeepLinkId} onDeepLinkConsumed={() => setImproveDeepLinkId(null)} /></ErrorBoundary>}
         {/* SaaS Phase 1.2 — 슈퍼관리자 전용 회사 관리 탭(인덱스=TABS.length). 일반 admin 비표시. */}
         {isSuperAdmin && tab === SUPER_TAB_INDEX && (
           <ErrorBoundary label="회사 관리">
@@ -5059,10 +5080,13 @@ function ImproveStatusBadge({ status }) {
   return <span style={{ ...S.statusBadge, ...improveToneStyle(tone) }}>{label}</span>;
 }
 
-function ImprovementTab({ companyId, user, role, companies }) {
+function ImprovementTab({ companyId, user, role, companies, deepLinkId, onDeepLinkConsumed }) {
   const isSuperAdmin = role === "superadmin";
   const myUid = user?.uid;
   const [list, setList] = useState([]);
+  const [listLoaded, setListLoaded] = useState(false);   // 첫 스냅샷 도착 여부(딥링크 판정용)
+  const [deepLinkMiss, setDeepLinkMiss] = useState(false);
+  const deepLinkDoneRef = useRef(false);
   const [statusFilter, setStatusFilter] = useState("all");
   const [mineOnly, setMineOnly] = useState(false);
   const [search, setSearch] = useState("");
@@ -5087,12 +5111,29 @@ function ImprovementTab({ companyId, user, role, companies }) {
     if (!companyId && !isSuperAdmin) return;
     const unsub = onSnapshot(
       improvementQuery({ companyId, isSuperAdmin }),
-      snap => setList(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
-      err => console.warn("[개선요청] 구독 오류:", err.message)
+      snap => { setList(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setListLoaded(true); },
+      err => { console.warn("[개선요청] 구독 오류:", err.message); setListLoaded(true); }
     );
     return unsub;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, isSuperAdmin, refreshTick]);
+
+  // 구글챗 알림 딥링크 소비(1회) — 목록 첫 스냅샷 도착 후 해당 요청 상세 자동 오픈.
+  // 목록에 없으면(타 회사 요청·삭제됨) 안내 배너만. 소비 후 주소창 ?imp= 제거.
+  useEffect(() => {
+    if (!deepLinkId || deepLinkDoneRef.current || !listLoaded) return;
+    deepLinkDoneRef.current = true;
+    const found = list.find(r => r.id === deepLinkId);
+    if (found) {
+      setDetailId(found.id);
+      setSeenMap(prev => markSeen(found.id, prev));
+    } else {
+      setDeepLinkMiss(true);
+    }
+    clearImproveDeepLinkParam();
+    if (onDeepLinkConsumed) onDeepLinkConsumed();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkId, listLoaded, list]);
 
   // 회사명 라벨(superadmin) — companies 목록에서 매핑.
   const companyNameById = {};
@@ -5162,6 +5203,11 @@ function ImprovementTab({ companyId, user, role, companies }) {
 
       {/* 목록 */}
       <div style={{ flex: 1, overflowY: "auto", padding: "12px 20px 40px" }}>
+        {deepLinkMiss && (
+          <div style={{ background: "#FFF1E0", border: "1px solid #FFE0C2", borderRadius: 10, padding: "10px 14px", marginBottom: 10, fontSize: 12, fontWeight: 600, color: "#B95300" }}>
+            알림에서 연 요청을 찾지 못했습니다. 다른 회사의 요청이거나 삭제된 요청일 수 있습니다.
+          </div>
+        )}
         {filtered.length === 0 && <div style={S.empty}>표시할 개선 요청이 없습니다.</div>}
         {filtered.map(r => {
           const unread = isUnread(r, myUid, seenMap);
