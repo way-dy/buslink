@@ -2018,7 +2018,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
         seats: item.seats ?? null,
         departTime: item.departTime || "",
         memo: item.memo || "",
-        order: typeof item.order === "number" ? item.order : null, // 원본 옆에 붙도록 순서 보존
+        order: null, // 복사본은 목록 맨 뒤로 — 원본 order 를 그대로 물려받으면 값이 중복돼 ▲▼ 순서변경(값 교환)이 무효화됨(2026-07-21). 맨 뒤에서 원하는 위치로 이동.
         partnerCode: item.partnerCode || "",
         partnerName: item.partnerName || "",
         boardingMode: item.boardingMode || "",
@@ -2359,8 +2359,15 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
     setReordering(true);
     try {
       let list = filtered;
-      // 백필 — 회사 전체 노선에 order 부여(이미 전부 숫자면 skip).
-      if (routes.some(r => typeof r.order !== "number")) {
+      // 백필/정규화 — 회사 전체 노선에 0..n-1 order 부여.
+      //   트리거: ① order 미설정(레거시) 노선이 있거나 ② order 값이 중복일 때.
+      //   중복(노선 복사 시 원본 order 를 그대로 물려받아 같은 값 두 개)이면 아래 값 교환이
+      //   "같은 값끼리 맞바꿈"이라 무효 → 복사 후 순서 변경이 안 되던 원인(2026-07-21).
+      //   정규화하면 현재 표시 순서 그대로 distinct 값이 부여돼 교환이 정상 동작한다.
+      const numericOrders = routes.map(r => r.order).filter(o => typeof o === "number");
+      const needsSeed = routes.some(r => typeof r.order !== "number")
+        || new Set(numericOrders).size !== numericOrders.length;
+      if (needsSeed) {
         const seeded = [...routes].sort(compareRoutes);
         await Promise.all(seeded.map((r, i) =>
           typeof r.order === "number" && r.order === i
