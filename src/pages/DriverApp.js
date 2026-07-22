@@ -9,7 +9,7 @@ import { buildCumulativeLengths, projectToPolyline } from "../lib/routeProgress"
 import { buildRunId, recordEtaDiagnostic, throttleGate } from "../lib/etaDiag";
 import { ensureGeolocationPermission } from "../lib/usePermissions";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
-import { createBoardingToken, getBoardingUrl, validateAndBoardByDriver, boardByNfc } from "../lib/boarding";
+import { createBoardingToken, getBoardingUrl, validateAndBoardByDriver, boardByNfc, registerNfcCard } from "../lib/boarding";
 import { isWebNfcSupported, normalizeNfcUid, formatNfcUid, createTagCooldown } from "../lib/nfc";
 import QRCode from "qrcode";
 import jsQR from "jsqr";
@@ -1815,17 +1815,50 @@ function DriverNfcTag({ companyId, driver, dispatch }) {
   const [errMsg, setErrMsg] = useState("");
   const [last, setLast] = useState(null);   // { kind:'ok'|'dup'|'unknown', name, empNo, uid }
   const [count, setCount] = useState(null); // 서버 집계 탑승 인원(오늘·이 차량)
+
+  // 등록 모드(2026-07-22) — 기존 사원증 재사용 현장은 UID 목록이 없어 기사가 대행 등록.
+  const [mode, setMode] = useState("board");     // "board"(탑승) | "register"(카드 등록)
+  const [passengers, setPassengers] = useState([]);
+  const [passLoading, setPassLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [selectedEmp, setSelectedEmp] = useState(null); // { empNo, name, nfcUid }
+  const [pendingUid, setPendingUid] = useState(null);   // 탑승 모드에서 미등록으로 찍힌 카드
+  const [regMsg, setRegMsg] = useState(null);           // { ok:boolean, text:string }
+
   const abortRef = useRef(null);
   const audioRef = useRef(null);
   const cooldownRef = useRef(createTagCooldown(2000));
   const busyRef = useRef(false);
+  // ⚠ NDEFReader.onreading 은 scan() 호출 시점의 클로저를 붙든다 → 최신 state(mode·
+  //   selectedEmp)를 못 본다. 항상 최신 핸들러를 가리키는 ref 로 우회(stale closure 방지).
+  const handlerRef = useRef(() => {});
 
   const vehicleId = dispatch?.vehicleId || driver?.vehicleId || "";
+  const routeId = dispatch?.routeId || "";
 
   // 언마운트 시 스캔 중단 — AbortController 없이 두면 탭을 떠나도 리더가 계속 살아있다.
   useEffect(() => {
     return () => { try { abortRef.current?.abort(); } catch (_) {} };
   }, []);
+
+  // 등록 모드 진입 시 이 노선 승객 명단 1회 로드(사번 타이핑 대신 이름 선택).
+  // where(routeId) 단일 필드 = 자동 인덱스. active 는 클라 필터(복합 인덱스 회피).
+  useEffect(() => {
+    if (mode !== "register" || !companyId || !routeId || passengers.length > 0) return;
+    let alive = true;
+    setPassLoading(true);
+    getDocs(query(collection(db, "companies", companyId, "passengers"), where("routeId", "==", routeId)))
+      .then(snap => {
+        if (!alive) return;
+        const list = snap.docs.map(d => ({ empNo: d.id, ...d.data() }))
+          .filter(p => p.active !== false)
+          .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ko"));
+        setPassengers(list);
+      })
+      .catch(() => { if (alive) setErrMsg("승객 명단을 불러오지 못했습니다"); })
+      .finally(() => { if (alive) setPassLoading(false); });
+    return () => { alive = false; };
+  }, [mode, companyId, routeId, passengers.length]);
 
   // 비프음 — 사용자 제스처(태깅 시작) 안에서 AudioContext 를 만들어야 소리가 난다
   // (swstagsys unlockAudio 선례: 제스처 밖에서 만들면 suspended 상태로 무음).
@@ -1862,7 +1895,8 @@ function DriverNfcTag({ companyId, driver, dispatch }) {
       abortRef.current = ac;
       await ndef.scan({ signal: ac.signal });
       ndef.onreadingerror = () => setErrMsg("카드를 읽지 못했습니다. 다시 태그해주세요");
-      ndef.onreading = (event) => { handleTag(event?.serialNumber); };
+      // ref 경유 — 모드 전환·승객 선택이 반영된 최신 핸들러가 호출된다.
+      ndef.onreading = (event) => { handlerRef.current(event?.serialNumber); };
       setScanning(true);
     } catch (e) {
       setScanning(false);
@@ -1882,6 +1916,23 @@ function DriverNfcTag({ companyId, driver, dispatch }) {
     setScanning(false);
   };
 
+  // 등록 모드 태깅 — 선택된 승객에게 이 카드를 매핑.
+  const handleRegisterTag = async (uid) => {
+    if (!selectedEmp) { setPendingUid(uid); setRegMsg(null); return; } // 승객 먼저 고르게
+    try {
+      const r = await registerNfcCard({ companyId, empNo: selectedEmp.empNo, uid });
+      setRegMsg({ ok: true, text: `${r.name || selectedEmp.name}님 카드가 ${r.replaced ? "교체" : "등록"}되었습니다` });
+      beep(true);
+      if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]);
+      // 명단 캐시 갱신(배지 즉시 반영) + 다음 사람 등록으로 진행
+      setPassengers(prev => prev.map(p => p.empNo === selectedEmp.empNo ? { ...p, nfcUid: uid } : p));
+      setSelectedEmp(null); setPendingUid(null); setSearch("");
+    } catch (e) {
+      setRegMsg({ ok: false, text: e?.message || String(e) });
+      beep(false);
+    }
+  };
+
   const handleTag = async (serial) => {
     const uid = normalizeNfcUid(serial);
     if (!uid) return;
@@ -1890,6 +1941,7 @@ function DriverNfcTag({ companyId, driver, dispatch }) {
     if (busyRef.current) return;
     busyRef.current = true;
     try {
+      if (mode === "register") { await handleRegisterTag(uid); return; }
       const r = await boardByNfc({
         companyId, vehicleId, uid,
         selectedRouteId: dispatch?.routeId || null,
@@ -1919,6 +1971,10 @@ function DriverNfcTag({ companyId, driver, dispatch }) {
     }
   };
 
+  // 매 렌더마다 최신 handleTag 를 ref 에 꽂는다 — scan() 이 붙든 옛 클로저 대신
+  // 이 ref 를 통해 호출되므로 모드/선택 승객이 항상 최신값으로 평가된다.
+  handlerRef.current = handleTag;
+
   // ── 미지원 단말: 숨기지 말고 이유 + 대안 안내 ──
   if (!supported) {
     return (
@@ -1940,8 +1996,127 @@ function DriverNfcTag({ companyId, driver, dispatch }) {
       : last?.kind === "dup" ? { bg: "var(--color-primary-soft)", bd: "var(--color-primary)", fg: "var(--color-primary-deep)" }
         : { bg: "var(--color-atomic-red-90)", bd: "var(--color-destructive)", fg: "var(--color-destructive)" };
 
+  const filteredPass = (() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return passengers;
+    return passengers.filter(p =>
+      (p.name || "").toLowerCase().includes(q) || (p.empNo || "").toLowerCase().includes(q));
+  })();
+
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, width: "100%" }}>
+      {/* 모드 전환 — 탑승 처리 ↔ 카드 등록 */}
+      <div style={{ display: "flex", gap: 6, width: "100%", maxWidth: 340 }}>
+        {[["board", "탑승 처리"], ["register", "카드 등록"]].map(([m, label]) => (
+          <button key={m}
+            onClick={() => { setMode(m); setRegMsg(null); setErrMsg(""); }}
+            style={{
+              flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 13, fontWeight: 700,
+              cursor: "pointer", fontFamily: "inherit",
+              border: `1px solid ${mode === m ? "var(--color-primary)" : "var(--color-line)"}`,
+              background: mode === m ? "var(--color-primary-soft)" : "var(--color-bg)",
+              color: mode === m ? "var(--color-primary-deep)" : "var(--color-label-mute)",
+            }}>{label}</button>
+        ))}
+      </div>
+
+      {/* ─────────── 카드 등록 모드 ─────────── */}
+      {mode === "register" ? (
+        <>
+          <div style={{ fontSize: 12, color: "var(--color-label-mute)", textAlign: "center", lineHeight: 1.6 }}>
+            사원증 UID 목록이 없는 경우 여기서 카드를 등록합니다.<br />
+            <b>승객을 고른 뒤 그 사람의 카드를 태그</b>하세요.
+          </div>
+
+          {pendingUid && !selectedEmp && (
+            <div style={{
+              width: "100%", maxWidth: 340, borderRadius: 12, padding: "10px 14px",
+              background: "var(--color-primary-soft)", border: "1px solid var(--color-primary)", textAlign: "center",
+            }}>
+              <div style={{ fontSize: 12, color: "var(--color-primary-deep)", fontWeight: 700 }}>읽은 카드</div>
+              <div style={{ fontFamily: "monospace", fontSize: 14, fontWeight: 800 }}>{formatNfcUid(pendingUid)}</div>
+              <div style={{ fontSize: 11, color: "var(--color-label-mute)", marginTop: 2 }}>아래에서 이 카드의 주인을 선택하세요</div>
+            </div>
+          )}
+
+          {selectedEmp ? (
+            <div style={{ width: "100%", maxWidth: 340, textAlign: "center" }}>
+              <div style={{ fontSize: 12, color: "var(--color-label-mute)" }}>선택된 승객</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "var(--color-label)" }}>
+                {selectedEmp.name} <span style={{ fontSize: 12, color: "var(--color-label-mute)" }}>({selectedEmp.empNo})</span>
+              </div>
+              <div style={{ fontSize: 13, color: "var(--color-primary-deep)", fontWeight: 700, marginTop: 10 }}>
+                이제 이 승객의 사원증을 태그하세요
+              </div>
+              <button onClick={() => { setSelectedEmp(null); setPendingUid(null); }}
+                style={{ ...S.refreshBtn, marginTop: 10 }}>다른 승객 선택</button>
+            </div>
+          ) : (
+            <div style={{ width: "100%", maxWidth: 340 }}>
+              <input value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="이름 또는 사번 검색"
+                style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 10, border: "1px solid var(--color-line)", fontSize: 14, fontFamily: "inherit", outline: "none" }} />
+              <div style={{ maxHeight: 240, overflowY: "auto", marginTop: 8, border: "1px solid var(--color-line)", borderRadius: 10 }}>
+                {passLoading ? <div style={{ padding: 14, fontSize: 13, color: "var(--color-label-alt)", textAlign: "center" }}>명단 불러오는 중…</div>
+                  : filteredPass.length === 0 ? <div style={{ padding: 14, fontSize: 13, color: "var(--color-label-alt)", textAlign: "center" }}>
+                    {passengers.length === 0 ? "이 노선에 등록된 승객이 없습니다" : "검색 결과가 없습니다"}
+                  </div>
+                    : filteredPass.map(p => (
+                      <button key={p.empNo}
+                        onClick={() => {
+                          setSelectedEmp({ empNo: p.empNo, name: p.name, nfcUid: p.nfcUid });
+                          setRegMsg(null);
+                          // 카드를 먼저 읽어둔 상태면 선택 즉시 등록까지 진행
+                          if (pendingUid) {
+                            registerNfcCard({ companyId, empNo: p.empNo, uid: pendingUid })
+                              .then(r => {
+                                setRegMsg({ ok: true, text: `${r.name || p.name}님 카드가 ${r.replaced ? "교체" : "등록"}되었습니다` });
+                                setPassengers(prev => prev.map(x => x.empNo === p.empNo ? { ...x, nfcUid: pendingUid } : x));
+                                setSelectedEmp(null); setPendingUid(null); setSearch("");
+                                beep(true);
+                              })
+                              .catch(e => { setRegMsg({ ok: false, text: e?.message || String(e) }); beep(false); });
+                          }
+                        }}
+                        style={{
+                          display: "flex", width: "100%", alignItems: "center", justifyContent: "space-between",
+                          gap: 8, padding: "10px 12px", border: "none", borderBottom: "1px solid var(--color-line-soft)",
+                          background: "var(--color-bg)", cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+                        }}>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: "var(--color-label)" }}>
+                          {p.name} <span style={{ fontSize: 11, color: "var(--color-label-mute)" }}>{p.empNo}</span>
+                        </span>
+                        {p.nfcUid
+                          ? <span style={{ fontSize: 10, fontWeight: 700, color: "#007A29", background: "#E6F7EB", padding: "2px 7px", borderRadius: 10 }}>카드 있음</span>
+                          : <span style={{ fontSize: 10, color: "var(--color-label-alt)" }}>미등록</span>}
+                      </button>
+                    ))}
+              </div>
+            </div>
+          )}
+
+          {regMsg && (
+            <div style={{
+              width: "100%", maxWidth: 340, borderRadius: 12, padding: "12px 14px", textAlign: "center",
+              background: regMsg.ok ? "#E6F7EB" : "var(--color-atomic-red-90)",
+              border: `2px solid ${regMsg.ok ? "var(--color-positive)" : "var(--color-destructive)"}`,
+              color: regMsg.ok ? "#007A29" : "var(--color-destructive)",
+              fontSize: 13, fontWeight: 700, whiteSpace: "pre-line", lineHeight: 1.6,
+            }}>{regMsg.text}</div>
+          )}
+
+          {!scanning
+            ? <button onClick={start} style={{ ...S.primaryBtn, maxWidth: 280 }}>카드 읽기 시작</button>
+            : <>
+              <div style={{ fontSize: 12, color: "var(--color-primary-deep)", fontWeight: 700 }}>카드 대기 중…</div>
+              <button onClick={stop} style={{ ...S.refreshBtn, maxWidth: 280 }}>중지</button>
+            </>}
+          {errMsg && (
+            <div style={{ fontSize: 12, color: "var(--color-destructive)", textAlign: "center", whiteSpace: "pre-line", lineHeight: 1.6 }}>{errMsg}</div>
+          )}
+        </>
+      ) : (
+        <>
       {/* 노선 + 오늘 탑승 인원 — 레거시 버스인 태깅 화면 구성 */}
       <div style={S.qrRouteBox}>
         <div style={S.qrRouteLabel}>노선</div>
@@ -1991,6 +2166,12 @@ function DriverNfcTag({ companyId, driver, dispatch }) {
               <div style={{ fontSize: 11, color: "var(--color-label-alt)", marginTop: 6, fontFamily: "monospace" }}>
                 {formatNfcUid(last.uid)}
               </div>
+              {/* 그 자리에서 등록으로 잇는 고리 — 카드를 다시 댈 필요 없이 UID 를 넘긴다. */}
+              <button
+                onClick={() => { setPendingUid(last.uid); setMode("register"); setRegMsg(null); setLast(null); }}
+                style={{ ...S.primaryBtn, maxWidth: 240, marginTop: 10 }}>
+                이 카드 등록하기
+              </button>
             </>
           ) : (
             <>
@@ -2012,6 +2193,8 @@ function DriverNfcTag({ companyId, driver, dispatch }) {
       )}
 
       {scanning && <button onClick={stop} style={{ ...S.refreshBtn, maxWidth: 280 }}>태깅 중지</button>}
+        </>
+      )}
     </div>
   );
 }

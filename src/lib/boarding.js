@@ -200,6 +200,15 @@ export async function boardByNfc({ companyId, vehicleId, uid, selectedRouteId })
   return data; // { ok, registered, empNo?, name?, alreadyBoarded?, uid?, routeName, vehicleNo, dispatchDate, todayCount }
 }
 
+// ─── NFC 카드 등록 대행 (2026-07-22) ──────────────────────
+// 기존 사원증을 재사용하는 현장에는 UID 목록이 없다 → 기사 폰(Android)이 카드를 읽어
+// 승객에게 매핑한다. 중복 카드 검사·정규화는 서버(CF registerNfcCard)가 강제.
+// 다른 사람에게 등록된 카드면 `already-exists` 로 throw(조용히 뺏지 않음).
+export async function registerNfcCard({ companyId, empNo, uid }) {
+  const { data } = await httpsCallable(functions, "registerNfcCard")({ companyId, empNo, uid });
+  return data; // { ok, empNo, name, replaced }
+}
+
 // ─── 유틸 ────────────────────────────────────────────────
 function generateTokenId() {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';

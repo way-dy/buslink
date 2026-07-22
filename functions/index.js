@@ -748,6 +748,83 @@ exports.boardNfc = onCall(async (request) => {
   };
 });
 
+// registerNfcCard({ companyId, empNo, uid }) — 기사앱 카드 등록 대행 (2026-07-22)
+//
+// 배경: 기존 사원증·출입카드를 재사용하면 회사에 UID 목록이 없다 → 카드를 한 번씩
+// 읽어내야 하는데, 승객 자가등록은 iOS 웹이 NFC 를 못 읽어 불가. 기사 폰(Android)이
+// 이미 NFC 리더이므로 기사가 대행 등록한다(추가 장비 0).
+//
+// 규칙:
+//  - 같은 사람이 다른 카드로 재등록 = **허용**(카드 분실·교체. 레거시 버스인도 재태깅=재등록).
+//  - 다른 사람에게 이미 등록된 카드 = **거부**. 조용히 뺏으면 원 소유자가 어느 날 갑자기
+//    "미등록 카드"가 되고 원인 추적이 불가능해진다. 관리자가 포털에서 해제 후 재등록.
+//  - passengers.write 룰이 isAuth() 라 클라 직접 쓰기도 가능하지만, **중복 검사와 정규화를
+//    한 곳에서 강제**하려면 서버여야 한다(클라 우회 시 UID 중복 → 조회가 임의 1건 선택).
+exports.registerNfcCard = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
+
+  const { companyId, empNo, uid } = request.data || {};
+  if (!companyId || typeof companyId !== "string") {
+    throw new HttpsError("invalid-argument", "companyId가 필요합니다");
+  }
+  const trimmedEmpNo = String(empNo || "").trim();
+  if (!trimmedEmpNo) throw new HttpsError("invalid-argument", "승객을 선택해주세요");
+
+  const cleanUid = normalizeNfcUidServer(uid);
+  // 클라 isValidNfcUid 와 동일 기준(8자 이상·짝수) — 잘못 읽힌 값이 등록되면
+  // 그 사람은 영영 태깅이 안 되므로 등록 시점에 거른다.
+  if (cleanUid.length < 8 || cleanUid.length % 2 !== 0) {
+    throw new HttpsError("invalid-argument", "카드 번호를 정확히 읽지 못했습니다\n카드를 다시 태그해주세요");
+  }
+
+  const db = admin.firestore();
+
+  const userSnap = await db.collection("users").doc(request.auth.uid).get();
+  const user = userSnap.exists ? (userSnap.data() || {}) : {};
+  if (!["driver", "admin", "superadmin"].includes(user.role)) {
+    throw new HttpsError("permission-denied", "기사 또는 관리자만 등록할 수 있습니다");
+  }
+  if (user.role !== "superadmin" && user.companyId !== companyId) {
+    throw new HttpsError("permission-denied", "다른 회사의 등록은 허용되지 않습니다");
+  }
+
+  const passRef = db
+    .collection("companies").doc(companyId)
+    .collection("passengers").doc(trimmedEmpNo);
+  const passSnap = await passRef.get();
+  if (!passSnap.exists) throw new HttpsError("not-found", "등록되지 않은 승객입니다");
+
+  // 이 카드가 이미 다른 사람 것인지 — 중복 등록이면 조회(limit 1)가 임의로 한 명을
+  // 고르게 되어 "어떤 날은 되고 어떤 날은 안 되는" 증상이 된다.
+  const dupSnap = await db
+    .collection("companies").doc(companyId)
+    .collection("passengers")
+    .where("nfcUid", "==", cleanUid).limit(2).get();
+  const other = dupSnap.docs.find((d) => d.id !== trimmedEmpNo);
+  if (other) {
+    const o = other.data() || {};
+    throw new HttpsError(
+      "already-exists",
+      `이 카드는 이미 ${o.name || "다른 승객"}(${o.empNo || other.id})에게 등록되어 있습니다\n관리자가 협력사 포털에서 해제한 뒤 다시 등록해주세요`
+    );
+  }
+
+  const prevUid = (passSnap.data() || {}).nfcUid || null;
+  await passRef.update({
+    nfcUid: cleanUid,
+    nfcUidUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  console.log(`[registerNfcCard] cid=${companyId} emp=${trimmedEmpNo} uid=${cleanUid} prev=${prevUid || "-"}`);
+  return {
+    ok: true,
+    empNo: trimmedEmpNo,
+    name: (passSnap.data() || {}).name || "",
+    replaced: !!prevUid && prevUid !== cleanUid, // 카드 교체였는지(화면 문구 분기용)
+  };
+});
+
 // ════════════════════════════════════════════════════════
 // SaaS Phase 1.4 (2026-05-29) — 협력사 공지 발송 (onCall)
 //
