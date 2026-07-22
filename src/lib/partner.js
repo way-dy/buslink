@@ -1,5 +1,5 @@
 import { db } from "../firebase";
-import { normalizeNfcUid } from "./nfc";
+import { normalizeNfcUid, isValidNfcUid } from "./nfc";
 import {
   doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc,
   collection, getDocs, query, where, serverTimestamp, Timestamp
@@ -82,6 +82,8 @@ export function parseEmployeeExcel(file) {
           dept:   headers.findIndex(h => h.includes("부서") || h.includes("dept")),
           route:  headers.findIndex(h => h.includes("노선") || h.includes("route")),
           active: headers.findIndex(h => h.includes("재직") || h.includes("active")),
+          // NFC 사원증 카드번호(2026-07-22·선택 컬럼). 없으면 -1 → 아무 것도 안 건드림.
+          nfc:    headers.findIndex(h => h.includes("nfc") || h.includes("카드")),
         };
 
         if (colMap.empNo === -1) throw new Error("사번 컬럼을 찾을 수 없습니다");
@@ -103,13 +105,28 @@ export function parseEmployeeExcel(file) {
             ? String(row[colMap.active] || "Y").trim().toUpperCase()
             : "Y";
 
-          employees.push({
+          // NFC 카드번호 — ⚠ **셀이 비어 있으면 키 자체를 안 넣는다**.
+          //   importEmployees 는 `nfcUid !== undefined` 일 때만 기록하므로, 빈 셀에
+          //   ""/null 을 넣으면 이미 등록된 카드가 대량 업로드로 전부 지워진다.
+          //   "값이 있을 때만 덮어쓰기" = 부분 명부 업로드로도 기존 등록 보존.
+          const emp = {
             empNo,
             name,
             dept: colMap.dept !== -1 ? String(row[colMap.dept] || "").trim() : "",
             routeCode: colMap.route !== -1 ? String(row[colMap.route] || "").trim() : "",
             active: activeVal !== "N" && activeVal !== "FALSE" && activeVal !== "0",
-          });
+          };
+          if (colMap.nfc !== -1) {
+            const rawUid = String(row[colMap.nfc] || "").trim();
+            if (rawUid) {
+              if (!isValidNfcUid(rawUid)) {
+                errors.push(`${lineNo}행: NFC 카드번호 형식 오류 "${rawUid}" (사번: ${empNo})`);
+              } else {
+                emp.nfcUid = rawUid; // 정규화는 importEmployees 가 수행
+              }
+            }
+          }
+          employees.push(emp);
         });
 
         resolve({ employees, errors, total: employees.length });
@@ -254,13 +271,14 @@ export async function verifyPassenger({ companyId, empNo, pin, routeId, tokenId 
 // ─── 샘플 엑셀 생성 ──────────────────────────────────────
 export function downloadSampleExcel() {
   const XLSX = window.XLSX;
+  // NFC 카드번호는 **선택 컬럼** — 비워두면 기존 등록이 그대로 보존된다(지워지지 않음).
   const ws = XLSX.utils.aoa_to_sheet([
-    ["사번", "이름", "부서", "노선코드", "재직여부(Y/N)"],
-    ["10001", "홍길동", "개발팀", "662", "Y"],
-    ["10002", "김철수", "인사팀", "663", "Y"],
-    ["10003", "이영희", "총무팀", "662", "N"],
+    ["사번", "이름", "부서", "노선코드", "재직여부(Y/N)", "NFC카드번호(선택)"],
+    ["10001", "홍길동", "개발팀", "662", "Y", "0453CE9A"],
+    ["10002", "김철수", "인사팀", "663", "Y", "04:1A:2B:3C"],
+    ["10003", "이영희", "총무팀", "662", "N", ""],
   ]);
-  ws["!cols"] = [{ wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 16 }];
+  ws["!cols"] = [{ wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 16 }, { wch: 20 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "승객명부");
   XLSX.writeFile(wb, "BusLink_승객명부_양식.xlsx");

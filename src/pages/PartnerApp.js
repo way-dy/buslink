@@ -3,7 +3,8 @@ import {
   validatePartnerCode, parseEmployeeExcel,
   importEmployees, downloadSampleExcel, hashPin
 } from "../lib/partner";
-import { normalizeNfcUid, isValidNfcUid, formatNfcUid } from "../lib/nfc";
+import { normalizeNfcUid, isValidNfcUid, formatNfcUid, isWebNfcSupported, createTagCooldown } from "../lib/nfc";
+import { registerNfcCard } from "../lib/boarding";
 import { db, auth } from "../firebase";
 import { signInAnonymously } from "firebase/auth";
 import { collection, getDocs, doc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, limit } from "firebase/firestore";
@@ -23,7 +24,7 @@ import { useOnlineRecover } from "../lib/useOnlineRecover";
 import { applyPartnerBranding, clearPartnerBranding } from "../lib/partnerBranding";
 
 const STEPS = { CODE:"code", MAIN:"main", DONE:"done", MANAGE:"manage" };
-const REG_MODES = { FILE:"file", SINGLE:"single", MULTI:"multi" };
+const REG_MODES = { FILE:"file", SINGLE:"single", MULTI:"multi", NFC:"nfc" };
 
 // Phase 1.4 (2026-05-29) — 협력사 공지 발송 onCall(`sendPartnerNotice`) 호출용.
 // region="us-central1" 명시(AdminApp 패턴 일관, functions/index.js 리전 고정).
@@ -161,7 +162,7 @@ export default function PartnerApp() {
             {mainTab === "register" && (
               <>
                 <div style={S.subTabBar}>
-                  {[[REG_MODES.FILE,"📂 파일 업로드"],[REG_MODES.SINGLE,"👤 개별 등록"],[REG_MODES.MULTI,"👥 다중 등록"]].map(([mode,label])=>(
+                  {[[REG_MODES.FILE,"📂 파일 업로드"],[REG_MODES.SINGLE,"👤 개별 등록"],[REG_MODES.MULTI,"👥 다중 등록"],[REG_MODES.NFC,"📇 카드 등록"]].map(([mode,label])=>(
                     <button key={mode} onClick={()=>setRegMode(mode)}
                       style={{ ...S.subTabBtn,
                         background: regMode===mode ? "var(--color-bg)" : "transparent",
@@ -175,6 +176,7 @@ export default function PartnerApp() {
                 {regMode===REG_MODES.FILE && <FileUploadMode codeData={codeData} code={code} routes={routes} onDone={handleDone}/>}
                 {regMode===REG_MODES.SINGLE && <SingleRegMode codeData={codeData} code={code} routes={routes} onDone={handleDone}/>}
                 {regMode===REG_MODES.MULTI && <MultiRegMode codeData={codeData} code={code} routes={routes} onDone={handleDone}/>}
+                {regMode===REG_MODES.NFC && <NfcRegMode codeData={codeData} code={code}/>}
               </>
             )}
 
@@ -503,6 +505,183 @@ function MultiRegMode({ codeData, code, routes, onDone }) {
         {loading?`등록 중...`:`✅ ${validCount}명 등록하기`}
       </button>
       <div style={{ fontSize:11, color:"var(--color-label-alt)", textAlign:"center" }}>사번·이름이 비어있는 행은 자동 제외됩니다 · 초기 PIN: 000000</div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
+// NFC 카드 일괄 등록 모드 (2026-07-22)
+//
+// 기존 사원증·출입카드를 재사용하는 현장은 회사에 UID 목록이 없다 → 카드를 한 번씩
+// 읽어내야 한다. 승객 자가등록은 **아이폰 웹이 NFC 를 못 읽어** 채택하지 않았다
+// (way 결정: 아이폰 사용자 비중이 높음) → 담당자가 **안드로이드 1대로 줄 세워 일괄 등록**.
+//
+// 흐름 최적화: 이름 선택 → 카드 태그 → 자동으로 선택 해제 + 검색어 초기화 →
+// 바로 다음 사람. 1인당 3초를 목표로 클릭 수를 최소화한다.
+//
+// ⚠ Web NFC = 안드로이드 크롬 전용. PC·아이폰에서는 이 모드가 동작하지 않으므로
+//    이유와 대안(엑셀 컬럼·개별 입력)을 화면에서 명시한다.
+// ════════════════════════════════════════════════════════
+function NfcRegMode({ codeData, code }) {
+  const supported = isWebNfcSupported();
+  const [employees, setEmployees] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState(null);
+  const [scanning, setScanning] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [errMsg, setErrMsg] = useState("");
+  const abortRef = useRef(null);
+  const cooldownRef = useRef(createTagCooldown(2000));
+  const handlerRef = useRef(() => {});
+  const busyRef = useRef(false);
+
+  useEffect(() => {
+    if (!codeData?.companyId || !code) return;
+    const q = query(
+      collection(db, "companies", codeData.companyId, "passengers"),
+      where("partnerCode", "==", code)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      setEmployees(snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .filter(e => e.active !== false)
+        .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ko")));
+      setLoading(false);
+    }, () => setLoading(false));
+    return () => unsub();
+  }, [codeData?.companyId, code]);
+
+  useEffect(() => () => { try { abortRef.current?.abort(); } catch (_) {} }, []);
+
+  const start = async () => {
+    setErrMsg("");
+    try {
+      const ndef = new window.NDEFReader();
+      const ac = new AbortController();
+      abortRef.current = ac;
+      await ndef.scan({ signal: ac.signal });
+      ndef.onreadingerror = () => setErrMsg("카드를 읽지 못했습니다. 다시 태그해주세요");
+      // ⚠ onreading 은 scan() 시점 클로저를 붙든다 → ref 경유로 최신 선택 승객을 본다.
+      ndef.onreading = (e) => handlerRef.current(e?.serialNumber);
+      setScanning(true);
+    } catch (e) {
+      setScanning(false);
+      setErrMsg(e?.name === "NotAllowedError"
+        ? "NFC 권한이 거부되었습니다.\n브라우저 설정에서 이 사이트의 NFC 를 허용해주세요"
+        : "NFC 시작 오류: " + (e?.message || e));
+    }
+  };
+
+  const stop = () => {
+    try { abortRef.current?.abort(); } catch (_) {}
+    abortRef.current = null;
+    setScanning(false);
+  };
+
+  const onTag = async (serial) => {
+    const uid = normalizeNfcUid(serial);
+    if (!uid || !cooldownRef.current(uid) || busyRef.current) return;
+    if (!selected) { setMsg({ ok: false, text: "먼저 등록할 승객을 선택해주세요" }); return; }
+    busyRef.current = true;
+    try {
+      const r = await registerNfcCard({
+        companyId: codeData.companyId, empNo: selected.id, uid, partnerCode: code,
+      });
+      setMsg({ ok: true, text: `${r.name || selected.name}님 ${r.replaced ? "카드 교체 완료" : "등록 완료"}` });
+      if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]);
+      // 바로 다음 사람으로 — 연속 등록이 끊기지 않게 선택·검색어 초기화
+      setSelected(null); setSearch("");
+    } catch (e) {
+      setMsg({ ok: false, text: e?.message || String(e) });
+      if ("vibrate" in navigator) navigator.vibrate([200, 80, 200]);
+    } finally { busyRef.current = false; }
+  };
+  handlerRef.current = onTag;
+
+  const done = employees.filter(e => e.nfcUid).length;
+  const filtered = (() => {
+    const q = search.trim().toLowerCase();
+    const base = employees;
+    if (!q) return base;
+    return base.filter(e => (e.name || "").toLowerCase().includes(q) || (e.empNo || "").toLowerCase().includes(q));
+  })();
+
+  if (!supported) {
+    return (
+      <div style={{ padding: 16, borderRadius: 12, background: "var(--color-bg-soft)", border: "1px solid var(--color-line)", fontSize: 13, lineHeight: 1.7, color: "var(--color-label-mute)" }}>
+        <div style={{ fontWeight: 800, color: "var(--color-label)", marginBottom: 6 }}>이 기기에서는 카드 태깅을 쓸 수 없습니다</div>
+        NFC 태깅은 <b>안드로이드 + 크롬</b>에서만 동작합니다(PC·아이폰 미지원).
+        <br />· 안드로이드 폰·태블릿에서 <b>크롬으로</b> 이 포털에 접속해주세요.
+        <br />· 카드번호를 이미 알고 있다면 <b>파일 업로드</b>(NFC카드번호 컬럼) 또는
+        <b> 승객 관리 → 수정</b>에서 직접 입력할 수 있습니다.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ fontSize: 12, color: "var(--color-label-mute)", lineHeight: 1.6 }}>
+        안드로이드 폰 한 대로 <b>승객을 줄 세워 연속 등록</b>할 수 있습니다.
+        이름을 고르고 그 사람 사원증을 폰 뒷면에 대면 바로 다음 사람으로 넘어갑니다.
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ flex: 1, height: 8, borderRadius: 4, background: "var(--color-bg-soft)", overflow: "hidden" }}>
+          <div style={{ width: `${employees.length ? (done / employees.length) * 100 : 0}%`, height: "100%", background: "var(--color-positive)" }} />
+        </div>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--color-label-mute)", whiteSpace: "nowrap" }}>
+          {done} / {employees.length}명 등록
+        </span>
+      </div>
+
+      {!scanning
+        ? <button style={S.btn} onClick={start}>📇 카드 읽기 시작</button>
+        : <button style={{ ...S.btn, background: "var(--color-bg-soft)", color: "var(--color-label-mute)" }} onClick={stop}>중지</button>}
+
+      {selected && (
+        <div style={{ padding: "12px 14px", borderRadius: 12, background: "var(--color-primary-soft)", border: "2px solid var(--color-primary)", textAlign: "center" }}>
+          <div style={{ fontSize: 12, color: "var(--color-label-mute)" }}>선택됨</div>
+          <div style={{ fontSize: 17, fontWeight: 800 }}>{selected.name} <span style={{ fontSize: 12, color: "var(--color-label-mute)" }}>({selected.empNo})</span></div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--color-primary-deep)", marginTop: 6 }}>
+            {scanning ? "이 승객의 사원증을 태그하세요" : "‘카드 읽기 시작’을 먼저 눌러주세요"}
+          </div>
+        </div>
+      )}
+
+      {msg && (
+        <div style={{
+          padding: "10px 14px", borderRadius: 10, fontSize: 13, fontWeight: 700, whiteSpace: "pre-line", lineHeight: 1.6,
+          background: msg.ok ? "#E6F7EB" : "#FCE5E5",
+          color: msg.ok ? "#007A29" : "var(--color-destructive)",
+          border: `1px solid ${msg.ok ? "#B7E6C7" : "#F6C9C9"}`,
+        }}>{msg.text}</div>
+      )}
+      {errMsg && <div style={S.errorMsg}>{errMsg}</div>}
+
+      <input style={{ ...S.input, padding: "9px 12px" }} placeholder="이름·사번 검색"
+        value={search} onChange={e => setSearch(e.target.value)} />
+
+      <div style={{ maxHeight: 300, overflowY: "auto", border: "1px solid var(--color-line)", borderRadius: 10 }}>
+        {loading ? <div style={{ padding: 16, textAlign: "center", fontSize: 13, color: "var(--color-label-alt)" }}>명단 불러오는 중…</div>
+          : filtered.length === 0 ? <div style={{ padding: 16, textAlign: "center", fontSize: 13, color: "var(--color-label-alt)" }}>
+            {employees.length === 0 ? "등록된 승객이 없습니다" : "검색 결과가 없습니다"}</div>
+            : filtered.map(e => (
+              <button key={e.id} onClick={() => { setSelected(e); setMsg(null); }}
+                style={{
+                  display: "flex", width: "100%", alignItems: "center", justifyContent: "space-between", gap: 8,
+                  padding: "11px 12px", border: "none", borderBottom: "1px solid var(--color-line-soft)",
+                  background: selected?.id === e.id ? "var(--color-primary-soft)" : "var(--color-bg)",
+                  cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+                }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: "var(--color-label)" }}>
+                  {e.name} <span style={{ fontSize: 11, color: "var(--color-label-mute)" }}>{e.empNo}</span>
+                </span>
+                {e.nfcUid
+                  ? <span style={{ fontSize: 10, fontWeight: 700, color: "#007A29", background: "#E6F7EB", padding: "2px 7px", borderRadius: 10, whiteSpace: "nowrap" }}>✓ {formatNfcUid(e.nfcUid)}</span>
+                  : <span style={{ fontSize: 10, color: "var(--color-label-alt)" }}>미등록</span>}
+              </button>
+            ))}
+      </div>
     </div>
   );
 }

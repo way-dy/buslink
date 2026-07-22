@@ -204,8 +204,12 @@ export async function boardByNfc({ companyId, vehicleId, uid, selectedRouteId })
 // 기존 사원증을 재사용하는 현장에는 UID 목록이 없다 → 기사 폰(Android)이 카드를 읽어
 // 승객에게 매핑한다. 중복 카드 검사·정규화는 서버(CF registerNfcCard)가 강제.
 // 다른 사람에게 등록된 카드면 `already-exists` 로 throw(조용히 뺏지 않음).
-export async function registerNfcCard({ companyId, empNo, uid }) {
-  const { data } = await httpsCallable(functions, "registerNfcCard")({ companyId, empNo, uid });
+// partnerCode: 협력사 포털(익명 인증·role 없음)에서 호출할 때 필수 — 서버가 업체코드를
+// 검증하고 **그 거래처 소속 승객인지**까지 확인한다. 기사·관리자는 role 로 통과(미전달 가능).
+export async function registerNfcCard({ companyId, empNo, uid, partnerCode }) {
+  const { data } = await httpsCallable(functions, "registerNfcCard")({
+    companyId, empNo, uid, partnerCode: partnerCode || null,
+  });
   return data; // { ok, empNo, name, replaced }
 }
 

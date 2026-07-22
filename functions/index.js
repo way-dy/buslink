@@ -779,20 +779,40 @@ exports.registerNfcCard = onCall(async (request) => {
 
   const db = admin.firestore();
 
-  const userSnap = await db.collection("users").doc(request.auth.uid).get();
-  const user = userSnap.exists ? (userSnap.data() || {}) : {};
-  if (!["driver", "admin", "superadmin"].includes(user.role)) {
-    throw new HttpsError("permission-denied", "기사 또는 관리자만 등록할 수 있습니다");
-  }
-  if (user.role !== "superadmin" && user.companyId !== companyId) {
-    throw new HttpsError("permission-denied", "다른 회사의 등록은 허용되지 않습니다");
-  }
-
   const passRef = db
     .collection("companies").doc(companyId)
     .collection("passengers").doc(trimmedEmpNo);
   const passSnap = await passRef.get();
   if (!passSnap.exists) throw new HttpsError("not-found", "등록되지 않은 승객입니다");
+  const pass = passSnap.data() || {};
+
+  // ── 호출자 인증 2경로 ──────────────────────────────────────────
+  // (a) 기사·관리자: users/{uid}.role + 같은 회사 (기사앱 현장 등록)
+  // (b) 협력사 포털: PartnerApp 은 **익명 인증 + 업체코드 인증**이라 role 이 없다
+  //     → partnerCodes/{code} 검증(exists+active+companyId 일치) + **대상 승객이
+  //     그 협력사 소속인지**까지 확인해야 남의 거래처 직원 카드를 못 건드린다.
+  //     (sendPartnerNotice 의 코드 인증 패턴과 동일)
+  const { partnerCode } = request.data || {};
+  const userSnap = await db.collection("users").doc(request.auth.uid).get();
+  const user = userSnap.exists ? (userSnap.data() || {}) : {};
+  const isStaff = ["driver", "admin", "superadmin"].includes(user.role);
+
+  if (isStaff) {
+    if (user.role !== "superadmin" && user.companyId !== companyId) {
+      throw new HttpsError("permission-denied", "다른 회사의 등록은 허용되지 않습니다");
+    }
+  } else {
+    const code = String(partnerCode || "").trim();
+    if (!code) throw new HttpsError("permission-denied", "등록 권한이 없습니다");
+    const codeSnap = await db.collection("partnerCodes").doc(code).get();
+    const cd = codeSnap.exists ? (codeSnap.data() || {}) : null;
+    if (!cd || cd.active === false || cd.companyId !== companyId) {
+      throw new HttpsError("permission-denied", "유효하지 않은 업체코드입니다");
+    }
+    if ((pass.partnerCode || null) !== code) {
+      throw new HttpsError("permission-denied", "이 승객은 해당 거래처 소속이 아닙니다");
+    }
+  }
 
   // 이 카드가 이미 다른 사람 것인지 — 중복 등록이면 조회(limit 1)가 임의로 한 명을
   // 고르게 되어 "어떤 날은 되고 어떤 날은 안 되는" 증상이 된다.
@@ -809,18 +829,18 @@ exports.registerNfcCard = onCall(async (request) => {
     );
   }
 
-  const prevUid = (passSnap.data() || {}).nfcUid || null;
+  const prevUid = pass.nfcUid || null;
   await passRef.update({
     nfcUid: cleanUid,
     nfcUidUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 
-  console.log(`[registerNfcCard] cid=${companyId} emp=${trimmedEmpNo} uid=${cleanUid} prev=${prevUid || "-"}`);
+  console.log(`[registerNfcCard] cid=${companyId} emp=${trimmedEmpNo} uid=${cleanUid} prev=${prevUid || "-"} by=${isStaff ? user.role : "partner"}`);
   return {
     ok: true,
     empNo: trimmedEmpNo,
-    name: (passSnap.data() || {}).name || "",
+    name: pass.name || "",
     replaced: !!prevUid && prevUid !== cleanUid, // 카드 교체였는지(화면 문구 분기용)
   };
 });
