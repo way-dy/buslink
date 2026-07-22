@@ -1037,10 +1037,13 @@ export default function DriverApp({ companyId: propCompanyId }) {
         )}
 
         {/* 탭 전환 — 항상 표시. passenger-qr 모드는 라벨이 'QR 스캔'(기사가 스캔측).
-            NFC 탭(2026-07-22)은 Web NFC 지원 단말(안드로이드 크롬)에서만 노출 —
-            아이폰·PC 기사에게 눌러도 안 되는 탭을 보여주지 않는다(탭 안에서 다시 안내). */}
+            NFC 탭(2026-07-22)은 **지원 여부와 무관하게 항상 노출**한다(2026-07-22 정정):
+            기사 단말은 안드로이드로 통제되므로 대부분 동작하고, 미지원인 드문 경우
+            (PC 접속·삼성 인터넷 등 크롬 아닌 브라우저·아이패드)에는 탭 안에서 이유와
+            해결법을 안내해야 한다. 탭을 숨기면 그 안내가 도달 불가능해져 기사는
+            "NFC 가 왜 없지?"만 겪는다. */}
         <div style={S.tabRow}>
-          {["운행", "탑승 QR", ...(isWebNfcSupported() ? ["NFC"] : [])].map(tab => (
+          {["운행", "탑승 QR", "NFC"].map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
               style={{ ...S.tabBtn, ...(activeTab === tab ? S.tabBtnActive : S.tabBtnIdle) }}>
               {tab === "탑승 QR" && <Icon name="qr" size={16} />} {tab === "NFC" && "📇 "}
@@ -1975,16 +1978,20 @@ function DriverNfcTag({ companyId, driver, dispatch }) {
   // 이 ref 를 통해 호출되므로 모드/선택 승객이 항상 최신값으로 평가된다.
   handlerRef.current = handleTag;
 
-  // ── 미지원 단말: 숨기지 말고 이유 + 대안 안내 ──
+  // ── 미지원 단말: 숨기지 말고 이유 + 해결법 안내 ──
+  // 기사 단말은 안드로이드로 통제되므로 여기 걸리는 건 대개 "크롬이 아닌 브라우저로
+  // 열었다"(삼성 인터넷 등)이거나 PC 접속이다 → 원인별 해결법을 구체적으로 제시.
   if (!supported) {
     return (
       <div style={S.qrNotice}>
         <span style={{ fontSize: 26 }}>📵</span>
         <div>
-          <div style={S.qrNoticeTitle}>이 기기는 NFC 태깅을 지원하지 않습니다</div>
+          <div style={S.qrNoticeTitle}>이 기기·브라우저에서는 NFC 태깅을 쓸 수 없습니다</div>
           <div style={S.qrNoticeSub}>
-            NFC 태깅은 <b>안드로이드 크롬</b>에서만 동작합니다(아이폰·PC 미지원).
-            <br />이 기기에서는 <b>탑승 QR</b> 탭을 사용해주세요.
+            NFC 태깅은 <b>안드로이드 + 크롬</b>에서만 동작합니다.
+            <br />· 안드로이드 폰이라면 <b>크롬으로 다시 열어주세요</b>(삼성 인터넷 등 다른 브라우저는 미지원).
+            <br />· 폰 <b>설정에서 NFC 가 켜져 있는지</b> 확인해주세요.
+            <br />· PC·아이폰·아이패드는 지원하지 않습니다 → <b>탑승 QR</b> 탭을 사용해주세요.
           </div>
         </div>
       </div>
