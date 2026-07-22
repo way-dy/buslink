@@ -3,6 +3,7 @@ import {
   validatePartnerCode, parseEmployeeExcel,
   importEmployees, downloadSampleExcel, hashPin
 } from "../lib/partner";
+import { normalizeNfcUid, isValidNfcUid, formatNfcUid } from "../lib/nfc";
 import { db, auth } from "../firebase";
 import { signInAnonymously } from "firebase/auth";
 import { collection, getDocs, doc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, limit } from "firebase/firestore";
@@ -335,7 +336,7 @@ function FileUploadMode({ codeData, code, routes, onDone }) {
 // 개별 등록 모드
 // ════════════════════════════════════════════════════════
 function SingleRegMode({ codeData, code, routes, onDone }) {
-  const empty = { empNo:"", name:"", dept:"", routeCode:"", active:true, pinLocked:false };
+  const empty = { empNo:"", name:"", dept:"", routeCode:"", active:true, pinLocked:false, nfcUid:"" };
   const [form, setForm] = useState(empty);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -343,11 +344,15 @@ function SingleRegMode({ codeData, code, routes, onDone }) {
   const handleSave = async () => {
     if (!form.empNo.trim()) return setError("사번은 필수입니다");
     if (!form.name.trim()) return setError("이름은 필수입니다");
+    // NFC 카드번호는 선택 입력 — 입력했다면 형식은 맞아야 한다(오타를 등록 시점에 차단).
+    if (form.nfcUid.trim() && !isValidNfcUid(form.nfcUid)) {
+      return setError("NFC 카드번호 형식이 올바르지 않습니다\n카드에 적힌 16진수(예: 0453CE9A)를 입력해주세요");
+    }
     setLoading(true); setError("");
     try {
       const res = await importEmployees({
         companyId: codeData.companyId, partnerCode: code, partnerName: codeData.partnerName,
-        employees: [{ ...form, empNo: form.empNo.trim(), name: form.name.trim(), dept: form.dept.trim(), active: form.active, pinLocked: !!form.pinLocked }],
+        employees: [{ ...form, empNo: form.empNo.trim(), name: form.name.trim(), dept: form.dept.trim(), active: form.active, pinLocked: !!form.pinLocked, nfcUid: normalizeNfcUid(form.nfcUid) }],
         routes,
       });
       onDone(res);
@@ -392,6 +397,16 @@ function SingleRegMode({ codeData, code, routes, onDone }) {
           style={{ accentColor:"var(--color-primary)", width:16, height:16, cursor:"pointer" }} />
         <span style={{ fontSize:13, color:"var(--color-label)", fontWeight:500 }}>PIN 변경 잠금 (여러 명이 함께 쓰는 공용 계정)</span>
       </label>
+      {/* NFC 사원증(2026-07-22) — 기사앱 태깅 시 이 값으로 사람을 찾는다.
+          입력은 자유 형식(대소문자·콜론 허용)이고 저장은 normalizeNfcUid 로 통일. */}
+      <div>
+        <label style={S.label}>NFC 카드번호 (선택)</label>
+        <input style={S.input} placeholder="0453CE9A 또는 04:53:CE:9A"
+          value={form.nfcUid} onChange={e=>setForm({...form,nfcUid:e.target.value})} />
+        <div style={{ fontSize:11, color:"var(--color-label-alt)", marginTop:4, lineHeight:1.5 }}>
+          사원증 카드에 적힌 16진수 번호. 등록하면 기사앱에서 카드를 대는 것만으로 탑승 처리됩니다.
+        </div>
+      </div>
       {error && <div style={S.errorMsg}>{error}</div>}
       <div style={{ display:"flex", gap:8 }}>
         <button style={{ ...S.btn, opacity:loading?0.6:1 }} onClick={handleSave} disabled={loading}>
@@ -528,17 +543,23 @@ function EmployeeManageMode({ codeData, code, routes }) {
 
   const openEdit = (emp) => {
     setEditEmp(emp);
-    setEditForm({ name: emp.name||"", dept: emp.dept||"", routeCode: emp.routeCode||"", active: emp.active, pinLocked: !!emp.pinLocked });
+    setEditForm({ name: emp.name||"", dept: emp.dept||"", routeCode: emp.routeCode||"", active: emp.active, pinLocked: !!emp.pinLocked, nfcUid: emp.nfcUid||"" });
     setMsg(null);
   };
 
   const handleSave = async () => {
+    const rawUid = (editForm.nfcUid || "").trim();
+    if (rawUid && !isValidNfcUid(rawUid)) {
+      setMsg({ type: "error", text: "NFC 카드번호 형식이 올바르지 않습니다 (예: 0453CE9A)" });
+      return;
+    }
     setSaving(true); setMsg(null);
     try {
       const routeId = routes.find(r => r.code === editForm.routeCode || r.id === editForm.routeCode)?.id || editForm.routeCode;
       await updateDoc(
         doc(db, "companies", codeData.companyId, "passengers", editEmp.id),
-        { name: editForm.name.trim(), dept: editForm.dept.trim(), routeCode: editForm.routeCode, routeId, active: editForm.active, pinLocked: !!editForm.pinLocked, updatedAt: serverTimestamp() }
+        // nfcUid: 빈 입력이면 null 로 지운다(카드 분실·회수 시 해제 경로).
+        { name: editForm.name.trim(), dept: editForm.dept.trim(), routeCode: editForm.routeCode, routeId, active: editForm.active, pinLocked: !!editForm.pinLocked, nfcUid: rawUid ? normalizeNfcUid(rawUid) : null, updatedAt: serverTimestamp() }
       );
       setMsg({ type: "success", text: "저장되었습니다" });
       setTimeout(() => { setEditEmp(null); setMsg(null); }, 800);
@@ -609,9 +630,11 @@ function EmployeeManageMode({ codeData, code, routes }) {
                     <Pill tone={emp.active?"positive":"danger"} dot>{emp.active?"재직":"퇴사"}</Pill>
                     {emp.pinInitial && !emp.pinLocked && <Pill tone="warn">PIN미변경</Pill>}
                     {emp.pinLocked && <Pill tone="primary">🔒 PIN잠금</Pill>}
+                    {emp.nfcUid && <Pill tone="positive">📇 NFC</Pill>}
                   </div>
                   <div style={{ fontSize:12, color:"var(--color-label-mute)" }}>
                     {emp.dept || "부서없음"} · {emp.routeCode || "노선없음"}
+                    {emp.nfcUid && <> · <span style={{ fontFamily:"monospace" }}>{formatNfcUid(emp.nfcUid)}</span></>}
                   </div>
                 </div>
                 <div style={{ display:"flex", gap:4, flexShrink:0 }}>
@@ -656,6 +679,15 @@ function EmployeeManageMode({ codeData, code, routes }) {
                 style={{ accentColor:"var(--color-primary)", width:16, height:16, cursor:"pointer" }} />
               <span style={{ fontSize:13, color:"var(--color-label)", fontWeight:500 }}>PIN 변경 잠금 (여러 명이 함께 쓰는 공용 계정)</span>
             </label>
+
+            {/* NFC 사원증(2026-07-22) — 비우면 카드 해제(분실·회수). */}
+            <label style={S.label}>NFC 카드번호</label>
+            <input style={S.input} placeholder="0453CE9A 또는 04:53:CE:9A (비우면 해제)"
+              value={editForm.nfcUid || ""} onChange={e=>setEditForm({...editForm,nfcUid:e.target.value})} />
+            <div style={{ fontSize:11, color:"var(--color-label-alt)", lineHeight:1.5 }}>
+              사원증 카드의 16진수 번호. 등록 시 기사앱에서 카드 태깅만으로 탑승 처리됩니다.
+            </div>
+
             <div style={{ fontSize:11, color:"var(--color-label-alt)", lineHeight:1.5 }}>
               잠그면 승객앱 설정에서 PIN 변경 항목이 보이지 않습니다. PIN 재설정이 필요하면 목록의 “PIN초기화”를 사용하세요.
             </div>

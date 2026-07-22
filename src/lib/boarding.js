@@ -185,6 +185,21 @@ export async function validateAndBoardByDriver({
   return { routeName, vehicleNo, dispatchDate, empNo, name };
 }
 
+// ─── NFC 사원증 탑승 (2026-07-22) ─────────────────────────
+// 기사앱(Android Chrome)이 NDEFReader 로 읽은 카드 serial 을 서버에 넘겨 판정받는다.
+// 카드→탑승자 조회·미등록 기록(nfcRejects)·멱등 boarding 은 전부 CF boardNfc(Admin SDK).
+// 클라가 직접 못 하는 이유는 functions/index.js boardNfc 주석 참조(룰·정보노출·정규화).
+//
+// ⚠ **미등록 카드는 throw 가 아니라 `registered:false` 로 돌아온다** — 기사 화면이
+//   빨간 "미등록" UI 를 그려야 하고, throw 로 만들면 네트워크 오류와 구분이 안 된다.
+//   호출부는 반드시 `res.registered` 를 분기할 것(try/catch 만으론 미등록을 못 잡는다).
+export async function boardByNfc({ companyId, vehicleId, uid, selectedRouteId }) {
+  const { data } = await httpsCallable(functions, "boardNfc")({
+    companyId, vehicleId, uid, selectedRouteId: selectedRouteId || null,
+  });
+  return data; // { ok, registered, empNo?, name?, alreadyBoarded?, uid?, routeName, vehicleNo, dispatchDate, todayCount }
+}
+
 // ─── 유틸 ────────────────────────────────────────────────
 function generateTokenId() {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';

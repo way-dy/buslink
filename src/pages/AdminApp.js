@@ -15,6 +15,7 @@ import { forceReconnect } from "../lib/forceReconnect";
 import { createPartnerCode, getBoardingUrl } from "../lib/partner";
 // 정적(고정) QR — 차량별 인쇄용 URL 생성(2026-07-08 RQ#3)
 import { getStaticBoardingUrl } from "../lib/boarding";
+import { formatNfcUid } from "../lib/nfc";
 import { sendNotice } from "../lib/notifications";
 import { compressImageFile } from "../lib/image";
 // 개선 요청 게시판(2026-07-13) — 순수 data-access + 상수 + 인앱 안읽음(클라 전용)
@@ -42,8 +43,10 @@ import { ErrorBoundary } from "../components/ErrorBoundary";
 import InstallPrompt from "../components/InstallPrompt";
 import { applyAppManifest } from "../lib/pwaManifest";
 
-const TABS = ["대시보드", "실시간 관제", "배차 관리", "배차 일정", "노선 관리", "기사 관리", "차량 관리", "시뮬레이터", "운행 이력", "탑승 통계", "협력사 관리", "공지 발송", "개선 요청"];
-const TAB_ICONS = ["grid", "pin", "flag", "calendar", "route", "user", "bus", "play", "clock", "chart", "globe", "bell", "sparkle"];
+// ⚠ 탭 추가는 **배열 끝에만**. 아래 렌더 분기가 `tab === 0..N` 하드코딩이라 중간 삽입 시
+//   전 탭이 밀려 다른 화면이 뜬다(개선 요청 딥링크 `?imp=` 포함). 2026-07-22 부정승차 추가.
+const TABS = ["대시보드", "실시간 관제", "배차 관리", "배차 일정", "노선 관리", "기사 관리", "차량 관리", "시뮬레이터", "운행 이력", "탑승 통계", "협력사 관리", "공지 발송", "개선 요청", "부정승차"];
+const TAB_ICONS = ["grid", "pin", "flag", "calendar", "route", "user", "bus", "play", "clock", "chart", "globe", "bell", "sparkle", "eye"];
 // "개선 요청"(인덱스 12) = 모든 admin/superadmin 노출(회사관리처럼 superadmin 한정 아님).
 // SUPER_TAB_INDEX 는 TABS.length 로 동적 계산 → 회사 관리 탭은 자동으로 13 으로 밀림.
 
@@ -342,7 +345,8 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
         {tab === 9 && <ErrorBoundary label="탑승 통계"><BoardingStatsTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
         {tab === 10 && <ErrorBoundary label="협력사 관리"><PartnerTab companyId={activeCompanyId} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
         {tab === 11 && <ErrorBoundary label="공지 발송"><NoticeTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
-        {tab === 12 && <ErrorBoundary label="개선 요청"><ImprovementTab companyId={activeCompanyId} user={user} role={role} companies={companies} deepLinkId={improveDeepLinkId} onDeepLinkConsumed={() => setImproveDeepLinkId(null)} /></ErrorBoundary>}
+        {tab === IMPROVE_TAB_INDEX && <ErrorBoundary label="개선 요청"><ImprovementTab companyId={activeCompanyId} user={user} role={role} companies={companies} deepLinkId={improveDeepLinkId} onDeepLinkConsumed={() => setImproveDeepLinkId(null)} /></ErrorBoundary>}
+        {tab === 13 && <ErrorBoundary label="부정승차"><NfcRejectTab companyId={activeCompanyId} /></ErrorBoundary>}
         {/* SaaS Phase 1.2 — 슈퍼관리자 전용 회사 관리 탭(인덱스=TABS.length). 일반 admin 비표시. */}
         {isSuperAdmin && tab === SUPER_TAB_INDEX && (
           <ErrorBoundary label="회사 관리">
@@ -5555,6 +5559,140 @@ const S = {
   label:{fontSize:12,fontWeight:600,color:"var(--color-label-mute)",marginTop:4},
   input:{background:"var(--color-bg)",border:"1px solid var(--color-line)",borderRadius:8,padding:"10px 14px",color:"var(--color-label)",fontSize:14,outline:"none",fontFamily:"inherit",width:"100%",boxSizing:"border-box"},
 };
+
+// ═══════════════════════════════════════════════════════
+// 부정승차(NFC 미등록 카드) 현황 — 2026-07-22
+//
+// 기사앱 NFC 태깅에서 passengers 에 매칭되는 nfcUid 가 없던 건. CF boardNfc 가
+// `companies/{cid}/nfcRejects/{date}/list` 에 적재한다(boardings 와 분리 — 탑승
+// 통계·정류장 매핑 집계 오염 방지). 레거시 버스인3 의 "부정승차현황"에 대응.
+//
+// rules: read=isAdmin(companyId), write=false(CF Admin SDK 전용) → 조회만.
+// ═══════════════════════════════════════════════════════
+function NfcRejectTab({ companyId }) {
+  const todayStr = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
+  const [date, setDate] = useState(todayStr);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [copiedUid, setCopiedUid] = useState(null);
+
+  useEffect(() => {
+    if (!companyId || !date) return;
+    setLoading(true);
+    const q = query(
+      collection(db, "companies", companyId, "nfcRejects", date, "list"),
+      orderBy("taggedAt", "desc")
+    );
+    const unsub = onSnapshot(q,
+      (snap) => { setRows(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false); },
+      () => { setRows([]); setLoading(false); } // 인덱스/권한 오류 시 빈 목록(화면 크래시 금지)
+    );
+    return () => unsub();
+  }, [companyId, date]);
+
+  // 같은 카드가 여러 번 찍힌 경우를 카드 단위로 묶어 보여준다(운영자는 "누구 카드인지
+  // 모를 카드가 몇 장 돌아다니는가"를 먼저 알아야 한다 — 태깅 건수가 아니라 카드 수).
+  const byUid = (() => {
+    const m = new window.Map(); // ⚠ 카카오 SDK `Map` import shadow 회피(파일 관례)
+    rows.forEach(r => {
+      const k = r.nfcUid || "-";
+      if (!m.has(k)) m.set(k, { uid: k, count: 0, routes: new Set(), vehicles: new Set(), lastAt: null });
+      const e = m.get(k);
+      e.count++;
+      if (r.routeName) e.routes.add(r.routeName);
+      if (r.vehicleNo) e.vehicles.add(r.vehicleNo);
+      const ms = r.taggedAt?.toMillis ? r.taggedAt.toMillis() : null;
+      if (ms && (!e.lastAt || ms > e.lastAt)) e.lastAt = ms;
+    });
+    return [...m.values()].sort((a, b) => b.count - a.count);
+  })();
+
+  const fmtTime = (ts) => {
+    const ms = ts?.toMillis ? ts.toMillis() : (typeof ts === "number" ? ts : null);
+    if (!ms) return "-";
+    return new Intl.DateTimeFormat("ko-KR", {
+      timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false,
+    }).format(new Date(ms));
+  };
+
+  return (
+    <div style={S.panel}>
+      <div style={S.panelHeader}>
+        <span style={{ fontSize: 16, fontWeight: 700 }}>부정승차 (NFC 미등록 카드)</span>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <input type="date" value={date} onChange={e => { if (e.target.value) setDate(e.target.value); }} style={S.dateInput} />
+        </div>
+      </div>
+
+      <div style={S.statGrid}>
+        <div>
+          <div style={{ fontSize: 11, color: "var(--color-label-mute)" }}>태깅 건수</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "var(--color-destructive)" }}>{rows.length}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: "var(--color-label-mute)" }}>미등록 카드 수</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "var(--color-label)" }}>{byUid.length}</div>
+        </div>
+      </div>
+
+      <div style={S.tableWrap}>
+        <div style={{ padding: "10px 14px 4px", fontSize: 12, fontWeight: 700, color: "var(--color-label-mute)" }}>카드별 요약</div>
+        <table style={S.table}>
+          <thead><tr>{["카드번호", "태깅 횟수", "노선", "차량", "마지막 태깅"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {loading ? <tr><td colSpan={5} style={{ ...S.td, textAlign: "center", color: "var(--color-label-alt)" }}>불러오는 중…</td></tr>
+              : byUid.length === 0 ? <tr><td colSpan={5} style={{ ...S.td, textAlign: "center", color: "var(--color-label-alt)" }}>이 날짜에 미등록 카드 태깅이 없습니다</td></tr>
+                : byUid.map(e => (
+                  <tr key={e.uid} style={S.tr}>
+                    <td style={{ ...S.td, fontFamily: "monospace", fontWeight: 700 }}>
+                      {formatNfcUid(e.uid)}
+                      {/* 등록으로 이어지는 고리 — 관리자가 이 번호를 협력사 포털 승객 정보에
+                          붙여넣으면 다음 태깅부터 정상 처리된다(카드 UID 확보 경로). */}
+                      <button style={{ ...S.editBtn, marginLeft: 8 }}
+                        onClick={() => {
+                          navigator.clipboard?.writeText(e.uid)
+                            .then(() => setCopiedUid(e.uid))
+                            .catch(() => {});
+                        }}>
+                        {copiedUid === e.uid ? "✓ 복사됨" : "복사"}
+                      </button>
+                    </td>
+                    <td style={S.td}><span style={{ ...S.statusBadge, background: "#FCE5E5", color: "var(--color-destructive)" }}>{e.count}회</span></td>
+                    <td style={S.td}>{[...e.routes].join(", ") || "-"}</td>
+                    <td style={S.td}>{[...e.vehicles].join(", ") || "-"}</td>
+                    <td style={S.td}>{fmtTime(e.lastAt)}</td>
+                  </tr>
+                ))}
+          </tbody>
+        </table>
+
+        {rows.length > 0 && (
+          <>
+            <div style={{ padding: "18px 14px 4px", fontSize: 12, fontWeight: 700, color: "var(--color-label-mute)" }}>태깅 기록</div>
+            <table style={S.table}>
+              <thead><tr>{["시각", "카드번호", "노선", "차량"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.id} style={S.tr}>
+                    <td style={S.td}>{fmtTime(r.taggedAt)}</td>
+                    <td style={{ ...S.td, fontFamily: "monospace" }}>{formatNfcUid(r.nfcUid)}</td>
+                    <td style={S.td}>{r.routeName || "-"}</td>
+                    <td style={S.td}>{r.vehicleNo || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+
+        <div style={{ padding: "14px", fontSize: 11, color: "var(--color-label-alt)", lineHeight: 1.7 }}>
+          미등록 카드는 <b>탑승 인원에 포함되지 않습니다</b>. 실제 이용자라면 협력사 포털의
+          승객 정보에서 <b>NFC 카드번호</b>를 등록하면 다음 태깅부터 정상 처리됩니다.
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ═══════════════════════════════════════════════════════
 // SaaS Phase 1.2 (2026-05-28) — 슈퍼관리자 회사 관리 탭

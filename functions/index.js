@@ -600,6 +600,155 @@ exports.boardStatic = onCall(async (request) => {
 });
 
 // ════════════════════════════════════════════════════════
+// NFC 사원증 탑승 (2026-07-22) — 기사앱 Web NFC 태깅 → 서버 판정
+//
+// 레거시 버스인3 의 "기사용 NFC 탑승"을 buslink 로 이식. 기사 폰(Android Chrome)이
+// NDEFReader 로 카드 serial 을 읽어 이 함수를 호출하면 서버가 판정한다.
+//
+// 왜 CF 위임인가(클라 직접 조회 아님):
+//  ① 미등록 카드 기록(nfcRejects)은 companies/** 하위라 write 룰이 admin 전용 —
+//     기사(role=driver)는 거부된다. Admin SDK 우회가 필요.
+//  ② `passengers where nfcUid ==` 를 클라가 돌리면 카드-사람 매핑 전체가 기사 단말에
+//     노출될 수 있다. 서버는 매칭된 1건만 돌려준다.
+//  ③ UID 정규화를 서버에서 한 번 더 강제(클라 정규화 누락 시에도 계약 유지).
+//
+// 입력: { companyId, vehicleId, uid, selectedRouteId? }
+// 반환(정상): { ok:true, registered:true, empNo, name, alreadyBoarded, routeName, vehicleNo, dispatchDate, todayCount }
+// 반환(미등록): { ok:true, registered:false, uid, routeName, vehicleNo, dispatchDate, todayCount }
+//   — 미등록도 **throw 하지 않는다**. 기사 화면이 빨간 "미등록" UI 를 그려야 하고,
+//     throw 로 만들면 네트워크 오류와 구분이 안 된다.
+// ════════════════════════════════════════════════════════
+
+// UID 정규화 — 클라 src/lib/nfc.js normalizeNfcUid 와 **동일 계약**(소문자 hex·구분자 제거).
+// 두 곳이 어긋나면 등록값과 조회값이 안 맞아 전원 미등록으로 떨어진다(회귀 가드).
+function normalizeNfcUidServer(raw) {
+  if (raw == null) return "";
+  return String(raw).toLowerCase().replace(/[^0-9a-f]/g, "");
+}
+
+exports.boardNfc = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
+
+  const { companyId, vehicleId, uid, selectedRouteId } = request.data || {};
+  if (!companyId || typeof companyId !== "string") {
+    throw new HttpsError("invalid-argument", "companyId가 필요합니다");
+  }
+  if (!vehicleId || typeof vehicleId !== "string") {
+    throw new HttpsError("invalid-argument", "vehicleId가 필요합니다");
+  }
+  const cleanUid = normalizeNfcUidServer(uid);
+  if (!cleanUid) throw new HttpsError("invalid-argument", "카드 정보를 읽지 못했습니다");
+
+  const db = admin.firestore();
+
+  // 호출자 권한 — 기사 또는 관리자, 그리고 **같은 회사**. recordStopArrival 패턴 미러.
+  // (익명 인증 승객이 남의 회사 카드를 긁어보는 것 차단)
+  const userSnap = await db.collection("users").doc(request.auth.uid).get();
+  const user = userSnap.exists ? (userSnap.data() || {}) : {};
+  if (!["driver", "admin", "superadmin"].includes(user.role)) {
+    throw new HttpsError("permission-denied", "기사 또는 관리자만 태깅할 수 있습니다");
+  }
+  if (user.role !== "superadmin" && user.companyId !== companyId) {
+    throw new HttpsError("permission-denied", "다른 회사의 태깅은 허용되지 않습니다");
+  }
+
+  // 오늘 배차 해석(비면 failed-precondition) — 정적 QR 과 동일 헬퍼(로직 중복 0).
+  const { today, routeId, routeName, driverId, vehicleNo } =
+    await resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRouteId);
+
+  // 카드 → 탑승자 조회. 단일 필드 동등 쿼리라 복합 인덱스 불요(자동 인덱스).
+  const passSnap = await db
+    .collection("companies").doc(companyId)
+    .collection("passengers")
+    .where("nfcUid", "==", cleanUid).limit(1).get();
+
+  const boardingsCol = db
+    .collection("companies").doc(companyId)
+    .collection("boardings").doc(today).collection("list");
+
+  // 오늘 이 차량 탑승 인원 — 기사 화면 카운터. swstagsys 는 메모리 카운트라
+  // 새로고침 시 0 이 되는 약점이 있었다(그쪽 issues.md 🟡) → 서버 집계로 해소.
+  const countToday = async () => {
+    try {
+      const agg = await boardingsCol.where("vehicleId", "==", vehicleId).count().get();
+      return agg.data().count;
+    } catch (_) { return null; } // 집계 실패는 화면 카운터만 생략(탑승은 이미 기록됨)
+  };
+
+  // ── 미등록 카드(부정승차) — boardings 를 오염시키지 않고 별도 기록 ──
+  if (passSnap.empty) {
+    try {
+      await db
+        .collection("companies").doc(companyId)
+        .collection("nfcRejects").doc(today).collection("list").add({
+          companyId, nfcUid: cleanUid,
+          routeId, routeName, vehicleId, vehicleNo, driverId,
+          reason: "unregistered",
+          taggedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+    } catch (e) {
+      console.warn(`[boardNfc] reject 기록 실패 cid=${companyId} uid=${cleanUid}: ${e.message}`);
+    }
+    console.log(`[boardNfc] UNREGISTERED cid=${companyId} veh=${vehicleId} uid=${cleanUid}`);
+    return {
+      ok: true, registered: false, uid: cleanUid,
+      routeName, vehicleNo, dispatchDate: today, todayCount: await countToday(),
+    };
+  }
+
+  const pass = passSnap.docs[0].data() || {};
+  const empNo = String(pass.empNo || passSnap.docs[0].id || "").trim();
+  const name = String(pass.name || "").trim();
+
+  // 비활성 탑승자도 **탑승은 기록**하되 미등록과 구분(운영자가 사후 판단).
+  // 여기서 차단하면 퇴사 처리 지연 등으로 정상 출근자가 버스 앞에서 막힌다.
+
+  // 차량 GPS 캡처 — boardStatic 과 동일(정류장 사후 매핑용).
+  let vehicleLat = null, vehicleLng = null, vehicleSpeed = null;
+  try {
+    const gpsSnap = await db.collection("gps").doc(`${companyId}_${vehicleId}`).get();
+    if (gpsSnap.exists) {
+      const g = gpsSnap.data() || {};
+      vehicleLat = typeof g.lat === "number" ? g.lat : null;
+      vehicleLng = typeof g.lng === "number" ? g.lng : null;
+      vehicleSpeed = typeof g.speed === "number" ? g.speed : null;
+    }
+  } catch (_) { /* GPS 미수신 → null, 탑승 자체는 진행 */ }
+
+  // 멱등 boarding — 정적 QR 과 **동일한 결정적 doc id**(직원 1인 × 차량 × 당일 1건).
+  // 같은 사람이 QR 로 이미 탔으면 NFC 태깅이 중복 적재하지 않는다(모드 간 멱등도 확보).
+  const boardingRef = boardingsCol.doc(`${empNo}__${vehicleId}`);
+  const existing = await boardingRef.get();
+  if (existing.exists) {
+    return {
+      ok: true, registered: true, empNo, name, alreadyBoarded: true,
+      routeName, vehicleNo, dispatchDate: today, todayCount: await countToday(),
+    };
+  }
+
+  await boardingRef.set({
+    empNo,
+    name,
+    tokenId: "",                 // NFC 는 토큰 없음(스키마 자리 유지)
+    companyId, routeId, routeName,
+    vehicleId, vehicleNo, driverId,
+    stopId: "",
+    stopName: "",
+    partnerCode: pass.partnerCode || null,
+    vehicleLat, vehicleLng, vehicleSpeed,
+    via: "nfc",                  // 탑승 모드 식별(기존 통계 read 호환·옵셔널)
+    nfcUid: cleanUid,
+    boardedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  console.log(`[boardNfc] cid=${companyId} veh=${vehicleId} emp=${empNo} uid=${cleanUid}`);
+  return {
+    ok: true, registered: true, empNo, name, alreadyBoarded: false,
+    routeName, vehicleNo, dispatchDate: today, todayCount: await countToday(),
+  };
+});
+
+// ════════════════════════════════════════════════════════
 // SaaS Phase 1.4 (2026-05-29) — 협력사 공지 발송 (onCall)
 //
 // 협력사 인사 담당이 자기 직원에게 직접 공지 발송.

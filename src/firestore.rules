@@ -93,6 +93,13 @@ service cloud.firestore {
         allow create: if isAuth();
         allow update, delete: if isAdmin(companyId);
       }
+
+      // NFC 미등록 카드 태깅 기록 (부정승차, 2026-07-22)
+      // write 는 CF(Admin SDK) 전용 — 클라 위조 차단. 조회는 관리자만.
+      match /nfcRejects/{date}/list/{rejectId} {
+        allow read:  if isAdmin(companyId);
+        allow write: if false;
+      }
     }
 
     // ─── GPS 실시간 위치 ─────────────────────────────────

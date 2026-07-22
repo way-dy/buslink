@@ -11,7 +11,9 @@
 > **2026-07-16 회의 전사 환각 — 진단 확정·정본 교체 완료**: dev_recording 녹음이 **무음**(295KB/20분=250B/s, Gemini 검청 "말소리 없음") → 요약·전문 둘 다 환각(운수사 5건/지불 109건, 실안건과 겹침 0). 환각 md 폐기, **정본 = 사용자 제공 전사(`RQ/20260716/`) 기반 `meetings/2026-07-16_추가개선사항미팅.md` 재작성**. Firestore doc status:error 마킹·sync.js 무음 게이트(<1,000B/s 전사 차단) 추가(dev_recording repo). 실안건 6건은 "다음 할 일" 최상단.
 > **2026-07-16 세션 3건(전부 prod 배포·커밋)**: ① 개선요청 웹훅 카드 base64 원문 노출 fix(CF `onImprovementRequestCreate`·`improvementPreviewText` 헬퍼·`8dfc3d3`) ② 배시현 게시판 요청 — 직원앱 내 정류장 카드 "운행 종료" 표기(`lib/runStatus.js` 순수 판정·`fb28514`·prod `main.7fd830f5.js`·게시판 done) ③ 개선요청 게시판 ↻ 새로고침 버튼(ImprovementTab — MapTab #2 `forceReconnect`+refreshTick 패턴 미러·stale 리스너 수동 재구독·prod `main.cbbabc98.js`). rules/indexes 변경 0.
 
-> **2026-07-22 세션(배차 복사 실행상태 복제 근절·prod 배포)**: 승인된 `clean_stale_arrivals.cjs --apply` 를 실행하려다 dry-run 수치 증가(69/122→120/215)와 **미래 날짜 배차의 도착기록**을 보고 발생원 재수색 → `handleCopyDispatches` 의 `{...data}` 스프레드가 `stopArrivals`·`preArrivalNotified` 까지 복제하던 것 확정(prod 필드 분포 실측). 명시 필드 화이트리스트로 교체·prod `main.3a183a76.js` 배포. 청소 스크립트는 미래일 `preArrivalNotified` 까지 처리하도록 확장. way 가 직접 `--apply` 실행 → **120배차 정리·재검증 0건/0건**. 상세 issues.md `[해결]`.
+> **2026-07-22 세션 B(NFC 사원증 탑승 신설·prod 배포)**: way 요청 — 레거시 버스인3 NFC 태깅(`file/20260722/*.pptx` 20슬라이드)과 `swsfirebase/swstagsys`(Web NFC 선례)를 참고해 buslink 에 이식. 탑승 모드 4번째. 신규 `src/lib/nfc.js`(순수·격리 테스트 36케이스) + CF `boardNfc` + DriverApp NFC 탭 + PartnerApp 카드번호 등록 + AdminApp "부정승차" 탭. prod `main.3d678744.js` + `firestore:rules` + `functions:boardNfc`(카나리아 401=우리 핸들러 확인). 신규 경고 0(35↔35). **실기기 검증 대기** — Web NFC 는 헤드리스 불가. 상세 issues.md `[패턴]`.
+
+> **2026-07-22 세션 A(배차 복사 실행상태 복제 근절·prod 배포)**: 승인된 `clean_stale_arrivals.cjs --apply` 를 실행하려다 dry-run 수치 증가(69/122→120/215)와 **미래 날짜 배차의 도착기록**을 보고 발생원 재수색 → `handleCopyDispatches` 의 `{...data}` 스프레드가 `stopArrivals`·`preArrivalNotified` 까지 복제하던 것 확정(prod 필드 분포 실측). 명시 필드 화이트리스트로 교체·prod `main.3a183a76.js` 배포. 청소 스크립트는 미래일 `preArrivalNotified` 까지 처리하도록 확장. way 가 직접 `--apply` 실행 → **120배차 정리·재검증 0건/0건**. 상세 issues.md `[해결]`.
 
 ## 현재 상태 (2026-07-13 세션 종료)
 > 이 저장소가 작업 정본. **어느 PC든** `git pull`(origin/master) + `.env.local`(↓부트스트랩, 카카오 키 `58bf34`)이면 빌드·배포 가능.
@@ -40,6 +42,8 @@
 
 ## 다음 할 일
 - [x] **배차 복제 실행상태 정리 완료(2026-07-22, way 직접 `--apply`)**: 근본 원인(배차 복사 스프레드) 수정·배포(`main.3a183a76.js`) 후 데이터 청소 실행 — **정리 배차 120건**(잔존 도착기록 215건 + 미래일 푸시마커 22건 제거). 재-dry-run 검증 = 630배차 전수 **0건/0건**. 도착시각 기록·도착 임박 푸시 정상 경로 복구.
+- [ ] **🔴 NFC 실기기 검증(2026-07-22)** — Web NFC 는 헤드리스 테스트가 불가하다. **안드로이드 폰 + 실제 사원증 카드**로: ① 기사앱 `/driver` 운행 시작 → NFC 탭 노출 확인(아이폰이면 탭이 안 보이는 게 정상) ② "사원증 태깅 시작" → 권한 프롬프트 → 카드 태깅 ③ 미등록 카드 = 빨간 "미등록 카드" + UID 표시, 카운트 불변 ④ 관리자 "부정승차" 탭에서 그 UID 복사 → 협력사 포털 승객 수정에 붙여넣기 → 재태깅 시 "승차 완료"+카운트 증가 ⑤ 같은 카드 재태깅 = "이미 탑승 처리됨"(중복 적재 0)
+- [ ] **(운영 판단) NFC 도입 범위 결정** — 현재 등록된 카드 0장이라 기능은 켜져 있어도 아무 동작 없음(회귀 0). 실제 도입하려면 ⓐ 어떤 거래처부터 쓸지 ⓑ 카드 UID 확보 방식(카드 인쇄번호 vs 미등록 태깅 후 복사) ⓒ 기사 폰이 안드로이드인지 확인 필요.
 - [ ] **(운영 판단) 중복 배차 확인(2026-07-22)**: 오염 구간 07-13~07-24 는 하루 배차 35건, 깨끗한 날(07-17/18/25/28)은 13~15건 — 복사가 배차 행 자체를 늘린 정황. 완전중복(routeId+departTime+vehicleId 동일)은 하루 3건뿐이라 나머지는 코드로 판별 불가. 배차관리 화면에서 07-23·07-24 보고 불필요분 삭제 여부 판단 필요.
 - [ ] **RQ/20260716 추가개선사항미팅 6건** (정본=`meetings/2026-07-16_추가개선사항미팅.md`·원 전사 `RQ/20260716/meeting.txt`):
   - [x] **#1 🔴 QR 오탑승 차단 + 선택 노선 매핑 (2026-07-16 prod 배포 `main.ab0d10a9.js` + CF `resolveStaticBoarding`/`boardStatic`·커밋 `2de00df`)**: `resolveStaticDispatchAdmin` selectedRouteId 매칭(불일치=차단·다중 회차=현재시각 근접)·직원앱 스캐너 session.routeId 전달·BoardingApp 무변경. 격리 7 assertion·신규 경고 0. **사용자 실기기 검증 대기**(카메라 스캔 자동화 불가): 7:10 선택→7:50 차량 태깅 시 "선택한 노선의 차량이 아닙니다" 확인. 상세 issues.md `[패턴]`.

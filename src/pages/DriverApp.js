@@ -9,7 +9,8 @@ import { buildCumulativeLengths, projectToPolyline } from "../lib/routeProgress"
 import { buildRunId, recordEtaDiagnostic, throttleGate } from "../lib/etaDiag";
 import { ensureGeolocationPermission } from "../lib/usePermissions";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
-import { createBoardingToken, getBoardingUrl, validateAndBoardByDriver } from "../lib/boarding";
+import { createBoardingToken, getBoardingUrl, validateAndBoardByDriver, boardByNfc } from "../lib/boarding";
+import { isWebNfcSupported, normalizeNfcUid, formatNfcUid, createTagCooldown } from "../lib/nfc";
 import QRCode from "qrcode";
 import jsQR from "jsqr";
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
@@ -1035,12 +1036,15 @@ export default function DriverApp({ companyId: propCompanyId }) {
           </button>
         )}
 
-        {/* 탭 전환 — 항상 표시. passenger-qr 모드는 라벨이 'QR 스캔'(기사가 스캔측). */}
+        {/* 탭 전환 — 항상 표시. passenger-qr 모드는 라벨이 'QR 스캔'(기사가 스캔측).
+            NFC 탭(2026-07-22)은 Web NFC 지원 단말(안드로이드 크롬)에서만 노출 —
+            아이폰·PC 기사에게 눌러도 안 되는 탭을 보여주지 않는다(탭 안에서 다시 안내). */}
         <div style={S.tabRow}>
-          {["운행", "탑승 QR"].map(tab => (
+          {["운행", "탑승 QR", ...(isWebNfcSupported() ? ["NFC"] : [])].map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
               style={{ ...S.tabBtn, ...(activeTab === tab ? S.tabBtnActive : S.tabBtnIdle) }}>
-              {tab === "탑승 QR" && <Icon name="qr" size={16} />} {tab === "탑승 QR" && boardingMode === "passenger-qr" ? "QR 스캔" : tab}
+              {tab === "탑승 QR" && <Icon name="qr" size={16} />} {tab === "NFC" && "📇 "}
+              {tab === "탑승 QR" && boardingMode === "passenger-qr" ? "QR 스캔" : tab}
             </button>
           ))}
         </div>
@@ -1289,6 +1293,21 @@ export default function DriverApp({ companyId: propCompanyId }) {
             dispatch={dispatch}
             currentStop={(currentStopIdx >= 0 && stops[currentStopIdx]) ? stops[currentStopIdx] : null}
           />
+        )}
+
+        {/* ─ NFC 탭 (2026-07-22) — QR 과 동일하게 운행 중에만 활성 ─
+            서버가 "오늘 이 차량 배차"로 노선을 해석하므로 배차·운행 상태가 전제. */}
+        {activeTab === "NFC" && !driving && (
+          <div style={S.qrNotice}>
+            <span style={{ fontSize: 26 }}>📇</span>
+            <div>
+              <div style={S.qrNoticeTitle}>운행 시작 후 태깅이 활성화됩니다</div>
+              <div style={S.qrNoticeSub}>운행 시작 버튼을 누른 뒤 사원증을 태그해주세요</div>
+            </div>
+          </div>
+        )}
+        {activeTab === "NFC" && driving && (
+          <DriverNfcTag companyId={companyId} driver={driver} dispatch={dispatch} />
         )}
       </div>
 
@@ -1778,6 +1797,221 @@ function DriverPassengerScan({ companyId, driver, dispatch, currentStop }) {
           <button onClick={reset} style={{ ...S.primaryBtn, maxWidth: 280 }}>다시 시도</button>
         </>
       )}
+    </div>
+  );
+}
+
+// ─── NFC 사원증 태깅 (2026-07-22) ─────────────────────────
+// 레거시 버스인 "기사용 NFC 탑승" 이식. 카드를 대면 서버(CF boardNfc)가 판정해
+// 등록/이미탑승/미등록 을 돌려주고, 화면은 그 결과만 그린다(판정 로직 클라 0).
+//
+// ⚠ Web NFC 는 **Android Chrome + HTTPS 전용**. iOS Safari·데스크톱엔 NDEFReader 가
+//   아예 없다 → 미지원 단말은 기능을 숨기지 말고 **QR 폴백을 안내**한다(정직 안내).
+// ⚠ `scan()` 은 반드시 **사용자 제스처** 안에서 호출해야 권한 프롬프트가 뜬다
+//   (마운트 시 자동 호출하면 조용히 거부됨) → "태깅 시작" 버튼 필수.
+function DriverNfcTag({ companyId, driver, dispatch }) {
+  const supported = isWebNfcSupported();
+  const [scanning, setScanning] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
+  const [last, setLast] = useState(null);   // { kind:'ok'|'dup'|'unknown', name, empNo, uid }
+  const [count, setCount] = useState(null); // 서버 집계 탑승 인원(오늘·이 차량)
+  const abortRef = useRef(null);
+  const audioRef = useRef(null);
+  const cooldownRef = useRef(createTagCooldown(2000));
+  const busyRef = useRef(false);
+
+  const vehicleId = dispatch?.vehicleId || driver?.vehicleId || "";
+
+  // 언마운트 시 스캔 중단 — AbortController 없이 두면 탭을 떠나도 리더가 계속 살아있다.
+  useEffect(() => {
+    return () => { try { abortRef.current?.abort(); } catch (_) {} };
+  }, []);
+
+  // 비프음 — 사용자 제스처(태깅 시작) 안에서 AudioContext 를 만들어야 소리가 난다
+  // (swstagsys unlockAudio 선례: 제스처 밖에서 만들면 suspended 상태로 무음).
+  const beep = (ok) => {
+    try {
+      const ctx = audioRef.current;
+      if (!ctx) return;
+      const play = (freq, at, dur) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.18, ctx.currentTime + at);
+        osc.start(ctx.currentTime + at);
+        osc.stop(ctx.currentTime + at + dur);
+      };
+      if (ok) play(880, 0, 0.12);
+      else { play(300, 0, 0.12); play(300, 0.16, 0.12); play(300, 0.32, 0.12); }
+    } catch (_) { /* 오디오 실패는 무시 — 태깅 자체와 무관 */ }
+  };
+
+  const start = async () => {
+    setErrMsg("");
+    try {
+      // 제스처 컨텍스트에서 오디오 언락
+      if (!audioRef.current) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) audioRef.current = new AC();
+      }
+      if (audioRef.current?.state === "suspended") await audioRef.current.resume().catch(() => {});
+
+      const ndef = new window.NDEFReader();
+      const ac = new AbortController();
+      abortRef.current = ac;
+      await ndef.scan({ signal: ac.signal });
+      ndef.onreadingerror = () => setErrMsg("카드를 읽지 못했습니다. 다시 태그해주세요");
+      ndef.onreading = (event) => { handleTag(event?.serialNumber); };
+      setScanning(true);
+    } catch (e) {
+      setScanning(false);
+      setErrMsg(
+        e?.name === "NotAllowedError"
+          ? "NFC 권한이 거부되었습니다.\n브라우저 설정에서 이 사이트의 NFC 를 허용해주세요"
+          : e?.name === "NotSupportedError"
+            ? "이 기기에서는 NFC 를 사용할 수 없습니다"
+            : "NFC 시작 오류: " + (e?.message || e)
+      );
+    }
+  };
+
+  const stop = () => {
+    try { abortRef.current?.abort(); } catch (_) {}
+    abortRef.current = null;
+    setScanning(false);
+  };
+
+  const handleTag = async (serial) => {
+    const uid = normalizeNfcUid(serial);
+    if (!uid) return;
+    // 카드를 대고 있으면 onreading 이 연속 발화 → 쿨다운으로 중복 호출 차단.
+    if (!cooldownRef.current(uid)) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
+    try {
+      const r = await boardByNfc({
+        companyId, vehicleId, uid,
+        selectedRouteId: dispatch?.routeId || null,
+      });
+      if (typeof r.todayCount === "number") setCount(r.todayCount);
+      // ⚠ 미등록은 throw 가 아니라 registered:false 로 온다(boarding.js 주석 참조).
+      if (!r.registered) {
+        setLast({ kind: "unknown", uid: r.uid || uid });
+        beep(false);
+        if ("vibrate" in navigator) navigator.vibrate([200, 80, 200]);
+      } else if (r.alreadyBoarded) {
+        setLast({ kind: "dup", name: r.name, empNo: r.empNo });
+        beep(true);
+        if ("vibrate" in navigator) navigator.vibrate(60);
+      } else {
+        setLast({ kind: "ok", name: r.name, empNo: r.empNo });
+        beep(true);
+        if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]);
+      }
+      setErrMsg("");
+    } catch (e) {
+      // 네트워크·배차없음 등 진짜 오류만 여기로 온다.
+      setErrMsg(e?.message || String(e));
+      beep(false);
+    } finally {
+      busyRef.current = false;
+    }
+  };
+
+  // ── 미지원 단말: 숨기지 말고 이유 + 대안 안내 ──
+  if (!supported) {
+    return (
+      <div style={S.qrNotice}>
+        <span style={{ fontSize: 26 }}>📵</span>
+        <div>
+          <div style={S.qrNoticeTitle}>이 기기는 NFC 태깅을 지원하지 않습니다</div>
+          <div style={S.qrNoticeSub}>
+            NFC 태깅은 <b>안드로이드 크롬</b>에서만 동작합니다(아이폰·PC 미지원).
+            <br />이 기기에서는 <b>탑승 QR</b> 탭을 사용해주세요.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const tone =
+    last?.kind === "ok" ? { bg: "#E6F7EB", bd: "var(--color-positive)", fg: "#007A29" }
+      : last?.kind === "dup" ? { bg: "var(--color-primary-soft)", bd: "var(--color-primary)", fg: "var(--color-primary-deep)" }
+        : { bg: "var(--color-atomic-red-90)", bd: "var(--color-destructive)", fg: "var(--color-destructive)" };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, width: "100%" }}>
+      {/* 노선 + 오늘 탑승 인원 — 레거시 버스인 태깅 화면 구성 */}
+      <div style={S.qrRouteBox}>
+        <div style={S.qrRouteLabel}>노선</div>
+        <div style={S.qrRouteVal}>{dispatch?.routeName || "-"}</div>
+      </div>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 12, color: "var(--color-label-mute)", marginBottom: 2 }}>오늘 이 차량 탑승</div>
+        <div style={{ fontSize: 44, fontWeight: 900, lineHeight: 1.1, color: "var(--color-primary-deep)" }}>
+          {count == null ? "–" : count}
+        </div>
+      </div>
+
+      {!scanning ? (
+        <>
+          <div style={{ fontSize: 13, color: "var(--color-label-mute)", textAlign: "center", lineHeight: 1.6 }}>
+            태깅을 시작하면 사원증을 대는 즉시 탑승이 기록됩니다
+          </div>
+          <button onClick={start} style={{ ...S.primaryBtn, maxWidth: 280 }}>사원증 태깅 시작</button>
+        </>
+      ) : (
+        <>
+          <div style={{
+            width: 110, height: 110, borderRadius: "50%",
+            background: "var(--color-primary-soft)", border: "2px solid var(--color-primary)",
+            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 46,
+            animation: "blpulse 2.4s ease-out infinite",
+          }}>📇</div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "var(--color-primary-deep)" }}>사원증을 태그해주세요</div>
+          <div style={{ fontSize: 11, color: "var(--color-label-alt)", textAlign: "center", lineHeight: 1.6 }}>
+            폰 뒷면 NFC 위치에 카드를 대주세요 (기종마다 위치가 다릅니다)
+          </div>
+        </>
+      )}
+
+      {/* 최근 태깅 결과 */}
+      {last && (
+        <div style={{
+          width: "100%", maxWidth: 340, borderRadius: 14, padding: "14px 16px",
+          background: tone.bg, border: `2px solid ${tone.bd}`, textAlign: "center",
+        }}>
+          {last.kind === "unknown" ? (
+            <>
+              <div style={{ fontSize: 20, fontWeight: 900, color: tone.fg }}>미등록 카드</div>
+              <div style={{ fontSize: 12, color: "var(--color-label-mute)", marginTop: 4 }}>
+                등록되지 않은 사원증입니다 (탑승 인원에 포함되지 않음)
+              </div>
+              <div style={{ fontSize: 11, color: "var(--color-label-alt)", marginTop: 6, fontFamily: "monospace" }}>
+                {formatNfcUid(last.uid)}
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 20, fontWeight: 900, color: tone.fg }}>
+                {last.kind === "dup" ? "이미 탑승 처리됨" : "승차 완료"}
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "var(--color-label)", marginTop: 4 }}>
+                {last.name || "이름 미등록"}{last.empNo ? ` (${last.empNo})` : ""}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {errMsg && (
+        <div style={{ fontSize: 12, color: "var(--color-destructive)", textAlign: "center", whiteSpace: "pre-line", lineHeight: 1.6 }}>
+          {errMsg}
+        </div>
+      )}
+
+      {scanning && <button onClick={stop} style={{ ...S.refreshBtn, maxWidth: 280 }}>태깅 중지</button>}
     </div>
   );
 }

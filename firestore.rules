@@ -100,6 +100,16 @@ service cloud.firestore {
         allow update, delete: if isAdmin(companyId);
       }
 
+      // ─── NFC 미등록 카드 태깅 기록 (부정승차, 2026-07-22) ─
+      // 기사앱 NFC 태깅에서 passengers 에 매칭되는 nfcUid 가 없을 때 CF boardNfc 가 적재.
+      // boardings 와 **분리** — 탑승 통계/정류장 매핑 집계에 섞이면 안 됨(회귀 방지).
+      // write 는 Admin SDK(CF) 전용: 기사(role=driver)는 companies/** write 권한이 없고,
+      // 클라가 직접 쓰게 하면 위조 부정승차 기록이 가능해진다.
+      match /nfcRejects/{date}/list/{rejectId} {
+        allow read:  if isAdmin(companyId);
+        allow write: if false; // CF(Admin SDK)만 — 룰 우회
+      }
+
       // ─── FCM 토큰 저장 ───────────────────────────────
       match /fcmTokens/{empNo} {
         allow read:  if isAdmin(companyId);

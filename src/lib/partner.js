@@ -1,4 +1,5 @@
 import { db } from "../firebase";
+import { normalizeNfcUid } from "./nfc";
 import {
   doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc,
   collection, getDocs, query, where, serverTimestamp, Timestamp
@@ -147,6 +148,13 @@ export async function importEmployees({ companyId, partnerCode, partnerName, emp
       // 경로에서는 undefined → 필드 미기록 → 기존 잠금 설정 보존(회귀 0).
       const hasPinLocked = typeof emp.pinLocked === "boolean";
 
+      // NFC 사원증 UID(2026-07-22) — pinLocked 와 **같은 조건부 기록 규칙**.
+      // 엑셀 일괄 업로드는 nfcUid 를 안 넘기므로 undefined → 필드 미기록 →
+      // 이미 등록된 카드가 대량 등록으로 날아가지 않는다(회귀 0).
+      // 빈 문자열/null 은 "해제" 의도로 보고 null 기록(수정 모달에서 비운 경우).
+      const hasNfcUid = emp.nfcUid !== undefined;
+      const nfcUidValue = emp.nfcUid ? normalizeNfcUid(emp.nfcUid) : null;
+
       const data = {
         empNo: emp.empNo,
         name: emp.name,
@@ -160,6 +168,7 @@ export async function importEmployees({ companyId, partnerCode, partnerName, emp
         updatedAt: serverTimestamp(),
       };
       if (hasPinLocked) data.pinLocked = emp.pinLocked;
+      if (hasNfcUid) data.nfcUid = nfcUidValue;
 
       if (!existing.exists()) {
         // 신규: 초기 PIN 생성 (생년월일 대신 임시 PIN - 관리자가 별도 전달)
@@ -176,6 +185,7 @@ export async function importEmployees({ companyId, partnerCode, partnerName, emp
           active: emp.active,
           partnerCode, partnerName, updatedAt: serverTimestamp(),
           ...(hasPinLocked ? { pinLocked: emp.pinLocked } : {}),
+          ...(hasNfcUid ? { nfcUid: nfcUidValue } : {}),
         });
         if (!emp.active && existing.data().active) results.deactivated++;
         else results.updated++;
