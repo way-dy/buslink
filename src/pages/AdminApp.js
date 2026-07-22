@@ -1413,8 +1413,14 @@ function DispatchTab({ companyId, vehicles, drivers, allowed, currentUserUid }) 
   };
 
   // ★ 배차 복사 — 현재 날짜 배차를 다른 날짜로 복사
+  // ⚠ `...data` 스프레드 금지(2026-07-22) — 복사본은 **계획 정보만** 물려받고 운행 실행 상태는 버린다.
+  //    옛 스프레드는 `stopArrivals`(실 도착기록)·`preArrivalNotified`(도착 임박 푸시 멱등 마커)까지
+  //    미래 날짜 배차에 복제해 ① recordStopArrival 멱등 가드가 그 날 실제 도착 기록을 skip
+  //    ② notifyPreArrival 이 "이미 발송함"으로 보고 도착 임박 푸시를 건너뜀 — 둘 다 silent.
+  //    `scheduleId`/`source:"schedule"` 도 제외: 수동 복사본은 수동 배차다(펼침 산출물로 위장하면
+  //    운영자가 "일정에서 나온 배차"로 오인). 노선 복사(handleCopy)와 동일한 명시 필드 화이트리스트 규칙.
   const handleCopyDispatches = async () => {
-    // createdBy 격리: 제한 admin 은 본인이 볼 수 있는 배차만 복사(타 담당자 배차 오귀속 차단). data 의 createdBy 는 ...data 로 보존.
+    // createdBy 격리: 제한 admin 은 본인이 볼 수 있는 배차만 복사(타 담당자 배차 오귀속 차단). createdBy 는 원 담당자 보존.
     const source = dispatches.filter(canSeeDispatch);
     if (source.length === 0) return alert("복사할 배차가 없습니다");
     const targetDate = prompt("복사할 대상 날짜를 입력하세요 (예: 2026-03-24)", "");
@@ -1425,8 +1431,18 @@ function DispatchTab({ companyId, vehicles, drivers, allowed, currentUserUid }) 
     try {
       const ref = collection(db, "companies", companyId, "dispatches", targetDate, "list");
       for (const d of source) {
-        const { id: _id, ...data } = d;
-        await addDoc(ref, { ...data, date: targetDate });
+        const data = {
+          routeId: d.routeId ?? "",
+          routeName: d.routeName ?? "",
+          driverId: d.driverId ?? "",
+          vehicleId: d.vehicleId ?? "",
+          vehicleNo: d.vehicleNo ?? "",
+          departTime: d.departTime ?? "",
+          createdBy: d.createdBy ?? null,
+          date: targetDate,
+        };
+        if (d.driverName) data.driverName = d.driverName; // CF 펼침분만 보유(표시용 라벨)
+        await addDoc(ref, data);
       }
       alert(`${source.length}건 복사 완료`);
     } catch (e) { alert("복사 오류: " + e.message); }
