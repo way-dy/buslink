@@ -10,6 +10,8 @@
 //   node scripts/board.cjs done <id>             — 완료 처리(status:done + history + resultNote)
 //   node scripts/board.cjs status <id> <상태>     — 상태 전이(reviewing|in_progress|rejected)
 //   node scripts/board.cjs comment <id> <내용>     — 댓글(history) 추가. 사용자 용어만.
+//   node scripts/board.cjs comment <id> --file <경로> — 긴 안내(사용가이드 등)를 파일로.
+//        (여러 줄·한글이 셸 인자로 깨지는 것 방지. 파일은 UTF-8)
 //
 // ⚠ 게시판은 고객이 보는 화면이다. 완료 코멘트는 항상 "반영완료되었습니다" 로 고정하고
 //   변경 상세·빌드 해시·파일명 등 시스템 용어는 절대 남기지 않는다(자유 메모 인자 없음).
@@ -77,9 +79,11 @@ const arg = rest.join(" ");
     if (!s.exists) { console.error(`문서 없음: ${id}`); process.exit(1); }
 
     if (cmd === "comment") {
-      if (!arg) { console.error("usage: comment <id> <내용>"); process.exit(1); }
-      await ref.update({ updatedAt: serverTimestamp(), history: arrayUnion(histEntry(null, arg)) });
-      console.log(`💬 댓글 추가: [${id}] ${s.data().title}`);
+      // 긴 안내는 `--file <경로>` 로 — 여러 줄·한글이 셸 인자를 거치며 깨지는 것을 피한다.
+      const body = rest[0] === "--file" ? fs.readFileSync(rest[1], "utf8").trim() : arg;
+      if (!body) { console.error("usage: comment <id> <내용> | comment <id> --file <경로>"); process.exit(1); }
+      await ref.update({ updatedAt: serverTimestamp(), history: arrayUnion(histEntry(null, body)) });
+      console.log(`💬 댓글 추가(${body.length}자): [${id}] ${s.data().title}`);
       return;
     }
 
