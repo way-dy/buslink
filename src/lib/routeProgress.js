@@ -7,6 +7,34 @@
 
 const R = 6371000; // 지구 반경(m)
 
+/**
+ * 좌표 배열을 지도에 그릴 수 있는 `[{lat,lng}]` 로 정규화(2026-07-27).
+ *
+ * Firestore 좌표는 number 외에 문자열("37.5")·GeoPoint(`{latitude,longitude}`)·
+ * 중첩(`{location:GeoPoint}`) 로 들어올 수 있다(엑셀 import·콘솔 수기·SDK 차이).
+ * `typeof === "number"` 로 엄격 필터하면 그런 노선은 **전 좌표가 탈락해 경로가 통째로
+ * 사라지고 정류장 직선 폴백처럼 보인다**(issues.md stops 좌표 3분기 항목과 같은 계열).
+ * 유효 좌표가 2개 미만이면 빈 배열 → 호출부가 폴백을 고르게 한다.
+ */
+export function toLatLngPath(raw) {
+  if (!Array.isArray(raw)) return [];
+  // ⚠ `Number("")` 도 `Number(null)` 도 0 이다 — 그대로 통과시키면 빈 좌표가
+  //   (0,0) 대서양 한복판 점이 되어 경로가 아프리카까지 뻗는다. 빈 값은 NaN 으로.
+  const num = (v) => {
+    if (v === null || v === undefined) return NaN;
+    if (typeof v === "string" && v.trim() === "") return NaN;
+    return Number(v);
+  };
+  const out = [];
+  for (const p of raw) {
+    if (!p) continue;
+    const lat = num(p.lat !== undefined ? p.lat : (p.latitude !== undefined ? p.latitude : p.location?.latitude));
+    const lng = num(p.lng !== undefined ? p.lng : (p.longitude !== undefined ? p.longitude : p.location?.longitude));
+    if (Number.isFinite(lat) && Number.isFinite(lng)) out.push({ lat, lng });
+  }
+  return out.length >= 2 ? out : [];
+}
+
 // 두 좌표 간 거리(m) — Haversine
 export function haversine(a, b) {
   if (!a || !b) return Infinity;

@@ -1744,9 +1744,15 @@ function ymdKST(d) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(d);
 }
 function dayOfWeekKST(dateStr) {
-  // dateStr 의 KST 자정으로 Date 만들기: ISO에 +09:00 부착하면 안전
-  const dt = new Date(`${dateStr}T00:00:00+09:00`);
-  return dt.getDay(); // 0=일 ... 6=토 (KST 자정 시각이라 ts 변환 후에도 동일)
+  // 🔴 `getDay()` 는 **서버 로컬 시간대**로 요일을 계산한다. Cloud Functions 는 UTC 로 돌기
+  //   때문에 KST 자정(=전날 15:00 UTC)의 `getDay()` 는 **하루 전 요일**을 돌려준다.
+  //   그 결과 월요일 일정이 화요일에 펼쳐지고, 월요일에는 배차가 아예 안 생겼다
+  //   (2026-07-27 "배차일정 등록 후 하루밀림" 신고의 근인. prod 실측: 토요일에 평일 배차
+  //   29건 생성 / 월요일 0건).
+  //   날짜 문자열의 요일은 시간대와 무관한 **달력 계산**이므로 UTC 자정 + getUTCDay 로 고정한다.
+  //   ⚠ `getDay()` 로 되돌리지 말 것(동일 결함 재발).
+  const dt = new Date(`${dateStr}T00:00:00Z`);
+  return dt.getUTCDay(); // 0=일 ... 6=토
 }
 
 /**

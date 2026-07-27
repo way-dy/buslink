@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import jsQR from "jsqr";
 import { initNotifications, listenForegroundMessages } from "../lib/notifications";
 import { Map, MapMarker, Polyline, CustomOverlayMap, Roadview } from "react-kakao-maps-sdk";
@@ -10,7 +10,7 @@ import {
 } from "firebase/firestore";
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { calcETA } from "../lib/gps";
-import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom } from "../lib/routeProgress";
+import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom, toLatLngPath } from "../lib/routeProgress";
 import { computeStopEstimates, formatDelayLabel, formatPassengerEta, describeEtaSource } from "../lib/stopSchedule";
 import { useSmoothedEta } from "../lib/useSmoothedEta";
 import { computeRunEnded } from "../lib/runStatus";
@@ -1806,6 +1806,16 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
     }, () => setModalDispatch(null));
   }, [stopModal, companyId, wakeTick]);
 
+  // 모달 지도에 그릴 경로 — 관리자가 그린 routePath 가 있으면 그것, 없으면 정류장 직선.
+  // (routePath 미설정 노선은 예전처럼 직선으로 보이는 게 맞다 = 하위호환 폴백)
+  const modalPath = useMemo(() => {
+    const drawn = toLatLngPath(stopModal?.routePath);
+    if (drawn.length >= 2) return drawn;
+    return modalStops
+      .map(s => ({ lat: Number(s.lat), lng: Number(s.lng) }))
+      .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  }, [stopModal, modalStops]);
+
   // 모달 정류장 estimates(계획 + 누적지연). 모달엔 routePath/속도 모르므로 GPS 가중은 생략.
   const modalEstimates = (stopModal && modalStops.length > 0)
     ? computeStopEstimates({
@@ -2045,10 +2055,13 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
                   onCreate={map => { map.relayout(); setTimeout(() => map.relayout(), 300); }}
                   onCenterChanged={map => setModalCenter({ lat: map.getCenter().getLat(), lng: map.getCenter().getLng() })}>
 
-                  {/* 노선 폴리라인 */}
-                  {modalStops.length >= 2 && (
+                  {/* 노선 폴리라인 — 관리자가 그린 실제 경로(routePath) 우선, 없으면 정류장 직선 폴백.
+                      이 화면만 routePath 를 안 보고 정류장을 곧장 이어 그려서 "실시간 지도에서
+                      경로가 직선으로 나온다"는 신고가 나왔다(2026-07-27). 홈 탭·승객앱·협력사
+                      포털은 이미 routePath 를 쓰고 있었다. ⚠ 직선 전용으로 되돌리지 말 것. */}
+                  {modalPath.length >= 2 && (
                     <Polyline
-                      path={modalStops.map(s=>({ lat:s.lat, lng:s.lng }))}
+                      path={modalPath}
                       strokeWeight={4} strokeColor="#0066FF" strokeOpacity={0.7} strokeStyle="solid"
                     />
                   )}
