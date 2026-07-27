@@ -1,5 +1,6 @@
 import { db } from "../firebase";
 import { normalizeNfcUid, isValidNfcUid } from "./nfc";
+import { generateInitialPin, isValidInitialPin } from "./accountCards";
 import {
   doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc,
   collection, getDocs, query, where, serverTimestamp, Timestamp
@@ -84,6 +85,9 @@ export function parseEmployeeExcel(file) {
           active: headers.findIndex(h => h.includes("재직") || h.includes("active")),
           // NFC 사원증 카드번호(2026-07-22·선택 컬럼). 없으면 -1 → 아무 것도 안 건드림.
           nfc:    headers.findIndex(h => h.includes("nfc") || h.includes("카드")),
+          // 초기 PIN(2026-07-27·선택 컬럼). 비우면 신규 승객마다 자동 랜덤 발급.
+          // "카드"(nfc)와 겹치지 않도록 pin/비밀번호 계열만 매칭한다.
+          pin:    headers.findIndex(h => h.includes("pin") || h.includes("비밀번호")),
         };
 
         if (colMap.empNo === -1) throw new Error("사번 컬럼을 찾을 수 없습니다");
@@ -126,6 +130,19 @@ export function parseEmployeeExcel(file) {
               }
             }
           }
+          // 초기 PIN — NFC 와 같은 규칙: **빈 셀이면 키를 아예 안 넣는다**.
+          //   importEmployees 는 신규 승객에만 PIN 을 발급하므로 기존 승객의 PIN 은
+          //   어느 경로로도 대량 업로드에 덮이지 않는다.
+          if (colMap.pin !== -1) {
+            const rawPin = String(row[colMap.pin] || "").trim();
+            if (rawPin) {
+              if (!isValidInitialPin(rawPin)) {
+                errors.push(`${lineNo}행: 초기 PIN 형식 오류 "${rawPin}" — 숫자 4~6자리 (사번: ${empNo})`);
+              } else {
+                emp.initialPin = rawPin;
+              }
+            }
+          }
           employees.push(emp);
         });
 
@@ -141,7 +158,9 @@ export function parseEmployeeExcel(file) {
 
 // ─── 직원 DB 반영 ─────────────────────────────────────────
 export async function importEmployees({ companyId, partnerCode, partnerName, employees, routes }) {
-  const results = { added: 0, updated: 0, deactivated: 0, skipped: 0, errors: [] };
+  // credentials = 이번에 **신규 발급된** 계정의 평문 PIN. 저장하지 않고 호출부(안내문
+  // 인쇄)로만 돌려준다 — 화면을 벗어나면 다시 볼 수 없다(재발급 필요).
+  const results = { added: 0, updated: 0, deactivated: 0, skipped: 0, errors: [], credentials: [] };
 
   // 노선 코드 → routeId 맵 생성
   const routeMap = {};
@@ -188,12 +207,18 @@ export async function importEmployees({ companyId, partnerCode, partnerName, emp
       if (hasNfcUid) data.nfcUid = nfcUidValue;
 
       if (!existing.exists()) {
-        // 신규: 초기 PIN 생성 (생년월일 대신 임시 PIN - 관리자가 별도 전달)
-        data.pinHash = await hashPin("000000"); // 초기 PIN: 000000
-        data.pinInitial = true; // 첫 로그인 시 변경 유도
+        // 신규: 초기 PIN 을 **개인별로** 발급(2026-07-27).
+        //   이전엔 전원 "000000" 고정이라 사번(명부 순번)만 알면 남의 계정으로
+        //   로그인해 그 사람 노선·정류장·공지를 볼 수 있었다. 인원이 늘수록 그대로 확대.
+        //   관리자가 엑셀·폼으로 지정한 값이 있으면 그것, 없으면 랜덤 6자리.
+        const initialPin = isValidInitialPin(emp.initialPin) ? String(emp.initialPin).trim() : generateInitialPin();
+        data.pinHash = await hashPin(initialPin);
+        data.pinInitial = true; // 첫 로그인 시 본인 PIN 으로 변경 강제
         data.createdAt = serverTimestamp();
         await setDoc(ref, data);
         results.added++;
+        // 평문은 여기서만 존재 — 안내문 인쇄용으로 반환하고 Firestore 엔 남기지 않는다.
+        results.credentials.push({ empNo: emp.empNo, name: emp.name, dept: emp.dept || "", routeCode: emp.routeCode || "", pin: initialPin });
       } else {
         // 기존: 정보 업데이트 (PIN은 건드리지 않음)
         await updateDoc(ref, {
@@ -219,6 +244,40 @@ export async function importEmployees({ companyId, partnerCode, partnerName, emp
   });
 
   return results;
+}
+
+// ─── PIN 재발급 (안내문 재출력용) ─────────────────────────
+/**
+ * 선택한 승객들의 PIN 을 새로 발급한다(2026-07-27).
+ *
+ * 평문 PIN 을 저장하지 않으므로 안내문은 발급 직후 1회만 인쇄할 수 있다. 배부물을
+ * 잃어버렸거나 아직 안 뿌린 인원에게 다시 뽑아주려면 이 경로로 새 PIN 을 발급한다.
+ * `pinInitial:true` 로 되돌리므로 그 승객은 다음 로그인 때 본인 PIN 설정 화면을 다시 만난다.
+ *
+ * ⚠ 이미 본인 PIN 으로 바꾼 사람에게 쓰면 그 사람은 로그인 못 하게 된다 —
+ *   호출부가 대상(미접속자 등)을 좁히고 확인을 받는다.
+ *
+ * @returns {Promise<{credentials:Array, errors:string[]}>} credentials 는 importEmployees 와 동일 형식.
+ */
+export async function reissuePins({ companyId, passengers }) {
+  const credentials = [];
+  const errors = [];
+  for (const p of passengers || []) {
+    const empNo = String(p.empNo || p.id || "").trim();
+    if (!empNo) { errors.push("사번 없는 항목 건너뜀"); continue; }
+    try {
+      const pin = generateInitialPin();
+      await updateDoc(doc(db, "companies", companyId, "passengers", empNo), {
+        pinHash: await hashPin(pin),
+        pinInitial: true,
+        updatedAt: serverTimestamp(),
+      });
+      credentials.push({ empNo, name: p.name || "", dept: p.dept || "", routeCode: p.routeCode || "", pin });
+    } catch (e) {
+      errors.push(`${empNo} (${p.name || ""}): ${e.message}`);
+    }
+  }
+  return { credentials, errors };
 }
 
 // ─── PIN 해시 (SHA-256) ───────────────────────────────────
@@ -271,14 +330,15 @@ export async function verifyPassenger({ companyId, empNo, pin, routeId, tokenId 
 // ─── 샘플 엑셀 생성 ──────────────────────────────────────
 export function downloadSampleExcel() {
   const XLSX = window.XLSX;
-  // NFC 카드번호는 **선택 컬럼** — 비워두면 기존 등록이 그대로 보존된다(지워지지 않음).
+  // NFC 카드번호·초기PIN 은 **선택 컬럼** — 비워두면 기존 등록이 그대로 보존된다(지워지지 않음).
+  // 초기PIN 을 비우면 신규 등록 승객마다 자동으로 서로 다른 PIN 이 발급된다(권장).
   const ws = XLSX.utils.aoa_to_sheet([
-    ["사번", "이름", "부서", "노선코드", "재직여부(Y/N)", "NFC카드번호(선택)"],
-    ["10001", "홍길동", "개발팀", "662", "Y", "0453CE9A"],
-    ["10002", "김철수", "인사팀", "663", "Y", "04:1A:2B:3C"],
-    ["10003", "이영희", "총무팀", "662", "N", ""],
+    ["사번", "이름", "부서", "노선코드", "재직여부(Y/N)", "NFC카드번호(선택)", "초기PIN(선택)"],
+    ["10001", "홍길동", "개발팀", "662", "Y", "0453CE9A", ""],
+    ["10002", "김철수", "인사팀", "663", "Y", "04:1A:2B:3C", "1234"],
+    ["10003", "이영희", "총무팀", "662", "N", "", ""],
   ]);
-  ws["!cols"] = [{ wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 16 }, { wch: 20 }];
+  ws["!cols"] = [{ wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 16 }, { wch: 20 }, { wch: 14 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "승객명부");
   XLSX.writeFile(wb, "BusLink_승객명부_양식.xlsx");

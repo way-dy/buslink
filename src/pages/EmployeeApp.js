@@ -371,6 +371,21 @@ export default function EmployeeApp() {
 
   if (!session) return <LoginScreen companyId={companyId} onLogin={handleLogin} />;
 
+  // ── 첫 로그인 비밀번호 설정 강제(2026-07-27) ──────────────
+  // 관리자가 발급한 초기 비밀번호를 그대로 쓰면 안내문을 본 사람 누구나 그 계정에
+  // 들어갈 수 있다. 예전엔 설정 탭에서 "변경해주세요" 배너로 권유만 해 사실상 아무도
+  // 바꾸지 않았다(실측: 대상 전원 미변경). 공용 계정(pinLocked)은 여러 명이 함께 쓰므로 제외.
+  if (session.pinInitial && !session.pinLocked) {
+    return (
+      <FirstPinSetup
+        companyId={companyId}
+        session={session}
+        onDone={(s) => { saveSession({ ...session, ...s }); setSession(p => ({ ...p, ...s })); }}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
   return (
     <div style={S.appWrap}>
       <InstallPrompt />
@@ -449,7 +464,9 @@ export default function EmployeeApp() {
 // 로그인 화면
 // ════════════════════════════════════════════════════════
 function LoginScreen({ companyId, onLogin }) {
-  const [empNo, setEmpNo] = useState("");
+  // 계정 안내문 QR(`/p?emp=10001`)로 들어오면 사번을 미리 채운다(2026-07-27).
+  // 배부받은 사람이 자기 아이디를 타이핑하지 않아도 되고 오타 문의가 사라진다.
+  const [empNo, setEmpNo] = useState(() => (getParam("emp") || "").trim());
   const [pin, setPin] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -466,6 +483,9 @@ function LoginScreen({ companyId, onLogin }) {
       if (!p.active) throw new Error("비활성화된 계정입니다");
       const hashed = await hashPin(pin);
       if (p.pinHash !== hashed) throw new Error("PIN이 올바르지 않습니다");
+      // 최초 접속 여부 기록(2026-07-27) — 협력사 포털이 "아직 계정을 못 받은 사람"을
+      // 가려내는 유일한 신호다. 실패해도 로그인은 진행(best-effort).
+      updateDoc(ref, { lastLoginAt: serverTimestamp() }).catch(() => {});
       onLogin({ empNo: p.empNo, name: p.name, dept: p.dept, routeId: p.routeId, partnerCode: p.partnerCode || null, partnerName: p.partnerName || null, pinHash: hashed, pinInitial: p.pinInitial, pinLocked: !!p.pinLocked, favorites: p.favorites || [] });
     } catch (e) {
       setError(e.message);
@@ -481,8 +501,8 @@ function LoginScreen({ companyId, onLogin }) {
         </div>
         <div style={{ fontSize: 20, fontWeight: 800, color: "var(--color-label)", letterSpacing: "-0.02em", marginBottom: 4 }}>로그인</div>
         <div style={{ fontSize: 13, color: "var(--color-label-mute)", marginBottom: 18, lineHeight: 1.55 }}>
-          사번과 PIN을 입력하세요<br/>
-          <span style={{ color: "var(--color-cautionary)", fontWeight: 600 }}>초기 PIN: 000000 (첫 로그인 후 변경 필요)</span>
+          받으신 안내문의 아이디와 비밀번호를 입력하세요<br/>
+          <span style={{ color: "var(--color-cautionary)", fontWeight: 600 }}>첫 로그인 후 비밀번호를 직접 정하게 됩니다</span>
         </div>
         <input style={S.input} type="text" inputMode="text" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="사번"
           value={empNo} onChange={e => setEmpNo(e.target.value)} autoFocus />
@@ -494,6 +514,100 @@ function LoginScreen({ companyId, onLogin }) {
         <button style={{ ...S.btn, marginTop: 14, opacity: (!empNo || pin.length < 4 || loading) ? 0.5 : 1, cursor: (!empNo || pin.length < 4 || loading) ? "not-allowed" : "pointer" }}
           onClick={handleSubmit} disabled={!empNo || pin.length < 4 || loading}>
           {loading ? "확인 중..." : "로그인"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
+// 첫 로그인 비밀번호 설정 (2026-07-27)
+//
+// 관리자가 발급한 초기 비밀번호(안내문에 인쇄돼 있음)를 쓰는 동안에는 앱을 쓸 수 없다.
+// 현재 비밀번호를 다시 묻지 않는 이유 = 방금 그 값으로 로그인해 세션에 검증된 해시가
+// 이미 있기 때문(session.pinHash). 한 번 더 묻는 건 마찰만 늘린다.
+// ════════════════════════════════════════════════════════
+function FirstPinSetup({ companyId, session, onDone, onLogout }) {
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  // 🔴 저장된 세션만 믿으면 안 된다 — `pinLocked`/`pinInitial` 은 나중에 생긴 필드라
+  //   예전에 로그인한 기기의 localStorage 에는 아예 없다. 공용 계정(pinLocked)이
+  //   세션에 그 값이 없다는 이유로 이 화면을 만나 비밀번호를 바꾸면 **같은 계정을 쓰는
+  //   전원이 로그인 못 하게 된다**(2026-07-21 에 막았던 그 사고). 문서를 실측해
+  //   잠금이거나 이미 변경된 계정이면 즉시 통과시킨다.
+  const [checking, setChecking] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    getDoc(doc(db, "companies", companyId, "passengers", session.empNo))
+      .then(snap => {
+        if (!alive) return;
+        const p = snap.exists() ? snap.data() : null;
+        if (p && (p.pinLocked || !p.pinInitial)) {
+          onDone({ pinLocked: !!p.pinLocked, pinInitial: !!p.pinInitial });
+          return;
+        }
+        setChecking(false);
+      })
+      .catch(() => { if (alive) setChecking(false); }); // 조회 실패 시엔 설정 화면 유지(안전측)
+    return () => { alive = false; };
+    // onDone 은 매 렌더 새 함수지만 이 effect 는 계정 단위 1회면 충분하다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, session.empNo]);
+
+  const submit = async () => {
+    if (newPin.length < 4) return setError("비밀번호는 4자리 이상이어야 합니다");
+    if (newPin !== confirmPin) return setError("두 번 입력한 비밀번호가 다릅니다");
+    if (newPin === "000000") return setError("너무 쉬운 비밀번호입니다. 다른 번호로 정해주세요");
+    setLoading(true); setError("");
+    try {
+      const newHash = await hashPin(newPin);
+      await updateDoc(doc(db, "companies", companyId, "passengers", session.empNo), {
+        pinHash: newHash, pinInitial: false,
+      });
+      onDone({ pinHash: newHash, pinInitial: false });
+    } catch (e) {
+      setError("저장에 실패했습니다. 잠시 후 다시 시도해주세요");
+      setLoading(false);
+    }
+  };
+
+  if (checking) return (
+    <div style={S.fullCenter}>
+      <div style={S.spinner} />
+    </div>
+  );
+
+  return (
+    <div style={S.fullCenter}>
+      <div style={S.loginCard}>
+        <div style={S.header}>
+          <BusLinkLogo size={26} sub="승객 탑승 서비스" />
+        </div>
+        <div style={{ fontSize: 20, fontWeight: 800, color: "var(--color-label)", letterSpacing: "-0.02em", marginBottom: 4 }}>
+          비밀번호를 정해주세요
+        </div>
+        <div style={{ fontSize: 13, color: "var(--color-label-mute)", marginBottom: 16, lineHeight: 1.55 }}>
+          {session.name}님, 반갑습니다.<br/>
+          안내문에 적힌 비밀번호는 다른 사람도 볼 수 있으니
+          <b style={{ color: "var(--color-label)" }}> 본인만 아는 번호로 바꿔야</b> 이용할 수 있습니다.
+        </div>
+        <input style={S.input} type="password" inputMode="numeric" maxLength={6}
+          placeholder="새 비밀번호 (숫자 4~6자리)" value={newPin} autoFocus
+          onChange={e => setNewPin(e.target.value.replace(/\D/g, ""))} />
+        <input style={{ ...S.input, marginTop: 10 }} type="password" inputMode="numeric" maxLength={6}
+          placeholder="새 비밀번호 확인" value={confirmPin}
+          onChange={e => setConfirmPin(e.target.value.replace(/\D/g, ""))}
+          onKeyDown={e => e.key === "Enter" && submit()} />
+        {error && <div style={S.errorMsg}>{error}</div>}
+        <button style={{ ...S.btn, marginTop: 14, opacity: (newPin.length < 4 || loading) ? 0.5 : 1, cursor: (newPin.length < 4 || loading) ? "not-allowed" : "pointer" }}
+          onClick={submit} disabled={newPin.length < 4 || loading}>
+          {loading ? "저장 중..." : "설정하고 시작하기"}
+        </button>
+        <button style={{ background: "none", border: "none", color: "var(--color-label-mute)", fontSize: 12, fontFamily: "inherit", marginTop: 12, cursor: "pointer", textDecoration: "underline" }}
+          onClick={onLogout}>
+          다른 계정으로 로그인
         </button>
       </div>
     </div>

@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   validatePartnerCode, parseEmployeeExcel,
-  importEmployees, downloadSampleExcel, hashPin
+  importEmployees, downloadSampleExcel, reissuePins
 } from "../lib/partner";
+import QRCode from "qrcode";
+import { buildAccountCardsHtml, buildPassengerLoginUrl, openPrintWindow } from "../lib/accountCards";
 import { normalizeNfcUid, isValidNfcUid, formatNfcUid, isWebNfcSupported, createTagCooldown } from "../lib/nfc";
 import { registerNfcCard } from "../lib/boarding";
 import { db, auth } from "../firebase";
@@ -29,6 +31,25 @@ const REG_MODES = { FILE:"file", SINGLE:"single", MULTI:"multi", NFC:"nfc" };
 // Phase 1.4 (2026-05-29) — 협력사 공지 발송 onCall(`sendPartnerNotice`) 호출용.
 // region="us-central1" 명시(AdminApp 패턴 일관, functions/index.js 리전 고정).
 const functions = getFunctions(undefined, "us-central1");
+
+// ── 계정 안내문 인쇄(2026-07-27) ─────────────────────────
+// credentials(평문 PIN 포함·발급 직후에만 존재)로 개인별 QR 을 만들어 A4 인쇄창을 연다.
+// QR = 사번이 프리필된 승객앱 링크 → 배부받은 사람이 ID 를 타이핑할 필요가 없다.
+// QR 생성이 실패해도(용량·환경) 카드 자체는 ID/PIN 으로 쓸 수 있게 계속 진행한다.
+async function printAccountCards({ credentials, partnerName, routes }) {
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const cards = [];
+  for (const c of credentials) {
+    const loginUrl = buildPassengerLoginUrl({ origin, empNo: c.empNo });
+    let qrDataUrl = "";
+    try {
+      qrDataUrl = await QRCode.toDataURL(loginUrl, { width: 240, margin: 0 });
+    } catch (e) { /* QR 없이도 카드는 유효 */ }
+    const r = (routes || []).find(x => x.code === c.routeCode || x.id === c.routeCode);
+    cards.push({ ...c, routeName: r ? r.name : (c.routeCode || ""), loginUrl, qrDataUrl });
+  }
+  return openPrintWindow(buildAccountCardsHtml({ partnerName, cards }));
+}
 
 // 공지 발송 제한 상수(CF 와 동일 — UI 카운터·placeholder 용도. CF가 실제 게이트).
 const PARTNER_NOTICE_LIMIT_PER_HOUR = 5;
@@ -217,9 +238,31 @@ export default function PartnerApp() {
                 <div style={{ marginTop:10, fontSize:12, color:"var(--color-destructive)", fontWeight:600 }}>오류 {result.errors.length}건 스킵됨</div>
               )}
             </div>
-            <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center", lineHeight:1.5 }}>
-              신규 등록 승객의 초기 PIN은 <span style={{ color:"var(--color-cautionary)", fontWeight:800, background:"#FFF1E0", padding:"2px 8px", borderRadius:6 }}>000000</span>입니다
-            </div>
+            {/* 초기 PIN 개인별 발급(2026-07-27) — 평문은 저장하지 않으므로 이 화면을
+                벗어나면 다시 볼 수 없다. 배부물 인쇄를 여기서 유도한다. */}
+            {result.credentials?.length > 0 ? (
+              <>
+                <div style={{ background:"#FFF8ED", border:"1px solid #FFD9A8", borderRadius:10, padding:"12px 14px", width:"100%" }}>
+                  <div style={{ fontSize:13, fontWeight:800, color:"#8A5200", marginBottom:5 }}>
+                    ⚠️ 지금 안내문을 인쇄하세요
+                  </div>
+                  <div style={{ fontSize:12, color:"#8A5200", lineHeight:1.6 }}>
+                    승객마다 서로 다른 비밀번호가 발급되었습니다. 보안을 위해 비밀번호는 저장하지 않으므로,
+                    <b> 이 화면을 벗어나면 다시 볼 수 없습니다.</b> 나중에 필요하면 “승객 관리”에서 재발급하면 됩니다.
+                  </div>
+                </div>
+                <button style={S.btn} onClick={async () => {
+                  const ok = await printAccountCards({ credentials: result.credentials, partnerName: codeData?.partnerName, routes });
+                  if (!ok) alert("팝업이 차단되었습니다. 브라우저 팝업 차단을 해제한 뒤 다시 시도하세요.");
+                }}>
+                  📄 계정 안내문 인쇄 ({result.credentials.length}명)
+                </button>
+              </>
+            ) : (
+              <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center", lineHeight:1.5 }}>
+                신규 등록된 승객이 없어 발급된 비밀번호가 없습니다
+              </div>
+            )}
             <button style={S.btnSecondary} onClick={reset}>추가 등록하기</button>
           </div>
         )}
@@ -268,7 +311,7 @@ function FileUploadMode({ codeData, code, routes, onDone }) {
           <button onClick={downloadSampleExcel} style={S.btnSecondary}>📥 엑셀 양식 다운로드</button>
           <div style={S.excelGuide}>
             <div style={{ fontWeight:700, marginBottom:10, color:"#B95300", fontSize:13 }}>📋 양식 작성 안내</div>
-            {[["사번","필수 · 숫자 또는 문자"],["이름","필수"],["부서","선택 · 통계 사용"],["노선코드","선택 · 예) 662"],["재직여부","Y / N"]].map(([k,v])=>(
+            {[["사번","필수 · 숫자 또는 문자"],["이름","필수"],["부서","선택 · 통계 사용"],["노선코드","선택 · 예) 662"],["재직여부","Y / N"],["NFC카드번호","선택 · 비우면 기존 등록 유지"],["초기PIN","선택 · 비우면 자동 발급(권장)"]].map(([k,v])=>(
               <div key={k} style={{ display:"flex", gap:10, fontSize:12, marginBottom:4 }}>
                 <span style={{ color:"var(--color-primary)", fontWeight:700, minWidth:60 }}>{k}</span>
                 <span style={{ color:"var(--color-label-mute)" }}>{v}</span>
@@ -416,7 +459,7 @@ function SingleRegMode({ codeData, code, routes, onDone }) {
         </button>
         <button style={{ ...S.btnSecondary, flex:"0 0 80px" }} onClick={()=>setForm(empty)}>초기화</button>
       </div>
-      <div style={{ fontSize:11, color:"var(--color-label-alt)", textAlign:"center" }}>초기 PIN은 000000으로 설정됩니다</div>
+      <div style={{ fontSize:11, color:"var(--color-label-alt)", textAlign:"center" }}>비밀번호는 승객마다 다르게 자동 발급되며, 등록 후 안내문으로 인쇄할 수 있습니다</div>
     </div>
   );
 }
@@ -504,7 +547,7 @@ function MultiRegMode({ codeData, code, routes, onDone }) {
         onClick={handleSave} disabled={loading||validCount===0}>
         {loading?`등록 중...`:`✅ ${validCount}명 등록하기`}
       </button>
-      <div style={{ fontSize:11, color:"var(--color-label-alt)", textAlign:"center" }}>사번·이름이 비어있는 행은 자동 제외됩니다 · 초기 PIN: 000000</div>
+      <div style={{ fontSize:11, color:"var(--color-label-alt)", textAlign:"center" }}>사번·이름이 비어있는 행은 자동 제외됩니다 · 비밀번호는 승객마다 다르게 자동 발급</div>
     </div>
   );
 }
@@ -698,6 +741,9 @@ function EmployeeManageMode({ codeData, code, routes }) {
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
+  // PIN 재발급 결과(평문 PIN 포함 — 모달을 닫으면 다시 볼 수 없다).
+  const [pinResult, setPinResult] = useState(null);
+  const [pinBusy, setPinBusy] = useState(false);
 
   // 실시간 직원 목록
   useEffect(() => {
@@ -719,6 +765,13 @@ function EmployeeManageMode({ codeData, code, routes }) {
     if (search && !e.name?.includes(search) && !e.empNo?.includes(search) && !e.dept?.includes(search)) return false;
     return true;
   });
+
+  // 🔴 "아직 시작 안 한" 승객 판정(2026-07-27) — 접속 기록 없음 **AND** 발급받은 초기
+  //   비밀번호를 그대로 둔 상태. `lastLoginAt` 은 이 날 신설한 필드라 그 전에 접속한
+  //   사람에게는 아예 없다 → `!lastLoginAt` 만으로 판정하면 **이미 본인 비밀번호로
+  //   잘 쓰고 있는 사람이 재발급 대상에 들어가 로그인 불가**가 된다. pinInitial 을 AND 로
+  //   걸어 그 사고를 막는다(조건 완화 금지).
+  const isUnstarted = (e) => !e.lastLoginAt && !!e.pinInitial;
 
   const openEdit = (emp) => {
     setEditEmp(emp);
@@ -748,14 +801,34 @@ function EmployeeManageMode({ codeData, code, routes }) {
     setSaving(false);
   };
 
+  // ── PIN 재발급(2026-07-27) ─────────────────────────────
+  // 예전엔 전원 "000000" 으로 되돌렸다. 사번만 알면 남의 계정에 들어갈 수 있어
+  // 개인별 랜덤 발급으로 바꿨고, 평문은 저장하지 않으므로 발급 결과를 모달에서
+  // 바로 인쇄(또는 메모)하게 한다.
   const handleResetPin = async (emp) => {
-    if (!window.confirm(`${emp.name}(${emp.empNo})의 PIN을 000000으로 초기화하시겠습니까?`)) return;
-    const { hashPin } = await import("../lib/partner");
-    const newHash = await hashPin("000000");
-    await updateDoc(doc(db, "companies", codeData.companyId, "passengers", emp.id), {
-      pinHash: newHash, pinInitial: true, updatedAt: serverTimestamp()
-    });
-    alert("PIN이 초기화되었습니다. (초기 PIN: 000000)");
+    if (!window.confirm(`${emp.name}(${emp.empNo})의 비밀번호를 새로 발급하시겠습니까?\n\n기존 비밀번호는 즉시 사용할 수 없게 됩니다.`)) return;
+    setPinBusy(true);
+    const res = await reissuePins({ companyId: codeData.companyId, passengers: [{ empNo: emp.id, name: emp.name, dept: emp.dept, routeCode: emp.routeCode }] });
+    setPinBusy(false);
+    setPinResult(res);
+  };
+
+  // 미접속자(=배부가 아직 도달하지 않았을 가능성이 큰 인원) 일괄 재발급.
+  // 이 사람들은 관리자가 발급한 초기 비밀번호를 그대로 두고 있으므로 새로 발급해도 잃을 게 없다.
+  // 이미 본인 비밀번호로 바꾼 사람은 대상에서 제외된다(로그인 못 하게 되는 사고 차단).
+  const handleReissueUnvisited = async () => {
+    const targets = filtered.filter(e => e.active && isUnstarted(e));
+    if (targets.length === 0) return alert("아직 시작하지 않은 재직 승객이 없습니다.");
+    if (!window.confirm(`아직 앱을 시작하지 않은 ${targets.length}명의 비밀번호를 새로 발급하고 안내문을 인쇄합니다.\n\n이미 본인 비밀번호로 바꿔 사용 중인 승객은 대상에서 제외됩니다.\n계속하시겠습니까?`)) return;
+    setPinBusy(true);
+    const res = await reissuePins({ companyId: codeData.companyId, passengers: targets.map(e => ({ empNo: e.id, name: e.name, dept: e.dept, routeCode: e.routeCode })) });
+    setPinBusy(false);
+    setPinResult(res);
+  };
+
+  const handlePrintPinResult = async () => {
+    const ok = await printAccountCards({ credentials: pinResult.credentials, partnerName: codeData?.partnerName, routes });
+    if (!ok) alert("팝업이 차단되었습니다. 브라우저 팝업 차단을 해제한 뒤 다시 시도하세요.");
   };
 
   return (
@@ -774,15 +847,25 @@ function EmployeeManageMode({ codeData, code, routes }) {
         ))}
       </div>
 
-      {/* 집계 */}
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
-        {[["전체",employees.length,"var(--color-primary)"],["재직",employees.filter(e=>e.active).length,"var(--color-positive)"],["퇴사",employees.filter(e=>!e.active).length,"var(--color-destructive)"]].map(([l,v,c])=>(
+      {/* 집계 — "미접속"(2026-07-27)은 계정을 아직 못 받았거나 안내문이 도달하지 않은 인원. */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:8 }}>
+        {[
+          ["전체",employees.length,"var(--color-primary)"],
+          ["재직",employees.filter(e=>e.active).length,"var(--color-positive)"],
+          ["퇴사",employees.filter(e=>!e.active).length,"var(--color-destructive)"],
+          ["미시작",employees.filter(e=>e.active && isUnstarted(e)).length,"var(--color-cautionary)"],
+        ].map(([l,v,c])=>(
           <div key={l} style={S.statCard}>
             <div style={{ fontSize:20, fontWeight:800, color:c, fontFamily:"var(--font-brand)" }}>{v}</div>
             <div style={{ fontSize:11, color:"var(--color-label-mute)", fontWeight:600 }}>{l}</div>
           </div>
         ))}
       </div>
+
+      {/* 계정 배부 도우미 — 아직 한 번도 접속하지 않은 인원만 골라 재발급+인쇄. */}
+      <button style={{ ...S.btnSecondary, opacity: pinBusy ? 0.6 : 1 }} onClick={handleReissueUnvisited} disabled={pinBusy}>
+        {pinBusy ? "발급 중..." : "📄 미시작 승객 계정 안내문 만들기"}
+      </button>
 
       {/* 직원 목록 */}
       {loading ? (
@@ -807,7 +890,8 @@ function EmployeeManageMode({ codeData, code, routes }) {
                     <span style={{ fontSize:14, fontWeight:700, color:"var(--color-label)" }}>{emp.name}</span>
                     <span style={{ fontSize:10, fontFamily:"monospace", color:"var(--color-label-mute)", background:"var(--color-bg-soft)", padding:"1px 6px", borderRadius:4 }}>{emp.empNo}</span>
                     <Pill tone={emp.active?"positive":"danger"} dot>{emp.active?"재직":"퇴사"}</Pill>
-                    {emp.pinInitial && !emp.pinLocked && <Pill tone="warn">PIN미변경</Pill>}
+                    {/* "미시작" 이 곧 "발급 비밀번호 그대로" 라 옛 PIN미변경 배지와 뜻이 겹친다 → 하나로 통합. */}
+                    {emp.active && isUnstarted(emp) && <Pill tone="warn">미시작</Pill>}
                     {emp.pinLocked && <Pill tone="primary">🔒 PIN잠금</Pill>}
                     {emp.nfcUid && <Pill tone="positive">📇 NFC</Pill>}
                   </div>
@@ -818,11 +902,55 @@ function EmployeeManageMode({ codeData, code, routes }) {
                 </div>
                 <div style={{ display:"flex", gap:4, flexShrink:0 }}>
                   <button onClick={()=>openEdit(emp)} style={S.smallBtn}>수정</button>
-                  <button onClick={()=>handleResetPin(emp)} style={S.smallBtnWarn}>PIN초기화</button>
+                  <button onClick={()=>handleResetPin(emp)} style={S.smallBtnWarn} disabled={pinBusy}>비밀번호 재발급</button>
                 </div>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* 비밀번호 발급 결과(2026-07-27) — 평문 PIN 은 저장하지 않으므로 이 모달이 유일한 노출 지점.
+          오버레이 클릭으로 닫지 않는다(실수로 닫으면 재발급 말고는 복구 경로가 없다). */}
+      {pinResult && (
+        <div style={S.overlay}>
+          <div style={S.modal}>
+            <div style={S.modalTitle}>비밀번호 발급 완료</div>
+            <div style={{ background:"#FFF8ED", border:"1px solid #FFD9A8", borderRadius:8, padding:"10px 12px", fontSize:12, color:"#8A5200", lineHeight:1.6 }}>
+              보안을 위해 비밀번호는 저장하지 않습니다. <b>이 창을 닫으면 다시 볼 수 없습니다.</b>
+              먼저 안내문을 인쇄하거나 목록을 복사해두세요.
+            </div>
+
+            <div style={{ maxHeight:220, overflowY:"auto", border:"1px solid var(--color-line)", borderRadius:8 }}>
+              {pinResult.credentials.map(c => (
+                <div key={c.empNo} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, padding:"9px 12px", borderBottom:"1px solid var(--color-line-soft)" }}>
+                  <div style={{ minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:700, color:"var(--color-label)" }}>{c.name}</div>
+                    <div style={{ fontSize:11, color:"var(--color-label-mute)", fontFamily:"monospace" }}>{c.empNo}</div>
+                  </div>
+                  <div style={{ fontSize:16, fontWeight:800, color:"var(--color-primary)", fontFamily:"monospace", letterSpacing:1 }}>{c.pin}</div>
+                </div>
+              ))}
+            </div>
+
+            {pinResult.errors?.length > 0 && (
+              <div style={{ fontSize:12, color:"var(--color-destructive)", fontWeight:600, lineHeight:1.5 }}>
+                발급 실패 {pinResult.errors.length}건: {pinResult.errors.slice(0, 3).join(" / ")}
+              </div>
+            )}
+
+            <div style={{ display:"flex", gap:8, marginTop:6 }}>
+              <button style={S.btn} onClick={handlePrintPinResult}>📄 안내문 인쇄</button>
+              <button style={{ ...S.btnSecondary, flex:"0 0 110px" }} onClick={() => {
+                const text = pinResult.credentials.map(c => `${c.name} / 아이디 ${c.empNo} / 비밀번호 ${c.pin}`).join("\n");
+                navigator.clipboard?.writeText(text).then(
+                  () => alert("목록을 복사했습니다."),
+                  () => alert("복사에 실패했습니다. 화면의 목록을 직접 옮겨 적어주세요.")
+                );
+              }}>목록 복사</button>
+            </div>
+            <button style={S.btnSecondary} onClick={() => setPinResult(null)}>닫기</button>
+          </div>
         </div>
       )}
 
