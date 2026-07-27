@@ -794,15 +794,19 @@ export default function DriverApp({ companyId: propCompanyId }) {
     // GPS watch 정지는 동기 — 즉시 안전.
     if (watchToStop != null) stopGPS(watchToStop);
     // Firestore 쓰기는 background — 실패해도 사용자는 이미 "운행 종료" 인지 가능.
+    // 2026-07-28: 발행한 프라미스를 반환한다. "운행 종료" 버튼 경로는 이 반환값을 무시하므로
+    // 위 회귀 가드(버튼 응답성)는 그대로이고, 로그아웃 경로만 이걸 기다렸다가 signOut 한다.
+    const pending = [];
     if (vehId) {
-      clearGPS({ companyId, vehicleId: vehId })
-        .catch(e => console.warn("[BusLink] clearGPS 실패(통신):", e.message));
+      pending.push(clearGPS({ companyId, vehicleId: vehId })
+        .catch(e => console.warn("[BusLink] clearGPS 실패(통신):", e.message)));
     }
     if (driver?.id) {
-      updateDoc(doc(db, "companies", companyId, "drivers", driver.id), {
+      pending.push(updateDoc(doc(db, "companies", companyId, "drivers", driver.id), {
         status: "대기", endedAt: new Date().toISOString(),
-      }).catch(e => console.warn("[BusLink] drivers 상태 update 실패(통신):", e.message));
+      }).catch(e => console.warn("[BusLink] drivers 상태 update 실패(통신):", e.message)));
     }
+    return pending;
   };
 
   const refreshToken = async (drv, disp) => {
@@ -832,7 +836,20 @@ export default function DriverApp({ companyId: propCompanyId }) {
   };
 
   const handleLogout = async () => {
-    if (driving) await handleStop();
+    if (driving) {
+      // ⚠ 2026-07-28 — 예전엔 handleStop() 직후 곧바로 signOut 했다. 운행 종료 쓰기 2건은
+      // fire-and-forget 이라 아직 전송 중인 상태에서 인증이 끊기면 permission-denied 로
+      // 유실된다 → "로그아웃했는데 관제에는 계속 운행중"(prod 실측: gps 문서는 지워졌는데
+      // drivers.status 만 18일째 "운행중" 으로 남은 기사). 그래서 signOut 전에 착지를 기다린다.
+      // 통신 불량으로 hang 해도 로그아웃 자체는 막지 않도록 3초에서 끊는다.
+      const pending = await handleStop();
+      if (pending && pending.length) {
+        await Promise.race([
+          Promise.allSettled(pending),
+          new Promise(resolve => setTimeout(resolve, 3000)),
+        ]);
+      }
+    }
     signOut(auth);
   };
 

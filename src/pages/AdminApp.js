@@ -12,6 +12,8 @@ import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { compareRoutes } from "../lib/routeOrder";
 import { sendGPS } from "../lib/gps";
 import { forceReconnect } from "../lib/forceReconnect";
+import { classifyRunSignals, STALE_SIGNAL_MIN } from "../lib/runSignals";
+import { forceEndRun } from "../lib/forceEndRun";
 import { createPartnerCode, getBoardingUrl } from "../lib/partner";
 // 정적(고정) QR — 차량별 인쇄용 URL 생성(2026-07-08 RQ#3)
 import { getStaticBoardingUrl } from "../lib/boarding";
@@ -709,6 +711,11 @@ function MapTab({ companyId, allowed, drivers }) {
   const [tick, setTick] = useState(0);
   const [refreshTick, setRefreshTick] = useState(0); // 노선 새로고침 버튼 → gps 재구독
   const [refreshing, setRefreshing] = useState(false);
+  // 운행 강제 종료(2026-07-28) — 확인 카드 대상 id · 처리 중 id · 처리 완료 id 맵.
+  // 확인은 인라인 카드로(모달 배경 클릭에 조용히 닫히는 UX 금지 — 2026-07-14 회귀 가드와 같은 원칙).
+  const [forceConfirm, setForceConfirm] = useState(null);
+  const [forceBusy, setForceBusy] = useState(null);
+  const [forceDone, setForceDone] = useState({});
   const vehiclesAll = useAnimatedPositions(rawVehicles);
 
   // 노선 새로고침(#2) — 기사 GPS 껐다 켜진 뒤 관제 화면에 위치 미반영 시 수동 재연결·재구독.
@@ -805,6 +812,45 @@ function MapTab({ companyId, allowed, drivers }) {
     d.status === "운행중" && !liveSet.has(d.vehicleId) &&
     (isAllAccess(allowed) || visibleDriverIds.has(d.id))
   );
+
+  // ── 잔존 운행 신호 정리(2026-07-28 개선요청 cv4XzFYLUdUfzqBEuDQw) ─────────────
+  // 기사가 "운행 종료"를 못 누른 채 남은 gps 문서는 스스로 사라지지 않고, 직원·승객앱
+  // 노선 탭이 그 문서 **존재만** 세어 "운행중"을 계속 표시한다(신고 증상). 그중엔 배정
+  // 기사가 아예 없는 고아 신호도 있어(기사 삭제·차량 재배정) 로그아웃으로는 못 지운다.
+  // 판정은 순수 모듈(lib/runSignals.js), 여기선 표시·게이팅만.
+  // (1초 tick 재렌더에 편승 — 신규 타이머 0)
+  const { staleSignals } = classifyRunSignals({ gpsDocs: rawVehicles, drivers: drivers || [], now: Date.now() });
+  // 제한 admin 게이팅 = 지도 차량과 동일 기준(allowMapRow). 노선을 알 수 없는 신호는
+  // 전체권한 admin 에게만(타 협력사 신호를 임의로 지우는 일 차단).
+  const visibleStaleSignals = staleSignals.filter(s =>
+    isAllAccess(allowed) ? true : (s.routeId ? allowMapRow(s.routeId) : false)
+  );
+
+  const handleForceEnd = async (sig) => {
+    setForceBusy(sig.id);
+    try {
+      await forceEndRun({ companyId, vehicleId: sig.vehicleId, driverId: sig.ownerDriverId || undefined });
+      setForceDone(d => ({ ...d, [sig.id]: true }));
+      setForceConfirm(null);
+    } catch (e) {
+      alert(`정리하지 못했습니다: ${e.message}`);
+    } finally {
+      setForceBusy(null);
+    }
+  };
+  // 운행중 표시만 남은 기사(GPS 문서 없음) 되돌리기 — 위 경고 카드에서 호출.
+  const handleForceEndDriver = async (d) => {
+    setForceBusy(d.id);
+    try {
+      await forceEndRun({ companyId, vehicleId: d.vehicleId, driverId: d.id });
+      setForceDone(x => ({ ...x, [d.id]: true }));
+      setForceConfirm(null);
+    } catch (e) {
+      alert(`정리하지 못했습니다: ${e.message}`);
+    } finally {
+      setForceBusy(null);
+    }
+  };
 
   return (
     <div style={MS.wrap}>
@@ -908,9 +954,103 @@ function MapTab({ companyId, allowed, drivers }) {
             <div style={{ fontSize:12, fontWeight:700, color:"#B26A00", marginBottom:8 }}>⚠ GPS 미수신 (운행중) {noGpsRunning.length}</div>
             {noGpsRunning.map(d => (
               <div key={d.id} style={{ fontSize:11, color:"var(--color-label)", padding:"3px 0" }}>
-                <span style={{ fontWeight:700 }}>{d.name}</span>
-                <span style={{ color:"var(--color-label-mute)", marginLeft:6 }}>{d.vehicleNo || "차량 미지정"}</span>
-                <span style={{ color:"#B26A00", marginLeft:6 }}>신호 없음</span>
+                <div>
+                  <span style={{ fontWeight:700 }}>{d.name}</span>
+                  <span style={{ color:"var(--color-label-mute)", marginLeft:6 }}>{d.vehicleNo || "차량 미지정"}</span>
+                  <span style={{ color:"#B26A00", marginLeft:6 }}>신호 없음</span>
+                </div>
+                {/* 운행이 이미 끝났는데 상태만 "운행중" 으로 남은 기사를 관리자가 되돌린다
+                    (기사가 운행 종료를 못 누른 채 앱 종료·폰 꺼짐 등). 2026-07-28 */}
+                {forceDone[d.id] ? (
+                  <div style={{ fontSize:10, color:"var(--color-positive)", marginTop:2 }}>✓ 대기 상태로 되돌렸습니다</div>
+                ) : forceConfirm === d.id ? (
+                  <div style={{ marginTop:4, padding:"6px 8px", background:"#fff", border:"1px solid #F0C68A", borderRadius:6 }}>
+                    <div style={{ fontSize:10, color:"var(--color-label)", lineHeight:1.5 }}>
+                      <b>{d.name}</b> 기사를 <b>대기</b> 상태로 되돌립니다.
+                      {d.startedAt && <><br />운행 시작 기록: {String(d.startedAt).slice(0, 10)}</>}
+                      <br />운행 중인 기사라면 실행하지 마세요.
+                    </div>
+                    <div style={{ display:"flex", gap:6, marginTop:6 }}>
+                      <button disabled={forceBusy === d.id} onClick={() => handleForceEndDriver(d)}
+                        style={{ flex:1, fontSize:10, fontWeight:700, padding:"5px 0", borderRadius:5, border:"none", background:"var(--color-destructive)", color:"#fff", cursor: forceBusy === d.id ? "default":"pointer", fontFamily:"inherit", opacity: forceBusy === d.id ? .6:1 }}>
+                        {forceBusy === d.id ? "처리 중…" : "운행 강제 종료"}
+                      </button>
+                      <button onClick={() => setForceConfirm(null)}
+                        style={{ flex:1, fontSize:10, fontWeight:700, padding:"5px 0", borderRadius:5, border:"1px solid var(--color-line)", background:"#fff", color:"var(--color-label-mute)", cursor:"pointer", fontFamily:"inherit" }}>
+                        취소
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => setForceConfirm(d.id)}
+                    style={{ marginTop:2, fontSize:10, fontWeight:700, color:"#B26A00", background:"transparent", border:"1px solid #E8B87A", borderRadius:5, padding:"2px 6px", cursor:"pointer", fontFamily:"inherit" }}>
+                    운행 강제 종료
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 🧹 잔존 운행 신호(2026-07-28 개선요청) — 기사가 "운행 종료"를 못 누른 채 남은
+            gps 문서. 직원·승객앱 노선 탭이 이 문서 존재만 세어 "운행중"을 계속 표시한다.
+            지울지는 마지막 신호 경과시간을 보고 운영자가 판단(자동 삭제 안 함). */}
+        {visibleStaleSignals.length > 0 && (
+          <div style={{ borderTop:"1px solid var(--color-line)", padding:"10px 12px", background:"var(--color-bg-soft)" }}>
+            <div style={{ fontSize:12, fontWeight:700, color:"var(--color-label)", marginBottom:2 }}>
+              🧹 잔존 운행 신호 {visibleStaleSignals.length}
+            </div>
+            <div style={{ fontSize:10, color:"var(--color-label-mute)", marginBottom:8, lineHeight:1.5 }}>
+              마지막 신호가 {STALE_SIGNAL_MIN}분 넘게 끊긴 차량입니다. 승객·직원 화면에는 아직 <b>운행중</b>으로 보입니다.
+            </div>
+            {visibleStaleSignals.map(s => (
+              <div key={s.id} style={{ padding:"6px 0", borderTop:"1px solid var(--color-line)" }}>
+                <div style={{ fontSize:11, color:"var(--color-label)" }}>
+                  <span style={{ fontWeight:700 }}>{s.routeName || "노선 미지정"}</span>
+                  <span style={{ color:"var(--color-label-mute)", marginLeft:6 }}>{s.vehicleNo || s.vehicleId}</span>
+                </div>
+                <div style={{ fontSize:10, color:"var(--color-label-mute)", marginTop:2, display:"flex", flexWrap:"wrap", gap:6, alignItems:"center" }}>
+                  <span>기사 {s.driverName || "–"}</span>
+                  <span style={{ color:"var(--color-destructive)", fontWeight:700 }}>마지막 신호 {s.ageLabel}</span>
+                  <span style={{ border:"1px solid var(--color-line)", borderRadius:4, padding:"0 4px", background:"#fff" }}>
+                    {s.source === "device" ? "🛰 단말" : "📱 모바일"}
+                  </span>
+                  {s.orphan && (
+                    <span style={{ border:"1px solid #E8B87A", color:"#B26A00", borderRadius:4, padding:"0 4px", background:"#FFF4E5" }}>
+                      배정 기사 없음
+                    </span>
+                  )}
+                </div>
+                {forceDone[s.id] ? (
+                  <div style={{ fontSize:10, color:"var(--color-positive)", marginTop:4 }}>✓ 정리했습니다</div>
+                ) : forceConfirm === s.id ? (
+                  <div style={{ marginTop:5, padding:"7px 8px", background:"#fff", border:"1px solid var(--color-line)", borderRadius:6 }}>
+                    <div style={{ fontSize:10, color:"var(--color-label)", lineHeight:1.55 }}>
+                      이 신호를 지우면 승객·직원 화면에서 <b>운행중</b> 표시가 사라집니다.
+                      <br />마지막 신호: <b>{s.ageLabel}</b>
+                      {s.ownerDriverId && <><br />{s.ownerDriverName} 기사도 <b>대기</b> 상태로 되돌립니다.</>}
+                      {s.source === "device" && (
+                        <><br /><span style={{ color:"#B26A00" }}>단말(GPS 기기) 차량입니다 — 운행 시간대에는 잠시 뒤 신호가 다시 올라옵니다.</span></>
+                      )}
+                      <br /><span style={{ color:"var(--color-label-mute)" }}>지금 운행 중인 차량이면 실행하지 마세요.</span>
+                    </div>
+                    <div style={{ display:"flex", gap:6, marginTop:6 }}>
+                      <button disabled={forceBusy === s.id} onClick={() => handleForceEnd(s)}
+                        style={{ flex:1, fontSize:10, fontWeight:700, padding:"5px 0", borderRadius:5, border:"none", background:"var(--color-destructive)", color:"#fff", cursor: forceBusy === s.id ? "default":"pointer", fontFamily:"inherit", opacity: forceBusy === s.id ? .6:1 }}>
+                        {forceBusy === s.id ? "처리 중…" : "운행 강제 종료"}
+                      </button>
+                      <button onClick={() => setForceConfirm(null)}
+                        style={{ flex:1, fontSize:10, fontWeight:700, padding:"5px 0", borderRadius:5, border:"1px solid var(--color-line)", background:"#fff", color:"var(--color-label-mute)", cursor:"pointer", fontFamily:"inherit" }}>
+                        취소
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => setForceConfirm(s.id)}
+                    style={{ marginTop:4, fontSize:10, fontWeight:700, color:"var(--color-primary-deep)", background:"#fff", border:"1px solid var(--color-line)", borderRadius:5, padding:"3px 8px", cursor:"pointer", fontFamily:"inherit" }}>
+                    운행 강제 종료
+                  </button>
+                )}
               </div>
             ))}
           </div>
