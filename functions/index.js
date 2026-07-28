@@ -151,9 +151,13 @@ exports.sendNoticeToCompany = onDocumentCreated("fcmQueue/{queueId}", async (eve
 // ════════════════════════════════════════════════════════
 
 // 발송할 푸시 메시지(공지 발송과 동일한 high-priority 구조 재사용).
-function buildPreArrivalMessage(tokens, { companyId, threshold, stopName }) {
+function buildPreArrivalMessage(tokens, { companyId, threshold, stopName, scheduleBased, minutesLeft }) {
   const title = "버스 도착 알림";
-  const body = threshold === "pre2"
+  // scheduleBased = GPS 가 끊겨 실측 도착을 못 잡을 때의 시간표 기반 폴백.
+  // 정확도가 다르므로 **문구로 정직하게 구분**한다(실측인 척하면 신뢰를 잃는다).
+  const body = scheduleBased
+    ? `예정 시각 기준 약 ${minutesLeft}분 뒤 도착 예정입니다`
+    : threshold === "pre2"
     ? "버스가 곧 도착해요 — 2 정거장 전입니다"
     : "버스가 한 정거장 앞이에요. 정류장으로 이동하세요";
   return {
@@ -164,6 +168,7 @@ function buildPreArrivalMessage(tokens, { companyId, threshold, stopName }) {
       companyId,
       threshold,            // "pre1" | "pre2"
       stopName: stopName || "",
+      source: scheduleBased ? "schedule" : "gps",  // 소비측이 정확도를 구분할 수 있게
       title,
       body,
     },
@@ -321,6 +326,197 @@ exports.notifyPreArrival = onDocumentUpdated(
       await event.data.after.ref.update({
         preArrivalNotified: admin.firestore.FieldValue.arrayUnion(...newMarkers),
       });
+    }
+  }
+);
+
+// ════════════════════════════════════════════════════════
+// (2026-07-29) 도착 임박 알림 — 시간표 기반 폴백
+//
+// 문제: 위 `notifyPreArrival` 은 dispatch 의 `stopArrivals` **갱신 트리거 하나**에만 매달려
+//   있고, stopArrivals 는 기사 폰 GPS 도착 감지의 산물이다. GPS 가 끊기면 도착 기록이 없고,
+//   그러면 알림도 통째로 안 나간다 — 에러도 로그도 안 남는 silent 공백.
+//   prod 실측(2026-07-28, dy001 최근 14일): 배차 372건 중 **281건(76%) 미발송**,
+//   어떤 날은 그날 배차 전체가 미발송이었다.
+//
+// 해법: 정류장 `offsetMin`(87% 채워져 있음)과 노선 `departTime` 으로 **예정 도착 시각**을
+//   계산해, GPS 가 죽은 배차에 한해 시간표 기준으로 발송한다. 부정확하지만 무알림보다 낫고
+//   문구에 "예정 시각 기준"이라고 명시해 실측과 구분한다.
+//
+// 🔴 안전장치 3중(알림 폭탄이 제일 큰 위험이다):
+//   ① **회사별 옵트인** — `companies/{cid}.preArrivalScheduleFallback === true` 일 때만 동작.
+//      배포만으로는 아무 일도 일어나지 않는다(기본 꺼짐).
+//   ② **GPS 가 살아 있으면 발송 안 함** — 실측 경로가 정상 동작 중인데 폴백이 먼저 나가면
+//      정확한 알림을 부정확한 알림이 밀어낸다. 그 차량 gps 문서가 신선하면 건너뛴다.
+//   ③ **멱등 마커를 실측 경로와 공유**(`{stopId}:pre1`) — 어느 쪽이 먼저 보내든 다른 쪽은
+//      마커를 보고 skip 한다. 중복 0(양방향).
+//
+// ⚠ 마커 기록 정책이 실측 경로와 다르다: 실측은 대상 0명이어도 마커를 남기지만(재발화 비용
+//   차단), 폴백은 **대상 0명이면 마커를 남기지 않는다** — 매분 도는 구조라 재평가 비용이
+//   작고, 승객이 lead 창 안에서 뒤늦게 '내 정류장'을 지정해도 받을 수 있어야 하기 때문.
+
+const PRE_ARRIVAL_LEAD_MIN_DEFAULT = 5;   // 예정 시각 몇 분 전에 보낼지
+const PRE_ARRIVAL_GPS_FRESH_SEC = 180;    // 이보다 최근 좌표가 있으면 "실측이 살아 있음"
+
+/** 노선 시간표 메타(캐시) — 좌표는 필요 없고 offsetMin 만 본다.
+ *  `loadRouteMeta`(폴러용)는 좌표 없는 정류장을 버리므로 여기선 별도 로더를 쓴다. */
+async function loadRouteSchedule(db, cid, routeId, cache) {
+  if (!routeId) return null;
+  const key = `${cid}__${routeId}`;
+  if (key in cache) return cache[key];
+  let meta = null;
+  try {
+    const rSnap = await db.collection("companies").doc(cid).collection("routes").doc(routeId).get();
+    if (rSnap.exists) {
+      const rv = rSnap.data() || {};
+      const stopsSnap = await db.collection("companies").doc(cid)
+        .collection("routes").doc(routeId).collection("stops").orderBy("order").get();
+      meta = {
+        departTime: rv.departTime || null,
+        stops: stopsSnap.docs.map(d => {
+          const v = d.data() || {};
+          return {
+            id: d.id,
+            name: v.name || "",
+            offsetMin: typeof v.offsetMin === "number" ? v.offsetMin : null,
+          };
+        }),
+      };
+    }
+  } catch (e) {
+    console.warn(`[도착임박:시간표] 노선 로드 실패 ${cid}/${routeId}: ${e.message}`);
+  }
+  cache[key] = meta;
+  return meta;
+}
+
+/** 순수 판정 — 지금 알려야 할 정류장 목록. 격리 테스트 대상(scripts/test_prearrival_schedule.cjs).
+ *  @returns [{stopId, name, minutesLeft, marker}]  (예정 시각이 가까운 순) */
+function dueStopsBySchedule({ stops, departTime, nowMin, leadMin, notified }) {
+  const dm = hhmmToMinutes(departTime);
+  if (dm === null || !Array.isArray(stops)) return [];
+  const lead = Number.isFinite(leadMin) && leadMin > 0 ? leadMin : PRE_ARRIVAL_LEAD_MIN_DEFAULT;
+  const done = Array.isArray(notified) ? notified : [];
+  const out = [];
+  for (const s of stops) {
+    if (!s || typeof s.offsetMin !== "number" || !isFinite(s.offsetMin)) continue; // 시간표 없는 정류장
+    const planned = dm + Math.round(s.offsetMin);
+    const left = planned - nowMin;
+    // 이미 지난 정류장(left<=0)엔 보내지 않는다 — 배포 직후 과거분 대량 발송 차단.
+    if (left <= 0 || left > lead) continue;
+    const marker = `${s.id}:pre1`;
+    if (done.includes(marker)) continue;
+    out.push({ stopId: s.id, name: s.name || "", minutesLeft: left, marker });
+  }
+  return out.sort((a, b) => a.minutesLeft - b.minutesLeft);
+}
+
+exports.notifyPreArrivalBySchedule = onSchedule(
+  { schedule: "* * * * *", timeZone: "Asia/Seoul", region: "us-central1" },
+  async () => {
+    const db = admin.firestore();
+    const now = new Date();
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(now);
+    const hhmm = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false,
+    }).format(now);
+    const nowMin = hhmmToMinutes(hhmm);
+    if (nowMin === null) return;
+
+    const companies = await db.collection("companies").get();
+    for (const c of companies.docs) {
+      const cid = c.id;
+      const cv = c.data() || {};
+      // ① 옵트인 게이트 — 켜지 않은 회사에선 아무 일도 일어나지 않는다.
+      if (cv.preArrivalScheduleFallback !== true) continue;
+      const leadMin = typeof cv.preArrivalLeadMin === "number" && cv.preArrivalLeadMin > 0
+        ? cv.preArrivalLeadMin : PRE_ARRIVAL_LEAD_MIN_DEFAULT;
+
+      try {
+        const dispSnap = await db.collection("companies").doc(cid)
+          .collection("dispatches").doc(today).collection("list").get();
+        if (dispSnap.empty) continue;
+
+        // ② 살아 있는 GPS 차량 집합 — 회사당 1회 조회(배차마다 읽으면 비용이 배로 든다).
+        const freshVeh = new Set();
+        try {
+          const gpsSnap = await db.collection("gps").where("companyId", "==", cid).get();
+          gpsSnap.docs.forEach(g => {
+            const v = g.data() || {};
+            const t = v.updatedAt && typeof v.updatedAt.toMillis === "function" ? v.updatedAt.toMillis() : null;
+            if (t !== null && Date.now() - t <= PRE_ARRIVAL_GPS_FRESH_SEC * 1000 && v.vehicleId) {
+              freshVeh.add(v.vehicleId);
+            }
+          });
+        } catch (e) {
+          console.warn(`[도착임박:시간표] gps 조회 실패 ${cid}: ${e.message}`);
+        }
+
+        const routeCache = {};
+        for (const d of dispSnap.docs) {
+          const dv = d.data() || {};
+          if (!dv.routeId) continue;
+          // 실측 경로가 살아 있으면 폴백은 물러난다.
+          if (dv.vehicleId && freshVeh.has(dv.vehicleId)) continue;
+
+          const meta = await loadRouteSchedule(db, cid, dv.routeId, routeCache);
+          if (!meta || !meta.departTime) continue;   // departTime 없는 노선 = 시간표 없음
+
+          const due = dueStopsBySchedule({
+            stops: meta.stops,
+            departTime: dv.departTime || meta.departTime,  // 배차가 시각을 덮어썼으면 그쪽 우선
+            nowMin,
+            leadMin,
+            notified: dv.preArrivalNotified,
+          });
+          if (due.length === 0) continue;
+
+          const newMarkers = [];
+          for (const t of due) {
+            const tokSnap = await db.collection("companies").doc(cid)
+              .collection("fcmTokens")
+              .where("routeId", "==", dv.routeId)
+              .where("stopId", "==", t.stopId)
+              .get();
+            const tokens = tokSnap.docs.map(x => x.data().token).filter(Boolean);
+            if (tokens.length === 0) continue;   // 마커 미기록(위 주석 참조)
+
+            const message = buildPreArrivalMessage(tokens, {
+              companyId: cid,
+              threshold: "pre1",
+              stopName: t.name,
+              scheduleBased: true,
+              minutesLeft: t.minutesLeft,
+            });
+            const resp = await admin.messaging().sendEachForMulticast(message);
+            console.log(`[도착임박:시간표] ${cid} ${dv.routeId} stop=${t.stopId} ${t.minutesLeft}분전 — 성공:${resp.successCount} 실패:${resp.failureCount}`);
+            newMarkers.push(t.marker);
+
+            // 무효 토큰 자동 삭제(실측 경로와 동일 처리).
+            const dels = [];
+            resp.responses.forEach((r, idx) => {
+              if (r.success) return;
+              const code = r.error && r.error.code;
+              if (code === "messaging/invalid-registration-token" ||
+                  code === "messaging/registration-token-not-registered") {
+                dels.push(
+                  db.collection("companies").doc(cid).collection("fcmTokens")
+                    .where("token", "==", tokens[idx]).get()
+                    .then(s => s.docs.forEach(x => x.ref.delete()))
+                );
+              }
+            });
+            await Promise.all(dels);
+          }
+          if (newMarkers.length > 0) {
+            await d.ref.update({
+              preArrivalNotified: admin.firestore.FieldValue.arrayUnion(...newMarkers),
+            });
+          }
+        }
+      } catch (e) {
+        console.error(`[도착임박:시간표] 회사 처리 실패 ${cid}: ${e.message}`);
+      }
     }
   }
 );
