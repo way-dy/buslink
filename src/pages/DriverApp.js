@@ -5,7 +5,9 @@ import { collection, query, where, getDocs, doc, updateDoc, getDoc, onSnapshot, 
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { startGPS, stopGPS, clearGPS, triggerHeartbeat } from "../lib/gps";
 import { planTimeForStop, computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
-import { buildCumulativeLengths, projectToPolyline } from "../lib/routeProgress";
+import { buildCumulativeLengths, projectToPolyline, toLatLngPath } from "../lib/routeProgress";
+import { computeGuide, kakaoMapDirectionsUrl, stopLatLng, splitGuidePath, guideView } from "../lib/navGuide";
+import { Map, MapMarker, Polyline, CustomOverlayMap } from "react-kakao-maps-sdk";
 import { buildRunId, recordEtaDiagnostic, throttleGate } from "../lib/etaDiag";
 import { ensureGeolocationPermission } from "../lib/usePermissions";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
@@ -1060,17 +1062,31 @@ export default function DriverApp({ companyId: propCompanyId }) {
             해결법을 안내해야 한다. 탭을 숨기면 그 안내가 도달 불가능해져 기사는
             "NFC 가 왜 없지?"만 겪는다. */}
         <div style={S.tabRow}>
-          {["운행", "탑승 QR", "NFC"].map(tab => (
+          {["운행", "길안내", "탑승 QR", "NFC"].map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
               style={{ ...S.tabBtn, ...(activeTab === tab ? S.tabBtnActive : S.tabBtnIdle) }}>
-              {tab === "탑승 QR" && <Icon name="qr" size={16} />} {tab === "NFC" && "📇 "}
+              {tab === "탑승 QR" && <Icon name="qr" size={16} />} {tab === "NFC" && "📇 "}{tab === "길안내" && "🧭 "}
               {tab === "탑승 QR" && boardingMode === "passenger-qr" ? "QR 스캔" : tab}
             </button>
           ))}
         </div>
 
-        {/* ─ 운행 탭: 정류장 현황 ─ */}
-        {(!driving || activeTab === "운행") && stops.length > 0 && (
+        {/* ─ 길안내 탭 (2026-07-28) ─ */}
+        {activeTab === "길안내" && (
+          <DriverNavGuide
+            stops={stops}
+            routePath={routePath}
+            currentStopIdx={currentStopIdx}
+            livePos={liveVehiclePos}
+            estByStopId={estByStopId}
+            deviceGps={deviceGps}
+          />
+        )}
+
+        {/* ─ 운행 탭: 정류장 현황 ─
+            ⚠ 미운행 시엔 탭과 무관하게 목록을 보여주던 기존 동작 유지(회귀 0).
+               길안내 탭에서만 목록을 감춘다(지도가 그 자리를 대신하므로). */}
+        {activeTab !== "길안내" && (!driving || activeTab === "운행") && stops.length > 0 && (
           <div style={S.listCard}>
             <div style={S.listHeader}>
               <span style={S.listTitle}>오늘 운행 정류장</span>
@@ -1817,6 +1833,218 @@ function DriverPassengerScan({ companyId, driver, dispatch, currentStop }) {
           <button onClick={reset} style={{ ...S.primaryBtn, maxWidth: 280 }}>다시 시도</button>
         </>
       )}
+    </div>
+  );
+}
+
+// ─── 길안내 (2026-07-28 way 요청 "초보 기사를 위한 네비게이션") ─────────────
+// 기사앱에는 지도가 **아예 없었다**(승객·직원·관리자 앱엔 전부 있는데) → 초행 노선을 맡은
+// 기사가 다음에 어디로 가야 하는지 앱에서 확인할 방법이 없었다. 이 탭이 그 구멍을 메운다.
+//
+// ⚠ 웹은 턴바이턴 음성 안내를 못 한다 → 음성이 필요하면 외부 내비(카카오맵)로 넘긴다.
+//   그런데 외부 앱을 띄우면 이 앱이 백그라운드로 가 위치 전송이 끊긴다(2026-06-26 실측:
+//   앱이 화면 앞에 있었는데도 GPS 가 65분 비어 관제에 버스가 멈춰 보였다).
+//   → 폰 GPS 차량에는 경고를 같이 띄운다. 단말(device) 차량은 위치가 단말에서 오므로 무관.
+//
+// 판정은 순수 모듈 `lib/navGuide.js`(격리 테스트), 여기선 표시만. gps.js·stopSchedule.js
+// 핫경로는 건드리지 않는다(회귀 가드 다수).
+function DriverNavGuide({ stops, routePath, currentStopIdx, livePos, estByStopId, deviceGps }) {
+  const [myPos, setMyPos] = useState(null);
+  const [view, setView] = useState(null); // {center, level} — 안내 대상 바뀔 때만 갱신
+  const mapObjRef = useRef(null);
+
+  // 운행 시작 전에도 길안내가 필요하다(초행 노선 미리보기) → 이 탭이 열려 있는 동안만
+  // 자체 측위. startGPS 파이프라인은 건드리지 않고 별도 watch 를 쓰고 언마운트 시 해제.
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    const w = navigator.geolocation.watchPosition(
+      p => setMyPos({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 }
+    );
+    return () => navigator.geolocation.clearWatch(w);
+  }, []);
+
+  // 운행 중이면 서버에 올라간 위치(관제·승객앱이 보는 것과 동일), 아니면 내 폰 위치.
+  const pos = livePos || myPos;
+  const guide = computeGuide({ stops, currentStopIdx, pos, estByStopId });
+  const target = guide.stop;
+  const targetLL = target ? stopLatLng(target) : null;
+  const naviUrl = target ? kakaoMapDirectionsUrl(target) : null;
+
+  // 경로 = 관리자가 그린 routePath 우선, 없으면 정류장 직선 폴백(하위호환).
+  const drawn = toLatLngPath(routePath);
+  const path = drawn.length >= 2 ? drawn : stops.map(stopLatLng).filter(Boolean);
+
+  // 길안내의 핵심 — 노선 전체를 한 줄로 그리면 "지금 어디로 가라"가 안 읽힌다.
+  // 지나온 / **지금 가야 할** / 그 이후로 잘라 가야 할 구간만 굵게 뽑는다.
+  const seg = splitGuidePath({ path, pos, targetLL });
+
+  // 지도 시점 — 내 위치와 다음 정류장이 한 화면에. **안내 대상이 바뀔 때만** 적용한다
+  // (라이브 위치마다 옮기면 기사가 손으로 움직인 화면과 싸운다 · 2026-06-23 관제와 같은 함정).
+  // 운행 시작 전에는 **노선 전체**를 보여준다 — 기사가 먼저 알아야 할 건 "이 노선이 어디로
+  // 도는가" 이고, 다음 정류장(수백 m)만 기준으로 확대하면 나머지 노선이 화면 밖으로 나간다.
+  const beforeRun = currentStopIdx < 0;
+  const didFitRef = useRef(false);
+  useEffect(() => {
+    const v = guideView({ pos, targetLL, path: beforeRun ? path : null });
+    if (v) { setView(v); didFitRef.current = !!pos; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guide.targetIdx]);
+  useEffect(() => {
+    // 진입 직후엔 아직 위치가 없다 → 첫 측위가 들어오면 그때 한 번 맞춘다.
+    if (didFitRef.current || !pos) return;
+    const v = guideView({ pos, targetLL, path: beforeRun ? path : null });
+    if (v) { setView(v); didFitRef.current = true; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pos]);
+  const mapCenter = view?.center || targetLL || pos || path[0] || { lat: 37.3894, lng: 126.9522 };
+  const mapLevel = view?.level || 5;
+
+  const stopPts = stops.map((s, i) => ({ s, i, ll: stopLatLng(s) })).filter(x => x.ll);
+
+  return (
+    <div style={{ ...S.listCard, padding: 0, overflow: "hidden" }}>
+      {/* 안내 카드 — 다음에 가야 할 곳 */}
+      <div style={{ padding: "14px 14px 12px" }}>
+        {guide.finished ? (
+          <div style={{ fontSize: 16, fontWeight: 800, color: "var(--color-label-mute)" }}>
+            오늘 운행 정류장을 모두 지났습니다
+          </div>
+        ) : !target ? (
+          <div style={{ fontSize: 15, color: "var(--color-label-mute)" }}>
+            이 노선에 등록된 정류장이 없습니다
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--color-primary-deep)", marginBottom: 4 }}>
+              다음 {guide.isLast ? "· 종점" : `${guide.targetIdx + 1}번째 정류장`}
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 900, color: "var(--color-label)", lineHeight: 1.2 }}>
+              {target.name || "이름 없음"}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 22, fontWeight: 900, color: "var(--color-primary)" }}>
+                {guide.remainLabel}
+              </span>
+              {guide.headingLabel && (
+                <span style={{ fontSize: 15, fontWeight: 800, color: "var(--color-label-alt)" }}>
+                  {guide.headingLabel}쪽
+                </span>
+              )}
+              {guide.plannedAt && (
+                <span style={{ fontSize: 14, fontWeight: 700, color: "var(--color-label-mute)" }}>
+                  예정 {guide.plannedAt}
+                </span>
+              )}
+            </div>
+            {!guide.hasPos && (
+              <div style={{ fontSize: 12, color: "var(--color-cautionary)", marginTop: 6, fontWeight: 700 }}>
+                위치를 확인하는 중입니다 — 남은 거리는 잠시 후 표시됩니다
+              </div>
+            )}
+            {target.address && (
+              <div style={{ fontSize: 13, color: "var(--color-label-mute)", marginTop: 6 }}>{target.address}</div>
+            )}
+            {target.description && (
+              <div style={{ fontSize: 13, color: "var(--color-label)", marginTop: 6, whiteSpace: "pre-wrap" }}>
+                {target.description}
+              </div>
+            )}
+            {/* 정류장 사진 — 초보 기사에겐 "여기서 세우세요"가 좌표보다 확실하다 */}
+            {target.photo && (
+              <div style={{ marginTop: 10 }}>
+                <img src={target.photo} alt={`${target.name || "정류장"} 사진`}
+                  style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 10, border: "1px solid var(--color-line)" }} />
+                <div style={{ fontSize: 11, color: "var(--color-label-mute)", marginTop: 4 }}>이 위치에서 정차합니다</div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* 지도 — 컨테이너가 생성 시점에 0px 일 수 있어 relayout 방어(카카오는 자동 안 함) */}
+      <div style={{ height: 320, position: "relative" }}>
+        <Map center={mapCenter} style={{ width: "100%", height: "100%" }} level={mapLevel}
+          onCreate={m => { mapObjRef.current = m; m.relayout(); setTimeout(() => m.relayout(), 300); }}>
+          {/* 그 이후 구간 — 흐리게(맥락만) */}
+          {seg.later.length >= 2 && (
+            <Polyline path={seg.later} strokeWeight={4} strokeColor="#0066FF" strokeOpacity={0.25} strokeStyle="shortdash" />
+          )}
+          {/* 지나온 구간 — 회색 */}
+          {seg.passed.length >= 2 && (
+            <Polyline path={seg.passed} strokeWeight={4} strokeColor="#8896AA" strokeOpacity={0.45} strokeStyle="solid" />
+          )}
+          {/* ★ 지금 가야 할 구간 — 굵고 진하게. 이 화면에서 눈이 제일 먼저 가야 할 것 */}
+          {seg.ahead.length >= 2 && (
+            <Polyline path={seg.ahead} strokeWeight={9} strokeColor="#0066FF" strokeOpacity={0.95} strokeStyle="solid" />
+          )}
+          {/* 경로가 아예 없을 때만 전체 노선 폴백 표시 */}
+          {seg.ahead.length < 2 && seg.later.length < 2 && path.length >= 2 && (
+            <Polyline path={path} strokeWeight={5} strokeColor="#0066FF" strokeOpacity={0.6} strokeStyle="solid" />
+          )}
+          {stopPts.map(({ s, i, ll }) => (
+            <CustomOverlayMap key={s.id || i} position={ll} yAnchor={0.5}>
+              <div style={{
+                minWidth: 22, height: 22, padding: "0 5px", borderRadius: 11,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 11, fontWeight: 900, fontFamily: "inherit",
+                background: i === guide.targetIdx ? "var(--color-primary)" : i <= currentStopIdx ? "var(--color-positive)" : "#fff",
+                color: i === guide.targetIdx || i <= currentStopIdx ? "#fff" : "var(--color-label)",
+                border: `2px solid ${i === guide.targetIdx ? "var(--color-primary)" : i <= currentStopIdx ? "var(--color-positive)" : "var(--color-line)"}`,
+                boxShadow: i === guide.targetIdx ? "0 0 0 5px rgba(0,102,255,0.22)" : "0 1px 4px rgba(0,0,0,.2)",
+                whiteSpace: "nowrap",
+              }}>
+                {i + 1}
+              </div>
+            </CustomOverlayMap>
+          ))}
+          {pos && <MapMarker position={pos} />}
+        </Map>
+        {/* 지도 이동 후 되돌아오는 버튼 — 자동 재센터 대신 수동(패닝과 안 싸우게) */}
+        <div style={{ position: "absolute", right: 10, bottom: 10, display: "flex", gap: 6, zIndex: 2 }}>
+          {pos && (
+            <button onClick={() => setView({ center: { ...pos }, level: 4 })}
+              style={{ fontSize: 12, fontWeight: 800, padding: "8px 12px", borderRadius: 8, border: "1px solid var(--color-line)", background: "#fff", color: "var(--color-label)", cursor: "pointer", fontFamily: "inherit", boxShadow: "0 2px 8px rgba(0,0,0,.15)" }}>
+              내 위치
+            </button>
+          )}
+          {targetLL && (
+            <button onClick={() => setView(guideView({ pos, targetLL }) || { center: { ...targetLL }, level: 4 })}
+              style={{ fontSize: 12, fontWeight: 800, padding: "8px 12px", borderRadius: 8, border: "none", background: "var(--color-primary)", color: "#fff", cursor: "pointer", fontFamily: "inherit", boxShadow: "0 2px 8px rgba(0,102,255,.3)" }}>
+              가야 할 길
+            </button>
+          )}
+          {path.length >= 2 && (
+            <button onClick={() => setView(guideView({ pos, targetLL, path }))}
+              style={{ fontSize: 12, fontWeight: 800, padding: "8px 12px", borderRadius: 8, border: "1px solid var(--color-line)", background: "#fff", color: "var(--color-label)", cursor: "pointer", fontFamily: "inherit", boxShadow: "0 2px 8px rgba(0,0,0,.15)" }}>
+              노선 전체
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 외부 내비 — 음성 안내가 필요할 때만. 위치 전송이 끊기는 대가를 미리 알린다. */}
+      <div style={{ padding: "12px 14px 14px" }}>
+        {naviUrl ? (
+          <>
+            <a href={naviUrl} target="_blank" rel="noreferrer"
+              style={{ ...S.primaryBtn, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, textDecoration: "none", maxWidth: "none" }}>
+              🧭 카카오맵으로 길안내
+            </a>
+            {!deviceGps && (
+              <div style={{ fontSize: 12, color: "var(--color-cautionary)", marginTop: 8, lineHeight: 1.5, fontWeight: 700 }}>
+                길안내 앱을 켜면 이 화면이 뒤로 가면서 위치 전송이 멈출 수 있습니다.
+                도착하면 이 앱으로 다시 돌아와 주세요.
+              </div>
+            )}
+          </>
+        ) : target ? (
+          <div style={{ fontSize: 12, color: "var(--color-label-mute)" }}>
+            이 정류장은 위치가 등록되어 있지 않아 길안내를 열 수 없습니다. 관리자에게 알려주세요.
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
