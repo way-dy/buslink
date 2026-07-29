@@ -188,6 +188,38 @@ export function guideView({ pos, targetLL, path } = {}) {
 }
 
 /**
+ * 지금 안내할 회전 지점 — 내 위치보다 **앞에 있는** 안내 중 가장 가까운 것.
+ *
+ * 카카오모빌리티 길찾기가 준 `guides`(회전 안내)를 경로 진행거리 기준으로 고른다.
+ * 직선거리로 고르면 자기교차·왕복 노선에서 이미 지나친 안내가 다시 잡힌다.
+ *
+ * @returns {{guide, aheadMeters, label}|null}
+ */
+export function nextNaviGuide({ guides, path, pos } = {}) {
+  if (!Array.isArray(guides) || guides.length === 0) return null;
+  if (!Array.isArray(path) || path.length < 2 || !pos) return null;
+  const cum = buildCumulativeLengths(path);
+  const my = projectToPolyline(pos, path, cum);
+  if (!my) return null;
+  let best = null;
+  for (const g of guides) {
+    if (!g || !Number.isFinite(g.lat) || !Number.isFinite(g.lng)) continue;
+    const p = projectToPolyline({ lat: g.lat, lng: g.lng }, path, cum);
+    if (!p) continue;
+    const ahead = p.progress - my.progress;
+    if (ahead <= 0) continue;                       // 이미 지난 안내
+    if (!best || ahead < best.aheadMeters) best = { guide: g, aheadMeters: ahead };
+  }
+  if (!best) return null;
+  const text = (best.guide.guidance || best.guide.name || "").trim();
+  return {
+    ...best,
+    // "300m 앞 우회전" — 거리를 앞에 둬야 운전 중 눈에 먼저 들어온다.
+    label: text ? `${formatDistance(best.aheadMeters)} 앞 ${text}` : formatDistance(best.aheadMeters),
+  };
+}
+
+/**
  * 카카오맵 길찾기 링크 — SDK·앱키 불필요, 아이폰·안드로이드 모두 동작.
  * 앱이 깔려 있으면 앱으로, 아니면 웹으로 열린다.
  * ⚠ 좌표 없는 정류장은 null → 호출부가 버튼을 숨긴다(빈 링크로 카카오맵을 열면 엉뚱한 곳).

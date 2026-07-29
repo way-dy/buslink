@@ -4,6 +4,9 @@ const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 // 개선 요청 구글챗 웹훅 — 시크릿 우선(getImprovementWebhookUrl 가 env→Firestore config 순 폴백).
 const GCHAT_WEBHOOK_URL = defineSecret("GCHAT_WEBHOOK_URL");
+// 카카오모빌리티 길찾기 REST 키(buslink 전용 앱). 기사 길안내의 도로 경로·회전 안내용.
+// ⚠ 지도 JS 키(58bf34…)와 다른 키다 — 그쪽은 브라우저용·도메인 화이트리스트, 이건 서버용.
+const KAKAO_REST_KEY = defineSecret("KAKAO_REST_KEY");
 const admin = require("firebase-admin");
 // 외부 운수 시스템(busin.co.kr) 서버사이드 fetch 용 — CORS·비표준 cert chain 때문에
 // 브라우저/클라이언트 fetch 불가, node http/https 로만 접근(rejectUnauthorized:false).
@@ -327,6 +330,156 @@ exports.notifyPreArrival = onDocumentUpdated(
         preArrivalNotified: admin.firestore.FieldValue.arrayUnion(...newMarkers),
       });
     }
+  }
+);
+
+// ════════════════════════════════════════════════════════
+// (2026-07-29) 기사 길안내 — 카카오모빌리티 다중 경유지 길찾기
+//
+// 배경: 관리자가 손으로 찍은 `routePath` 는 점 간격 중앙값 128m 라 "여기서 우회전"을
+//   근사조차 못 한다(실측: 154~174° 지그재그 노이즈가 실제 회전과 구분 안 됨).
+//   도로 데이터가 있어야 하고, 그걸 주는 게 이 API.
+//
+// 왜 앱을 안 떠나는가: 카카오내비 **앱**은 웹에 임베드할 수 없지만, 길찾기 **API** 는
+//   도로 좌표(vertexes)와 회전 안내(guides)를 JSON 으로 준다 → 우리 지도에 우리가 그리고
+//   우리가 읽어준다. 외부 앱으로 나가지 않으므로 기사 폰 GPS 가 안 끊기고, 그래서
+//   승객 도착 알림([[notifyPreArrival]])도 영향을 안 받는다.
+//
+// 🔴 **응답을 저장하지 않는다** — 카카오모빌리티 운영 정책상 결과의 자체 DB 저장·재사용이
+//   금지다(공식 답변 확인, 2026-07-29). 그래서 노선당 1회 받아 캐시하는 방식을 쓰지 않고
+//   요청 때마다 호출해 **그대로 돌려주기만** 한다(서버에도 클라에도 영속 저장 없음).
+//   무료 쿼터 = 다중 경유지 5,000건/일. 우리 사용량은 배차 ~30건/일이라 여유가 크다.
+//
+// 실패해도 치명적이지 않다 — 클라이언트는 기존 `routePath` 로 자동 폴백한다.
+
+const KAKAO_NAVI_URL = "https://apis-navi.kakaomobility.com/v1/waypoints/directions";
+const KAKAO_NAVI_MAX_WAYPOINTS = 30;   // API 상한(총 1,500km 미만)
+
+/** 카카오모빌리티 길찾기 POST — 응답 JSON 반환. 저장하지 않는다. */
+function postKakaoNavi(body, restKey) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const u = new URL(KAKAO_NAVI_URL);
+    const req = https.request({
+      hostname: u.hostname,
+      path: u.pathname,
+      method: "POST",
+      headers: {
+        Authorization: `KakaoAK ${restKey}`,
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload),
+      },
+      timeout: 10000,
+    }, (res) => {
+      let raw = "";
+      res.setEncoding("utf8");
+      res.on("data", (c) => { raw += c; });
+      res.on("end", () => {
+        if (res.statusCode !== 200) {
+          // 401/403 = 키 문제, 429 = 쿼터 — 메시지에 상태코드를 남겨 진단 가능하게.
+          return reject(new Error(`카카오 길찾기 HTTP ${res.statusCode}: ${raw.slice(0, 200)}`));
+        }
+        try { resolve(JSON.parse(raw)); } catch (e) { reject(new Error("응답 파싱 실패")); }
+      });
+    });
+    req.on("timeout", () => { req.destroy(new Error("카카오 길찾기 응답 시간 초과")); });
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+exports.getNaviRoute = onCall(
+  { region: "us-central1", secrets: [KAKAO_REST_KEY] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
+    const { companyId, routeId } = request.data || {};
+    if (!companyId || !routeId) throw new HttpsError("invalid-argument", "companyId·routeId 가 필요합니다");
+
+    const db = admin.firestore();
+    // 호출자 검증 — 같은 회사의 기사/관리자만(익명 승객이 쿼터를 소모하지 못하게).
+    const uSnap = await db.collection("users").doc(request.auth.uid).get();
+    const u = uSnap.exists ? (uSnap.data() || {}) : {};
+    const role = u.role;
+    if (!["driver", "admin", "superadmin"].includes(role)) {
+      throw new HttpsError("permission-denied", "권한이 없습니다");
+    }
+    if (role !== "superadmin" && u.companyId !== companyId) {
+      throw new HttpsError("permission-denied", "다른 회사의 노선입니다");
+    }
+
+    const stopsSnap = await db.collection("companies").doc(companyId)
+      .collection("routes").doc(routeId).collection("stops").orderBy("order").get();
+    const pts = [];
+    stopsSnap.docs.forEach((d) => {
+      const ll = stopLatLng(d.data() || {});
+      if (ll) pts.push({ name: (d.data() || {}).name || "", x: ll.lng, y: ll.lat });
+    });
+    if (pts.length < 2) throw new HttpsError("failed-precondition", "좌표가 있는 정류장이 2곳 이상이어야 합니다");
+
+    // 경유지 상한 초과 시 균등 간격으로 솎아낸다(정류장이 30개를 넘는 노선은 현재 없지만 방어).
+    let mid = pts.slice(1, -1);
+    if (mid.length > KAKAO_NAVI_MAX_WAYPOINTS) {
+      const step = mid.length / KAKAO_NAVI_MAX_WAYPOINTS;
+      mid = Array.from({ length: KAKAO_NAVI_MAX_WAYPOINTS }, (_, i) => mid[Math.floor(i * step)]);
+    }
+
+    let json;
+    try {
+      json = await postKakaoNavi({
+        origin: pts[0],
+        destination: pts[pts.length - 1],
+        waypoints: mid,
+        priority: "RECOMMEND",
+        car_fuel: "DIESEL",   // 버스 — 요금 추정에만 쓰이고 경로에는 영향 미미
+        summary: false,       // roads(vertexes)·guides 를 받으려면 false
+      }, KAKAO_REST_KEY.value());
+    } catch (e) {
+      console.warn(`[길안내] 카카오 호출 실패 ${companyId}/${routeId}: ${e.message}`);
+      throw new HttpsError("unavailable", "길찾기를 불러오지 못했습니다");
+    }
+
+    const route = (json.routes || [])[0];
+    if (!route || (route.result_code !== 0 && route.result_code !== undefined)) {
+      throw new HttpsError("unavailable", `길찾기 결과 없음: ${route ? route.result_msg : "빈 응답"}`);
+    }
+
+    // vertexes 는 [x1,y1,x2,y2,…] 1차원 배열이고 **x=경도, y=위도**다(뒤집으면 대서양으로 간다).
+    const path = [];
+    const guides = [];
+    (route.sections || []).forEach((sec) => {
+      (sec.roads || []).forEach((rd) => {
+        const v = rd.vertexes || [];
+        for (let i = 0; i + 1 < v.length; i += 2) {
+          const lng = Number(v[i]), lat = Number(v[i + 1]);
+          if (isFinite(lat) && isFinite(lng)) path.push({ lat, lng });
+        }
+      });
+      (sec.guides || []).forEach((g) => {
+        // type 100=출발지(안내할 것 없음) · 1000=경유지(우리 정류장 — 화면 위쪽 카드가
+        // 이미 크게 보여주므로 회전 안내 배너에 "경유지"가 끼면 방해만 된다) 제외.
+        // 나머지(회전·목적지 101)는 그대로 전달.
+        if (g.type === 100 || g.type === 1000) return;
+        const lat = Number(g.y), lng = Number(g.x);
+        if (!isFinite(lat) || !isFinite(lng)) return;
+        guides.push({
+          lat, lng,
+          name: g.name || "",
+          guidance: g.guidance || "",
+          type: g.type,
+        });
+      });
+    });
+    if (path.length < 2) throw new HttpsError("unavailable", "경로 좌표를 받지 못했습니다");
+
+    console.log(`[길안내] ${companyId}/${routeId} 경로 ${path.length}점·안내 ${guides.length}개 (정류장 ${pts.length})`);
+    // 저장하지 않고 그대로 반환한다(카카오 정책).
+    return {
+      path,
+      guides,
+      distance: route.summary ? route.summary.distance : null,
+      duration: route.summary ? route.summary.duration : null,
+    };
   }
 );
 

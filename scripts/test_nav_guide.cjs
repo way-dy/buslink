@@ -20,7 +20,7 @@ const rp = loadModule("src/lib/routeProgress.js");
 const { haversine, buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom } = rp;
 const G = loadModule("src/lib/navGuide.js", { haversine, buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom });
 const { stopLatLng, formatDistance, bearing, compassLabel, guideTargetIndex, computeGuide,
-  kakaoMapDirectionsUrl, splitGuidePath, fitLevel, guideView } = G;
+  kakaoMapDirectionsUrl, splitGuidePath, fitLevel, guideView, nextNaviGuide } = G;
 
 let pass = 0, fail = 0;
 const ok = (n, c, x) => { if (c) { pass++; console.log(`  ✅ ${n}`); } else { fail++; console.log(`  ❌ ${n}${x !== undefined ? " — " + JSON.stringify(x) : ""}`); } };
@@ -191,6 +191,33 @@ console.log("\n[12] fitLevel / guideView — 내 위치와 다음 정류장이 �
   eq("경로가 빈 배열이면 기존과 동일", guideView({ pos: me, targetLL: nearTarget, path: [] }).level, near.level);
   ok("경로에 잘못된 점이 섞여도 throw 없음",
     !!guideView({ pos: me, targetLL: nearTarget, path: [null, { lat: "x", lng: 1 }, wholeRoute[2]] }));
+}
+
+console.log("\n[13] nextNaviGuide — 카카오 회전 안내 중 '앞에 있는' 것만");
+{
+  const path = [0, 1, 2, 3, 4].map((i) => ({ lat: 37.4, lng: 127.0 + i * 0.01 }));
+  const guides = [
+    { lat: 37.4, lng: 127.005, guidance: "우회전", type: 2 },   // 내 뒤(지나침)
+    { lat: 37.4, lng: 127.025, guidance: "좌회전", type: 1 },   // 앞
+    { lat: 37.4, lng: 127.035, guidance: "목적지", type: 101 }, // 더 앞
+  ];
+  const me = { lat: 37.4, lng: 127.015 };
+  const r = nextNaviGuide({ guides, path, pos: me });
+  eq("가장 가까운 앞쪽 안내 선택", r.guide.guidance, "좌회전");
+  ok("거리는 양수", r.aheadMeters > 0, r.aheadMeters);
+  ok("라벨은 '거리 앞 문구'", /^\d+m 앞 좌회전$|^[\d.]+km 앞 좌회전$/.test(r.label), r.label);
+
+  // 모든 안내를 지나쳤으면 null
+  eq("전부 지나침", nextNaviGuide({ guides: [guides[0]], path, pos: me }), null);
+  eq("안내 없음", nextNaviGuide({ guides: [], path, pos: me }), null);
+  eq("경로 없음", nextNaviGuide({ guides, path: [], pos: me }), null);
+  eq("위치 없음", nextNaviGuide({ guides, path, pos: null }), null);
+  eq("인자 없음", nextNaviGuide(), null);
+  ok("좌표 깨진 안내는 건너뜀", nextNaviGuide({
+    guides: [{ lat: NaN, lng: 1, guidance: "깨짐" }, guides[1]], path, pos: me,
+  }).guide.guidance === "좌회전");
+  ok("문구 없으면 거리만", /^\d+m$|^[\d.]+km$/.test(
+    nextNaviGuide({ guides: [{ lat: 37.4, lng: 127.025 }], path, pos: me }).label));
 }
 
 console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);

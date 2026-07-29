@@ -6,7 +6,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { startGPS, stopGPS, clearGPS, triggerHeartbeat } from "../lib/gps";
 import { planTimeForStop, computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
 import { buildCumulativeLengths, projectToPolyline, toLatLngPath } from "../lib/routeProgress";
-import { computeGuide, kakaoMapDirectionsUrl, stopLatLng, splitGuidePath, guideView } from "../lib/navGuide";
+import { computeGuide, kakaoMapDirectionsUrl, stopLatLng, splitGuidePath, guideView, nextNaviGuide } from "../lib/navGuide";
 import { Map, MapMarker, Polyline, CustomOverlayMap } from "react-kakao-maps-sdk";
 import { buildRunId, recordEtaDiagnostic, throttleGate } from "../lib/etaDiag";
 import { ensureGeolocationPermission } from "../lib/usePermissions";
@@ -1074,6 +1074,8 @@ export default function DriverApp({ companyId: propCompanyId }) {
         {/* ─ 길안내 탭 (2026-07-28) ─ */}
         {activeTab === "길안내" && (
           <DriverNavGuide
+            companyId={companyId}
+            routeId={dispatch?.routeId}
             stops={stops}
             routePath={routePath}
             currentStopIdx={currentStopIdx}
@@ -1848,10 +1850,33 @@ function DriverPassengerScan({ companyId, driver, dispatch, currentStop }) {
 //
 // 판정은 순수 모듈 `lib/navGuide.js`(격리 테스트), 여기선 표시만. gps.js·stopSchedule.js
 // 핫경로는 건드리지 않는다(회귀 가드 다수).
-function DriverNavGuide({ stops, routePath, currentStopIdx, livePos, estByStopId, deviceGps }) {
+function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, livePos, estByStopId, deviceGps }) {
   const [myPos, setMyPos] = useState(null);
   const [view, setView] = useState(null); // {center, level} — 안내 대상 바뀔 때만 갱신
   const mapObjRef = useRef(null);
+  // 카카오모밀리티 도로 경로·회전 안내(2026-07-29). 저장하지 않고 화면에서만 쓴다.
+  const [navi, setNavi] = useState(null);        // {path, guides}
+  const [naviState, setNaviState] = useState("idle"); // idle|loading|ok|fail
+
+  const loadNavi = useCallback(async () => {
+    if (!companyId || !routeId) return;
+    setNaviState("loading");
+    try {
+      const fn = httpsCallable(getFunctions(undefined, "us-central1"), "getNaviRoute");
+      const r = await fn({ companyId, routeId });
+      const d = r?.data || {};
+      if (Array.isArray(d.path) && d.path.length >= 2) {
+        setNavi({ path: d.path, guides: Array.isArray(d.guides) ? d.guides : [] });
+        setNaviState("ok");
+      } else setNaviState("fail");
+    } catch (e) {
+      console.warn("[BusLink] 길찾기 로드 실패:", e?.message || e);
+      setNaviState("fail");
+    }
+  }, [companyId, routeId]);
+
+  // 노선이 정해지면 1회 로드. 결과는 저장하지 않으므로 노선이 바뀌면 다시 받는다.
+  useEffect(() => { setNavi(null); loadNavi(); }, [loadNavi]);
 
   // 운행 시작 전에도 길안내가 필요하다(초행 노선 미리보기) → 이 탭이 열려 있는 동안만
   // 자체 측위. startGPS 파이프라인은 건드리지 않고 별도 watch 를 쓰고 언마운트 시 해제.
@@ -1872,9 +1897,14 @@ function DriverNavGuide({ stops, routePath, currentStopIdx, livePos, estByStopId
   const targetLL = target ? stopLatLng(target) : null;
   const naviUrl = target ? kakaoMapDirectionsUrl(target) : null;
 
-  // 경로 = 관리자가 그린 routePath 우선, 없으면 정류장 직선 폴백(하위호환).
+  // 경로 우선순위: ① 카카오 도로 경로(회전 안내 포함) ② 관리자가 그린 routePath
+  // ③ 정류장 직선. ①이 실패해도 ②③으로 자동 폴백되므로 화면이 비지 않는다.
   const drawn = toLatLngPath(routePath);
-  const path = drawn.length >= 2 ? drawn : stops.map(stopLatLng).filter(Boolean);
+  const path = (navi && navi.path.length >= 2)
+    ? navi.path
+    : drawn.length >= 2 ? drawn : stops.map(stopLatLng).filter(Boolean);
+  // 회전 안내는 카카오 경로가 있을 때만(손으로 그린 경로로는 회전을 못 잡는다 — 실측 확인).
+  const turn = navi ? nextNaviGuide({ guides: navi.guides, path, pos }) : null;
 
   // 길안내의 핵심 — 노선 전체를 한 줄로 그리면 "지금 어디로 가라"가 안 읽힌다.
   // 지나온 / **지금 가야 할** / 그 이후로 잘라 가야 할 구간만 굵게 뽑는다.
@@ -1917,6 +1947,22 @@ function DriverNavGuide({ stops, routePath, currentStopIdx, livePos, estByStopId
           </div>
         ) : (
           <>
+            {/* ★ 회전 안내 — 운전 중엔 이게 제일 먼저 읽혀야 한다(거리 → 동작 순서) */}
+            {turn && (
+              <div style={{
+                display: "flex", alignItems: "center", gap: 10, marginBottom: 10,
+                padding: "12px 14px", borderRadius: 12,
+                background: "var(--color-primary)", color: "#fff",
+              }}>
+                <span style={{ fontSize: 26, lineHeight: 1 }}>↱</span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.2 }}>{turn.label}</div>
+                  {turn.guide.name && (
+                    <div style={{ fontSize: 12, opacity: 0.9, marginTop: 2 }}>{turn.guide.name}</div>
+                  )}
+                </div>
+              </div>
+            )}
             <div style={{ fontSize: 12, fontWeight: 700, color: "var(--color-primary-deep)", marginBottom: 4 }}>
               다음 {guide.isLast ? "· 종점" : `${guide.targetIdx + 1}번째 정류장`}
             </div>
@@ -2022,6 +2068,20 @@ function DriverNavGuide({ stops, routePath, currentStopIdx, livePos, estByStopId
             </button>
           )}
         </div>
+      </div>
+
+      {/* 경로 출처 표시 — 도로 경로인지 손으로 그린 경로인지 기사가 알 수 있게 */}
+      <div style={{ padding: "8px 14px 0", fontSize: 11, color: "var(--color-label-mute)", display: "flex", alignItems: "center", gap: 8 }}>
+        {naviState === "loading" ? "도로 경로를 불러오는 중…"
+          : naviState === "ok" ? "🛣 도로 경로 · 회전 안내 사용 중"
+          : naviState === "fail" ? "등록된 노선 경로로 안내 중(도로 경로를 못 받았습니다)"
+          : ""}
+        {naviState === "fail" && (
+          <button onClick={loadNavi}
+            style={{ fontSize: 11, fontWeight: 700, color: "var(--color-primary-deep)", background: "none", border: "1px solid var(--color-line)", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontFamily: "inherit" }}>
+            다시 시도
+          </button>
+        )}
       </div>
 
       {/* 외부 내비 — 음성 안내가 필요할 때만. 위치 전송이 끊기는 대가를 미리 알린다. */}
