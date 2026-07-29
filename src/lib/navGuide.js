@@ -38,6 +38,11 @@ export function formatDistance(m) {
 
 const COMPASS = ["북", "북동", "동", "남동", "남", "남서", "서", "북서"];
 
+/** 경로에서 이보다 멀면 "노선 위에 있지 않다"고 본다(m).
+ *  왕복 도로폭·GPS 오차·정류장 진입로를 감안한 값. 너무 크면 옆 도로를 달리면서도
+ *  노선 위로 오판하고, 너무 작으면 정상 운행 중에 자꾸 벗어났다고 나온다. */
+export const OFF_ROUTE_M = 300;
+
 /** 두 지점 사이 방위(도) — 정북 0, 시계방향. */
 export function bearing(from, to) {
   if (!from || !to) return null;
@@ -114,17 +119,24 @@ export function computeGuide({ stops, currentStopIdx = -1, pos = null, estByStop
  * @returns {{passed:Array, ahead:Array, later:Array}}
  *   passed 지나온 구간 · ahead **지금부터 다음 정류장까지(강조 대상)** · later 그 이후
  */
-export function splitGuidePath({ path, pos, targetLL } = {}) {
-  const empty = { passed: [], ahead: [], later: [] };
+export function splitGuidePath({ path, pos, targetLL, prevLL, maxOffRouteM = OFF_ROUTE_M } = {}) {
+  const empty = { passed: [], ahead: [], later: [], onRoute: false };
   if (!Array.isArray(path) || path.length < 2) return empty;
   const cum = buildCumulativeLengths(path);
   const total = cum[cum.length - 1];
   if (!(total > 0)) return empty;
 
+  // ⚠ projectToPolyline 은 아무리 멀어도 최근접점으로 투영한다 → 경로에서 한참 떨어진
+  //   곳(차고지·집·사무실)에서 보면 노선 중간 엉뚱한 지점이 "내 위치"가 되어 그 뒤 안내가
+  //   전부 어긋난다(2026-07-29 way 현장 확인: 16km 밖에서 "1.3km 앞 우회전"이 떴다).
+  //   그래서 수직거리를 검사해 **경로 위에 있을 때만** 내 위치를 기준점으로 쓴다.
   const myProj = pos ? projectToPolyline(pos, path, cum) : null;
+  const onRoute = !!(myProj && myProj.perpDist <= maxOffRouteM);
   const tgtProj = targetLL ? projectToPolyline(targetLL, path, cum) : null;
-  const myM = myProj ? myProj.progress : 0;
   const tgtM = tgtProj ? tgtProj.progress : total;
+  // 경로 밖이면 "직전 정류장 → 다음 정류장"이 지금 가야 할 구간이다(직전이 없으면 노선 시작).
+  const prevProj = prevLL ? projectToPolyline(prevLL, path, cum) : null;
+  const myM = onRoute ? myProj.progress : (prevProj ? prevProj.progress : 0);
 
   const passed = myM > 0 ? pathUpTo(path, cum, myM) : [];
   let ahead = [];
@@ -132,12 +144,12 @@ export function splitGuidePath({ path, pos, targetLL } = {}) {
     // 내 위치 이후 경로를 뽑고, 거기서 다음 정류장까지만 자른다.
     const rest = pathFrom(path, cum, myM);
     ahead = pathUpTo(rest, null, tgtM - myM);
-  } else if (pos && targetLL) {
+  } else if (onRoute && pos && targetLL) {
     // 이미 지나쳤는데 도착 감지가 안 된 경우 — 경로 대신 직선으로라도 방향을 준다.
     ahead = [pos, targetLL];
   }
   const later = tgtM < total ? pathFrom(path, cum, tgtM) : [];
-  return { passed, ahead, later };
+  return { passed, ahead, later, onRoute };
 }
 
 /** 두 지점이 한 화면에 들어오는 카카오맵 확대 단계(작을수록 확대). */
@@ -195,12 +207,15 @@ export function guideView({ pos, targetLL, path } = {}) {
  *
  * @returns {{guide, aheadMeters, label}|null}
  */
-export function nextNaviGuide({ guides, path, pos } = {}) {
+export function nextNaviGuide({ guides, path, pos, maxOffRouteM = OFF_ROUTE_M } = {}) {
   if (!Array.isArray(guides) || guides.length === 0) return null;
   if (!Array.isArray(path) || path.length < 2 || !pos) return null;
   const cum = buildCumulativeLengths(path);
   const my = projectToPolyline(pos, path, cum);
   if (!my) return null;
+  // 🔴 경로 밖이면 아예 안내하지 않는다 — 엉뚱한 회전을 알려주는 것보다 없는 게 낫다
+  //   (16km 밖에서 "1.3km 앞 우회전"이 뜨던 결함, 2026-07-29).
+  if (my.perpDist > maxOffRouteM) return null;
   let best = null;
   for (const g of guides) {
     if (!g || !Number.isFinite(g.lat) || !Number.isFinite(g.lng)) continue;

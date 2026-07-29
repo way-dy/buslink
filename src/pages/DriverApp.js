@@ -1908,7 +1908,9 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
 
   // 길안내의 핵심 — 노선 전체를 한 줄로 그리면 "지금 어디로 가라"가 안 읽힌다.
   // 지나온 / **지금 가야 할** / 그 이후로 잘라 가야 할 구간만 굵게 뽑는다.
-  const seg = splitGuidePath({ path, pos, targetLL });
+  // 직전 정류장 — 경로에서 멀리 떨어져 있을 때(차고지·출발 전) 기준점이 된다.
+  const prevLL = guide.targetIdx > 0 ? stopLatLng(stops[guide.targetIdx - 1]) : null;
+  const seg = splitGuidePath({ path, pos, targetLL, prevLL });
 
   // 지도 시점 — 내 위치와 다음 정류장이 한 화면에. **안내 대상이 바뀔 때만** 적용한다
   // (라이브 위치마다 옮기면 기사가 손으로 움직인 화면과 싸운다 · 2026-06-23 관제와 같은 함정).
@@ -2072,7 +2074,10 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
 
       {/* 경로 출처 표시 — 도로 경로인지 손으로 그린 경로인지 기사가 알 수 있게 */}
       <div style={{ padding: "8px 14px 0", fontSize: 11, color: "var(--color-label-mute)", display: "flex", alignItems: "center", gap: 8 }}>
-        {naviState === "loading" ? "도로 경로를 불러오는 중…"
+        {/* 노선에서 멀리 떨어져 있으면 회전 안내를 끄고 그 사실을 말해준다 —
+            안내가 그냥 없으면 기사는 고장으로 오해한다. */}
+        {pos && !seg.onRoute ? "노선에서 떨어져 있어 회전 안내는 표시하지 않습니다 · 노선에 올라서면 시작됩니다"
+          : naviState === "loading" ? "도로 경로를 불러오는 중…"
           : naviState === "ok" ? "🛣 도로 경로 · 회전 안내 사용 중"
           : naviState === "fail" ? "등록된 노선 경로로 안내 중(도로 경로를 못 받았습니다)"
           : ""}

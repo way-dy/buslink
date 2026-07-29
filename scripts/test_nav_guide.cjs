@@ -20,7 +20,7 @@ const rp = loadModule("src/lib/routeProgress.js");
 const { haversine, buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom } = rp;
 const G = loadModule("src/lib/navGuide.js", { haversine, buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom });
 const { stopLatLng, formatDistance, bearing, compassLabel, guideTargetIndex, computeGuide,
-  kakaoMapDirectionsUrl, splitGuidePath, fitLevel, guideView, nextNaviGuide } = G;
+  kakaoMapDirectionsUrl, splitGuidePath, fitLevel, guideView, nextNaviGuide, OFF_ROUTE_M } = G;
 
 let pass = 0, fail = 0;
 const ok = (n, c, x) => { if (c) { pass++; console.log(`  ✅ ${n}`); } else { fail++; console.log(`  ❌ ${n}${x !== undefined ? " — " + JSON.stringify(x) : ""}`); } };
@@ -160,9 +160,9 @@ console.log("\n[11] splitGuidePath — 길안내의 핵심: '지금 가야 할 �
   const passedTarget = splitGuidePath({ path, pos: { lat: 37.4, lng: 127.03 }, targetLL: target });
   eq("지나쳤어도 안내선 2점", passedTarget.ahead.length, 2);
 
-  eq("경로 없음", splitGuidePath({ path: [], pos: me, targetLL: target }), { passed: [], ahead: [], later: [] });
-  eq("인자 없음", splitGuidePath(), { passed: [], ahead: [], later: [] });
-  eq("점 1개", splitGuidePath({ path: [{ lat: 37.4, lng: 127 }] }), { passed: [], ahead: [], later: [] });
+  eq("경로 없음", splitGuidePath({ path: [], pos: me, targetLL: target }), { passed: [], ahead: [], later: [], onRoute: false });
+  eq("인자 없음", splitGuidePath(), { passed: [], ahead: [], later: [], onRoute: false });
+  eq("점 1개", splitGuidePath({ path: [{ lat: 37.4, lng: 127 }] }), { passed: [], ahead: [], later: [], onRoute: false });
 }
 
 console.log("\n[12] fitLevel / guideView — 내 위치와 다음 정류장이 한 화면에");
@@ -218,6 +218,35 @@ console.log("\n[13] nextNaviGuide — 카카오 회전 안내 중 '앞에 있는
   }).guide.guidance === "좌회전");
   ok("문구 없으면 거리만", /^\d+m$|^[\d.]+km$/.test(
     nextNaviGuide({ guides: [{ lat: 37.4, lng: 127.025 }], path, pos: me }).label));
+}
+
+console.log("\n[14] 🔴 경로에서 멀리 떨어져 있을 때 — 엉뚱한 지점에 투영되면 안 된다");
+{
+  // 2026-07-29 way 현장 확인: "완전히 멀리 떨어져 있을 때 경로가 안 맞게 나온다
+  // (이전 정류장에서의 안내 같다)". projectToPolyline 은 거리 제한이 없어 아무리 멀어도
+  // 경로상 최근접점으로 투영된다 → 노선 중간에 찍히고 거기부터 안내가 계산됐다.
+  const path = [0, 1, 2, 3, 4].map((i) => ({ lat: 37.4, lng: 127.0 + i * 0.01 }));
+  const target = { lat: 37.4, lng: 127.03 };          // 4번째 점
+  const prev = { lat: 37.4, lng: 127.02 };            // 3번째 점(직전 정류장)
+  const farAway = { lat: 37.55, lng: 127.02 };        // 경로에서 북쪽으로 ~16km
+
+  const r = splitGuidePath({ path, pos: farAway, targetLL: target, prevLL: prev });
+  ok("경로 밖으로 판정", r.onRoute === false, r.onRoute);
+  ok("가야 할 구간이 있다", r.ahead.length >= 2, r.ahead);
+  // 멀리 있을 땐 '직전 정류장 → 다음 정류장' 이 지금 가야 할 구간이어야 한다
+  ok("ahead 시작 ≈ 직전 정류장", Math.abs(r.ahead[0].lng - prev.lng) < 0.0015, r.ahead[0]);
+  ok("ahead 끝 ≈ 다음 정류장", Math.abs(r.ahead[r.ahead.length - 1].lng - target.lng) < 0.0015, r.ahead[r.ahead.length - 1]);
+
+  // 가까이 있으면 종전대로 내 위치부터
+  const near = { lat: 37.4001, lng: 127.025 };
+  const rn = splitGuidePath({ path, pos: near, targetLL: target, prevLL: prev });
+  ok("경로 위로 판정", rn.onRoute === true);
+  ok("ahead 시작 ≈ 내 위치", Math.abs(rn.ahead[0].lng - near.lng) < 0.002, rn.ahead[0]);
+
+  // 회전 안내는 경로 밖이면 아예 주지 않는다(엉뚱한 안내보다 없는 게 낫다)
+  const guides = [{ lat: 37.4, lng: 127.035, guidance: "우회전" }];
+  eq("경로 밖 → 회전 안내 없음", nextNaviGuide({ guides, path, pos: farAway }), null);
+  ok("경로 위 → 회전 안내 있음", !!nextNaviGuide({ guides, path, pos: near }));
 }
 
 console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);
