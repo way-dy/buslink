@@ -200,6 +200,32 @@ export function guideView({ pos, targetLL, path } = {}) {
 }
 
 /**
+ * 진행 방향(도) — 차량 마커를 어느 쪽으로 돌릴지.
+ *
+ * ⚠ 카카오 지도 웹 API 는 **지도 회전을 지원하지 않는다**(setBearing/rotate 없음·북쪽 고정).
+ *   그래서 "진행 방향이 위"로 만들 수 없고, 대신 **마커가 향한 방향**으로 알려준다.
+ *
+ * `coords.heading` 은 정지·저속에서 null 이거나 튄다 → 최근 이동 벡터를 우선 쓰고
+ * 그것도 없으면 heading, 둘 다 없으면 직전 값을 유지한다(홱홱 돌면 오히려 못 읽는다).
+ *
+ * @param {Object} p
+ * @param {Object} [p.prev]    직전 위치 {lat,lng}
+ * @param {Object} [p.cur]     현재 위치 {lat,lng}
+ * @param {number} [p.gpsHeading]  navigator 가 준 heading(도)
+ * @param {number} [p.fallback]    직전에 쓰던 방향(유지용)
+ * @param {number} [p.minMoveM]    이만큼은 움직여야 이동 벡터를 신뢰
+ * @returns {number|null}
+ */
+export function travelHeading({ prev, cur, gpsHeading, fallback = null, minMoveM = 8 } = {}) {
+  if (prev && cur && haversine(prev, cur) >= minMoveM) {
+    const b = bearing(prev, cur);
+    if (Number.isFinite(b)) return b;
+  }
+  if (Number.isFinite(gpsHeading) && gpsHeading >= 0) return gpsHeading;
+  return Number.isFinite(fallback) ? fallback : null;
+}
+
+/**
  * 지금 안내할 회전 지점 — 내 위치보다 **앞에 있는** 안내 중 가장 가까운 것.
  *
  * 카카오모빌리티 길찾기가 준 `guides`(회전 안내)를 경로 진행거리 기준으로 고른다.

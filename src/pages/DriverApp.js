@@ -5,9 +5,9 @@ import { collection, query, where, getDocs, doc, updateDoc, getDoc, onSnapshot, 
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { startGPS, stopGPS, clearGPS, triggerHeartbeat } from "../lib/gps";
 import { planTimeForStop, computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
-import { buildCumulativeLengths, projectToPolyline, toLatLngPath } from "../lib/routeProgress";
-import { computeGuide, kakaoMapDirectionsUrl, stopLatLng, splitGuidePath, guideView, nextNaviGuide } from "../lib/navGuide";
-import { Map, MapMarker, Polyline, CustomOverlayMap } from "react-kakao-maps-sdk";
+import { buildCumulativeLengths, projectToPolyline, toLatLngPath, haversine } from "../lib/routeProgress";
+import { computeGuide, kakaoMapDirectionsUrl, stopLatLng, splitGuidePath, guideView, nextNaviGuide, travelHeading } from "../lib/navGuide";
+import { Map, Polyline, CustomOverlayMap } from "react-kakao-maps-sdk";
 import { buildRunId, recordEtaDiagnostic, throttleGate } from "../lib/etaDiag";
 import { ensureGeolocationPermission } from "../lib/usePermissions";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
@@ -1852,6 +1852,7 @@ function DriverPassengerScan({ companyId, driver, dispatch, currentStop }) {
 // 핫경로는 건드리지 않는다(회귀 가드 다수).
 function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, livePos, estByStopId, deviceGps }) {
   const [myPos, setMyPos] = useState(null);
+  const [myGpsHeading, setMyGpsHeading] = useState(null); // navigator 가 준 진행 방향(정차 시 null)
   const [view, setView] = useState(null); // {center, level} — 안내 대상 바뀔 때만 갱신
   const mapObjRef = useRef(null);
   // 카카오모밀리티 도로 경로·회전 안내(2026-07-29). 저장하지 않고 화면에서만 쓴다.
@@ -1883,7 +1884,10 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
   useEffect(() => {
     if (!navigator.geolocation) return;
     const w = navigator.geolocation.watchPosition(
-      p => setMyPos({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      p => {
+        setMyPos({ lat: p.coords.latitude, lng: p.coords.longitude });
+        if (typeof p.coords.heading === "number" && !isNaN(p.coords.heading)) setMyGpsHeading(p.coords.heading);
+      },
       () => {},
       { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 }
     );
@@ -1892,6 +1896,22 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
 
   // 운행 중이면 서버에 올라간 위치(관제·승객앱이 보는 것과 동일), 아니면 내 폰 위치.
   const pos = livePos || myPos;
+
+  // 진행 방향 — 지도를 돌릴 수 없으니 마커를 돌린다. 직전 위치를 기억해 이동 벡터로 산출.
+  const prevPosRef = useRef(null);
+  const headingRef = useRef(null);
+  const [heading, setHeading] = useState(null);
+  useEffect(() => {
+    if (!pos) return;
+    const h = travelHeading({
+      prev: prevPosRef.current, cur: pos,
+      gpsHeading: myGpsHeading, fallback: headingRef.current,
+    });
+    if (h !== null && h !== headingRef.current) { headingRef.current = h; setHeading(h); }
+    // 충분히 움직였을 때만 기준점을 옮긴다(정차 중 미세 흔들림으로 방향이 튀지 않게).
+    if (!prevPosRef.current || haversine(prevPosRef.current, pos) >= 8) prevPosRef.current = pos;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pos && pos.lat, pos && pos.lng]);
   const guide = computeGuide({ stops, currentStopIdx, pos, estByStopId });
   const target = guide.stop;
   const targetLL = target ? stopLatLng(target) : null;
@@ -2047,7 +2067,25 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
               </div>
             </CustomOverlayMap>
           ))}
-          {pos && <MapMarker position={pos} />}
+          {/* 내 차량 — 진행 방향으로 회전하는 화살표.
+              ⚠ 카카오 지도 웹 API 는 지도 회전(heading-up)을 지원하지 않는다(북쪽 고정).
+              그래서 지도를 돌리는 대신 **마커가 향한 방향**으로 알린다. 방향을 아직 못
+              잡았으면(정차 등) 원형 점으로 — 없는 방향을 위쪽으로 그리면 거짓말이 된다. */}
+          {pos && (
+            <CustomOverlayMap position={pos} yAnchor={0.5} zIndex={5}>
+              <div style={{
+                width: 34, height: 34, borderRadius: "50%",
+                background: "var(--color-primary)", border: "3px solid #fff",
+                boxShadow: "0 2px 10px rgba(0,0,0,.35)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                color: "#fff", fontSize: 18, fontWeight: 900, lineHeight: 1,
+                transform: heading == null ? "none" : `rotate(${heading}deg)`,
+                transition: "transform .4s ease",
+              }}>
+                {heading == null ? "●" : "▲"}
+              </div>
+            </CustomOverlayMap>
+          )}
         </Map>
         {/* 지도 이동 후 되돌아오는 버튼 — 자동 재센터 대신 수동(패닝과 안 싸우게) */}
         <div style={{ position: "absolute", right: 10, bottom: 10, display: "flex", gap: 6, zIndex: 2 }}>

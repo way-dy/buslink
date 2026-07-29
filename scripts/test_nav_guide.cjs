@@ -20,7 +20,7 @@ const rp = loadModule("src/lib/routeProgress.js");
 const { haversine, buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom } = rp;
 const G = loadModule("src/lib/navGuide.js", { haversine, buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom });
 const { stopLatLng, formatDistance, bearing, compassLabel, guideTargetIndex, computeGuide,
-  kakaoMapDirectionsUrl, splitGuidePath, fitLevel, guideView, nextNaviGuide, OFF_ROUTE_M } = G;
+  kakaoMapDirectionsUrl, splitGuidePath, fitLevel, guideView, nextNaviGuide, OFF_ROUTE_M, travelHeading } = G;
 
 let pass = 0, fail = 0;
 const ok = (n, c, x) => { if (c) { pass++; console.log(`  ✅ ${n}`); } else { fail++; console.log(`  ❌ ${n}${x !== undefined ? " — " + JSON.stringify(x) : ""}`); } };
@@ -247,6 +247,23 @@ console.log("\n[14] 🔴 경로에서 멀리 떨어져 있을 때 — 엉뚱한 
   const guides = [{ lat: 37.4, lng: 127.035, guidance: "우회전" }];
   eq("경로 밖 → 회전 안내 없음", nextNaviGuide({ guides, path, pos: farAway }), null);
   ok("경로 위 → 회전 안내 있음", !!nextNaviGuide({ guides, path, pos: near }));
+}
+
+console.log("\n[15] travelHeading — 차량이 향한 방향(지도 회전을 못 하니 마커로 알린다)");
+{
+  const a = { lat: 37.40, lng: 127.00 };
+  const east = { lat: 37.40, lng: 127.01 };
+  const north = { lat: 37.41, lng: 127.00 };
+  ok("동쪽 이동 ≈ 90", Math.abs(travelHeading({ prev: a, cur: east }) - 90) < 2, travelHeading({ prev: a, cur: east }));
+  ok("북쪽 이동 ≈ 0", Math.abs(travelHeading({ prev: a, cur: north })) < 2, travelHeading({ prev: a, cur: north }));
+  // 거의 안 움직였으면 이동 벡터를 믿지 않는다(정차 중 방향이 홱홱 돈다)
+  const tiny = { lat: 37.400001, lng: 127.000001 };
+  eq("미세 이동은 gpsHeading 사용", travelHeading({ prev: a, cur: tiny, gpsHeading: 270 }), 270);
+  eq("미세 이동 + heading 없음 → 직전값 유지", travelHeading({ prev: a, cur: tiny, fallback: 123 }), 123);
+  eq("아무것도 없으면 null", travelHeading({}), null);
+  eq("인자 없음", travelHeading(), null);
+  eq("heading 이 음수(무효)면 폴백", travelHeading({ gpsHeading: -1, fallback: 45 }), 45);
+  ok("이동 벡터가 gpsHeading 보다 우선", Math.abs(travelHeading({ prev: a, cur: east, gpsHeading: 270 }) - 90) < 2);
 }
 
 console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);
