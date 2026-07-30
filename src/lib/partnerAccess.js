@@ -47,3 +47,31 @@ export function partnerCodeAllowed(allowed, code) {
   if (!code) return false;             // 협력사 미지정 = 제한 admin 비노출
   return allowed.includes(code);
 }
+
+/**
+ * 협력사 포털 노선 드롭다운 옵션 — **그 거래처 노선만** (2026-07-30 배시현 개선요청).
+ *
+ * 배경: PartnerApp 은 회사 **전 노선**을 불러 등록·수정 폼에 그대로 넘겼다. 그래서 담당자가
+ * 남의 거래처 노선을 골라 승객을 배정할 수 있었고, 실제로 prod 승객 13명 중 1명이 다른
+ * 거래처 노선에 배정된 상태로 발견됐다(표시만의 문제가 아니라 데이터가 틀어진다).
+ *
+ * 🔴 **현재 배정된 노선은 목록에 남긴다.** 수정 화면에서 select 의 현재 값이 옵션에 없으면
+ *   빈 선택으로 표시되고, 그대로 저장하면 **배정된 노선이 지워진다**. 거래처 미지정 노선이나
+ *   과거에 잘못 배정된 노선에 걸려 있는 승객이 실재하므로(prod 실측) 이 예외가 필수다.
+ *
+ * @param {Array}  routes   회사 전체 노선 [{id, code?, partnerCode?, name}]
+ * @param {string} code     이 포털의 업체코드
+ * @param {string} [current] 지금 폼에 들어 있는 값(routeCode 또는 routeId)
+ * @returns {Array} 드롭다운에 보일 노선
+ */
+export function partnerRouteOptions(routes, code, current) {
+  if (!Array.isArray(routes)) return [];
+  const cur = current === undefined || current === null || current === "" ? null : String(current);
+  return routes.filter((r) => {
+    if (!r) return false;
+    if (code && r.partnerCode === code) return true;
+    if (!cur) return false;
+    // 현재 값은 routeCode 로도 routeId 로도 들어올 수 있다(폼 계약이 둘을 섞어 쓴다).
+    return String(r.code || "") === cur || String(r.id || "") === cur;
+  });
+}

@@ -3,6 +3,7 @@ import {
   validatePartnerCode, parseEmployeeExcel,
   importEmployees, downloadSampleExcel, reissuePins
 } from "../lib/partner";
+import { partnerRouteOptions } from "../lib/partnerAccess";
 import QRCode from "qrcode";
 import { buildAccountCardsHtml, buildPassengerLoginUrl, openPrintWindow } from "../lib/accountCards";
 import { normalizeNfcUid, isValidNfcUid, formatNfcUid, isWebNfcSupported, createTagCooldown } from "../lib/nfc";
@@ -426,8 +427,13 @@ function SingleRegMode({ codeData, code, routes, onDone }) {
           <label style={S.label}>노선</label>
           <select style={S.input} value={form.routeCode} onChange={e=>setForm({...form,routeCode:e.target.value})}>
             <option value="">노선 선택</option>
-            {routes.map(r=><option key={r.id} value={r.code||r.id}>{r.name} ({r.code||r.id})</option>)}
+            {partnerRouteOptions(routes, code, form.routeCode).map(r=><option key={r.id} value={r.code||r.id}>{r.name} ({r.code||r.id})</option>)}
           </select>
+          {partnerRouteOptions(routes, code).length === 0 && (
+            <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:4 }}>
+              지정된 노선이 없습니다 — 관리자에게 노선 지정을 요청해 주세요
+            </div>
+          )}
         </div>
       </div>
       <label style={S.checkBox}>
@@ -517,7 +523,7 @@ function MultiRegMode({ codeData, code, routes, onDone }) {
             <select style={S.inputSm} value={row.routeCode}
               onChange={e=>updateRow(row.id,"routeCode",e.target.value)}>
               <option value="">노선</option>
-              {routes.map(r=><option key={r.id} value={r.code||r.id}>{r.code||r.name.substring(0,8)}</option>)}
+              {partnerRouteOptions(routes, code, row.routeCode).map(r=><option key={r.id} value={r.code||r.id}>{r.code||r.name.substring(0,8)}</option>)}
             </select>
             <div style={{ display:"flex", justifyContent:"center" }}>
               <input type="checkbox" checked={row.active}
@@ -970,7 +976,7 @@ function EmployeeManageMode({ codeData, code, routes }) {
             <label style={S.label}>노선</label>
             <select style={S.input} value={editForm.routeCode} onChange={e=>setEditForm({...editForm,routeCode:e.target.value})}>
               <option value="">노선 선택</option>
-              {routes.map(r=><option key={r.id} value={r.code||r.id}>{r.name} ({r.code||r.id})</option>)}
+              {partnerRouteOptions(routes, code, editForm.routeCode).map(r=><option key={r.id} value={r.code||r.id}>{r.name} ({r.code||r.id})</option>)}
             </select>
 
             <label style={S.checkBox}>
