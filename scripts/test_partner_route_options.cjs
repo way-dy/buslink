@@ -71,5 +71,40 @@ ok("배열에 null 요소 섞임", partnerRouteOptions([null, ROUTES[0]], CHAD).
 ok("빈 문자열 current 는 무시", !ids(partnerRouteOptions(ROUTES, CHAD, "")).includes("r4"));
 ok("인자 없음", partnerRouteOptions() .length === 0);
 
-console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);
+// ── 좌석예약 모드(2026-07-30) ─────────────────────────────
+const { seatReservationMode, canEnableSeatReservation, SEAT_MODES } = ctx;
+
+console.log("\n[6] 좌석예약 모드 정규화 — 모르는 값·부재는 전부 off(회귀 0)");
+ok("부재", seatReservationMode({}) === "off");
+ok("문서 없음", seatReservationMode(null) === "off");
+ok("optional", seatReservationMode({ seatReservation: "optional" }) === "optional");
+ok("required", seatReservationMode({ seatReservation: "required" }) === "required");
+ok("오타·구값은 off", seatReservationMode({ seatReservation: "Optional" }) === "off");
+ok("true 같은 옛 boolean 도 off", seatReservationMode({ seatReservation: true }) === "off");
+ok("상수 노출", SEAT_MODES.OFF === "off" && SEAT_MODES.REQUIRED === "required");
+
+console.log("\n[7] 🔴 정원 미설정 노선이 있으면 켤 수 없다");
+{
+  const R2 = [
+    { id: "a", name: "강남1", partnerCode: CHAD, seats: 45 },
+    { id: "b", name: "압구정", partnerCode: CHAD },          // 정원 없음
+    { id: "c", name: "판교", partnerCode: DAOU, seats: 25 },
+  ];
+  const chad = canEnableSeatReservation(R2, CHAD);
+  ok("켤 수 없음", chad.ok === false, chad);
+  ok("빠진 노선 이름을 알려준다", chad.missing.join() === "압구정", chad.missing);
+  ok("대상 노선 수", chad.total === 2);
+
+  const daou = canEnableSeatReservation(R2, DAOU);
+  ok("전부 정원 있으면 켤 수 있음", daou.ok === true, daou);
+  ok("빠진 것 없음", daou.missing.length === 0);
+
+  // seats:0 은 미설정 취급(정원 0석 노선은 없다)
+  ok("seats:0 은 미설정", canEnableSeatReservation([{ id: "z", name: "영석", partnerCode: CHAD, seats: 0 }], CHAD).ok === false);
+  // 노선이 아예 없는 거래처도 켤 수 없다(예약할 대상이 없다)
+  ok("노선 0개 거래처는 켤 수 없음", canEnableSeatReservation(R2, "DY001-없는곳").ok === false);
+  ok("routes 결측에도 throw 없음", canEnableSeatReservation(null, CHAD).ok === false);
+}
+
+console.log(`\n최종: ${pass} 통과 / ${fail} 실패`);
 process.exit(fail ? 1 : 0);

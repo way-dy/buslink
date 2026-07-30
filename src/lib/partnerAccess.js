@@ -75,3 +75,43 @@ export function partnerRouteOptions(routes, code, current) {
     return String(r.code || "") === cur || String(r.id || "") === cur;
   });
 }
+
+/**
+ * 좌석예약 모드 (2026-07-30 way 결정 — 고객사가 셋 중 고른다).
+ *
+ * boolean 이 아니라 **한 축의 3단계**다(탑승 모드 `boardingMode` 와 같은 방식):
+ *   off      예약 화면 자체를 안 보여준다. **부재·알 수 없는 값은 off**(신규 기능이라 회귀 0)
+ *   optional 좌석 확보형 — 예약자는 자리를 갖고, 미예약자도 정원 안이면 탑승
+ *   required 예약 필수형 — 미예약자는 기사 화면에 빨갛게 뜨고, 기사가 "태우기"로 예외 승차
+ *
+ * ⚠ required 라도 **탑승을 막지 않는다**. 막으면 예약 못 한 사람이 출근을 못 하고 기사가
+ *   사람을 막아야 한다 → 거부가 아니라 **기록 남는 예외 승차**로 정원 관리 목적만 달성한다.
+ */
+export const SEAT_MODES = { OFF: "off", OPTIONAL: "optional", REQUIRED: "required" };
+export const SEAT_MODE_LABELS = {
+  off: "사용 안 함",
+  optional: "좌석 확보형 (예약 없이도 탑승 가능)",
+  required: "예약 필수형 (미예약자는 기사 확인 후 탑승)",
+};
+
+/** 거래처 문서 → 정규화된 좌석예약 모드. 모르는 값·부재는 모두 off. */
+export function seatReservationMode(codeData) {
+  const v = codeData && codeData.seatReservation;
+  return v === SEAT_MODES.OPTIONAL || v === SEAT_MODES.REQUIRED ? v : SEAT_MODES.OFF;
+}
+
+/**
+ * 좌석예약을 켤 수 있는가 — **정원이 없으면 예약이 성립하지 않는다.**
+ * 안 막으면 "몇 자리인지 모르는 노선"에 예약 무제한이 조용히 성립한다.
+ *
+ * @param {Array}  routes 회사 전체 노선
+ * @param {string} code   이 거래처 업체코드
+ * @returns {{ok:boolean, missing:string[], total:number}} missing = 정원 미설정 노선명
+ */
+export function canEnableSeatReservation(routes, code) {
+  const mine = partnerRouteOptions(routes, code);
+  const missing = mine
+    .filter((r) => !(typeof r.seats === "number" && r.seats > 0))
+    .map((r) => r.name || r.id);
+  return { ok: mine.length > 0 && missing.length === 0, missing, total: mine.length };
+}

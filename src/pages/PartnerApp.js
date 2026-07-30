@@ -4,6 +4,7 @@ import {
   importEmployees, downloadSampleExcel, reissuePins
 } from "../lib/partner";
 import { partnerRouteOptions } from "../lib/partnerAccess";
+import { seatUsage } from "../lib/routeOrder";
 import QRCode from "qrcode";
 import { buildAccountCardsHtml, buildPassengerLoginUrl, openPrintWindow } from "../lib/accountCards";
 import { normalizeNfcUid, isValidNfcUid, formatNfcUid, isWebNfcSupported, createTagCooldown } from "../lib/nfc";
@@ -868,8 +869,34 @@ function EmployeeManageMode({ codeData, code, routes }) {
     if (!ok) alert("팝업이 차단되었습니다. 브라우저 팝업 차단을 해제한 뒤 다시 시도하세요.");
   };
 
+  // 정원 대비 등록 인원(2026-07-30) — 노선 좌석수 대비 몇 명 배정됐는지. 이미 갖고 있는
+  // 승객 목록·노선으로 집계하므로 신규 조회 0. 이 거래처 노선만 보여준다.
+  const seat = seatUsage(partnerRouteOptions(routes, code), employees.map(e => ({ routeId: e.routeId || e.routeCode, active: e.active })));
+  const seatRows = Object.entries(seat)
+    .map(([rid, u]) => ({ rid, ...u, name: (routes.find(r => r.id === rid) || {}).name || rid }))
+    .filter(u => u.registered > 0 || u.seats)
+    .sort((a, b) => (b.over ? 1 : 0) - (a.over ? 1 : 0) || b.registered - a.registered);
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+      {/* 노선별 정원 — 초과면 먼저 보이게 정렬 */}
+      {seatRows.length > 0 && (
+        <div style={{ border:"1px solid var(--color-line)", borderRadius:10, padding:"10px 12px", background:"var(--color-bg-soft)" }}>
+          <div style={{ fontSize:12, fontWeight:800, color:"var(--color-label)", marginBottom:6 }}>노선별 인원 / 좌석</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+            {seatRows.map(u => (
+              <div key={u.rid} style={{ display:"flex", justifyContent:"space-between", gap:8, fontSize:12 }}>
+                <span style={{ color:"var(--color-label-mute)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{u.name}</span>
+                <span style={{ fontWeight:800, flexShrink:0,
+                  color: u.over ? "var(--color-destructive)" : !u.seats ? "var(--color-label-mute)" : u.ratio >= 0.9 ? "var(--color-cautionary)" : "var(--color-label)" }}>
+                  {u.seats ? `${u.registered} / ${u.seats}석${u.over ? " 초과" : ""}` : `${u.registered}명 · 정원 미설정`}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 검색 + 필터 */}
       <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
         <input style={{ ...S.input, flex:1, minWidth:140, padding:"9px 12px" }}

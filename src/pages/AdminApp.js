@@ -9,7 +9,7 @@ import {
   doc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, orderBy
 } from "firebase/firestore";
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
-import { compareRoutes } from "../lib/routeOrder";
+import { compareRoutes, seatUsage } from "../lib/routeOrder";
 import { sendGPS } from "../lib/gps";
 import { forceReconnect } from "../lib/forceReconnect";
 import { classifyRunSignals, STALE_SIGNAL_MIN } from "../lib/runSignals";
@@ -36,7 +36,7 @@ import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 // 협력사 필터 공통 컴포넌트 — 다수 탭에서 재사용
 import { PartnerFilter } from "../components/PartnerFilter";
 // Phase B(2026-06-08) admin별 협력사 권한 게이팅 헬퍼(순수)
-import { resolveAllowed, isAllAccess, partnerCodeAllowed } from "../lib/partnerAccess";
+import { resolveAllowed, isAllAccess, partnerCodeAllowed, SEAT_MODES, SEAT_MODE_LABELS, seatReservationMode, canEnableSeatReservation } from "../lib/partnerAccess";
 // 포탈 설정 모달(협력사 브랜딩 검증·미리보기) — 2026-07-16 회의 #3·#5
 import { isValidHexColor, mixHex } from "../lib/partnerBranding";
 // 탭 단위 에러 경계 — 자식 throw 시 흰 화면 방지 + 에러 메시지 가시화
@@ -2129,6 +2129,17 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
     });
   }, [companyId]);
 
+  // 정원 대비 등록 인원(2026-07-30) — 노선에 좌석수는 원래 있었는데 몇 명이 배정됐는지
+  // 볼 화면이 없어 정원 초과를 사전에 못 잡았다. 승객 목록 1회 로드로 집계(실시간 불필요).
+  const [seatPassengers, setSeatPassengers] = useState([]);
+  useEffect(() => {
+    if (!companyId) return;
+    getDocs(collection(db, "companies", companyId, "passengers"))
+      .then(snap => setSeatPassengers(snap.docs.map(d => ({ routeId: d.data().routeId, active: d.data().active }))))
+      .catch(() => setSeatPassengers([]));
+  }, [companyId]);
+  const usage = seatUsage(routes, seatPassengers);
+
   // 협력사 목록 로드
   useEffect(() => {
     if (!companyId) return;
@@ -2632,7 +2643,19 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
                 <td style={{...S.td,color:"var(--color-label-mute)",fontSize:12}}>{r.shift||"–"}</td>
                 <td style={{...S.td,color:"var(--color-label-mute)",fontSize:12,fontFamily:"monospace"}}>{r.code||"–"}</td>
                 <td style={{...S.td,fontWeight:600,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</td>
-                <td style={S.td}>{r.seats?`${r.seats}석`:"–"}</td>
+                {/* 정원 대비 등록 인원(2026-07-30) — 초과면 붉게. 정원 미설정 노선은 인원만. */}
+                <td style={S.td}>
+                  {(() => {
+                    const u = usage[r.id];
+                    if (!u) return r.seats ? `${r.seats}석` : "–";
+                    if (!u.seats) return <span style={{ color:"var(--color-label-mute)" }}>{u.registered}명 · 정원 미설정</span>;
+                    return (
+                      <span style={{ fontWeight: 700, color: u.over ? "var(--color-destructive)" : u.ratio >= 0.9 ? "var(--color-cautionary)" : "var(--color-label)" }}>
+                        {u.registered} / {u.seats}석{u.over ? " 초과" : ""}
+                      </span>
+                    );
+                  })()}
+                </td>
                 <td style={S.td}><span style={S.timeBadge}>{r.departTime}</span></td>
                 <td style={S.td}>
                   <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
@@ -4433,6 +4456,7 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
   // 포탈 설정 모달 — 관제(운행 현황) 노출 + 브랜딩(컬러·로고) (2026-07-16 회의 #3·#5)
   const [portalEditTarget, setPortalEditTarget] = useState(null); // partnerCodes doc | null
   const [pOps, setPOps] = useState(true);
+  const [pSeat, setPSeat] = useState(SEAT_MODES.OFF);   // 좌석예약 모드(2026-07-30)
   const [pColor, setPColor] = useState("");        // "" = 기본 테마
   const [pLogo, setPLogo] = useState(null);         // data URI | null
   const [pLogoHeight, setPLogoHeight] = useState(28);
@@ -4504,6 +4528,7 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
   const openPortalEdit = (code) => {
     setPortalEditTarget(code);
     setPOps(code.opsControlEnabled !== false); // 부재=true(현행 유지)
+    setPSeat(seatReservationMode(code));       // 부재·모르는 값=off(신규 기능이라 회귀 0)
     const b = code.branding || {};
     setPColor(isValidHexColor(b.primaryColor) ? b.primaryColor : "");
     setPLogo(b.logo || null);
@@ -4523,10 +4548,22 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
   const handlePortalSave = async () => {
     if (!portalEditTarget) return;
     if (pColor && !isValidHexColor(pColor)) return alert("메인 컬러는 #RRGGBB 형식으로 입력하세요 (예: #D80027)");
+    // 정원 없는 노선이 있으면 예약을 켤 수 없다(켜면 예약 무제한이 조용히 성립한다).
+    if (pSeat !== SEAT_MODES.OFF) {
+      const chk = canEnableSeatReservation(routes, portalEditTarget.id);
+      if (!chk.ok) return alert(chk.total === 0
+        ? "이 협력사에 지정된 노선이 없어 좌석예약을 켤 수 없습니다."
+        : `좌석수가 없는 노선이 있어 좌석예약을 켤 수 없습니다.
+
+${chk.missing.slice(0,8).join(", ")}
+
+노선 관리에서 좌석수를 입력한 뒤 다시 시도하세요.`);
+    }
     setPLoading(true);
     try {
       await updateDoc(doc(db, "partnerCodes", portalEditTarget.id), {
         opsControlEnabled: pOps,
+        seatReservation: pSeat,
         branding: {
           primaryColor: pColor || null,
           logo: pLogo || null,
@@ -4790,6 +4827,35 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
           <div style={{ background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#003A99", lineHeight: 1.5 }}>
             ⓘ 끄면 이 협력사 포탈에서 실시간 버스 위치·노선도 섹션이 숨겨집니다(노선 카드·탑승 현황·공지는 유지).
           </div>
+
+          {/* ── 좌석예약 (2026-07-30) — 고객사가 셋 중 고른다. 부재=사용 안 함 ── */}
+          <label style={{ ...S.label, marginTop: 12 }}>좌석예약</label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {[SEAT_MODES.OFF, SEAT_MODES.OPTIONAL, SEAT_MODES.REQUIRED].map(m => (
+              <label key={m} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, color: "var(--color-label)", cursor: "pointer" }}>
+                <input type="radio" name="seatMode" checked={pSeat === m} onChange={() => setPSeat(m)} style={{ marginTop: 2 }} />
+                <span>{SEAT_MODE_LABELS[m]}</span>
+              </label>
+            ))}
+          </div>
+          {/* 🔴 정원이 없으면 예약이 성립하지 않는다 — 켜기 전에 막고 어느 노선인지 알려준다 */}
+          {pSeat !== SEAT_MODES.OFF && (() => {
+            const chk = canEnableSeatReservation(routes, portalEditTarget.id);
+            if (chk.ok) return (
+              <div style={{ marginTop: 6, fontSize: 11, color: "#007A29" }}>
+                이 협력사 노선 {chk.total}개 모두 좌석수가 설정되어 있습니다.
+              </div>
+            );
+            return (
+              <div style={{ marginTop: 6, background: "#FDECEC", border: "1px solid #F5C6C6", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#A81818", lineHeight: 1.6 }}>
+                {chk.total === 0
+                  ? "이 협력사에 지정된 노선이 없어 좌석예약을 켤 수 없습니다."
+                  : <>좌석수가 없는 노선이 있어 켤 수 없습니다 — <b>{chk.missing.slice(0, 5).join(", ")}</b>
+                      {chk.missing.length > 5 && ` 외 ${chk.missing.length - 5}개`}
+                      <br />노선 관리에서 좌석수를 입력한 뒤 다시 시도하세요.</>}
+              </div>
+            );
+          })()}
 
           <label style={{ ...S.label, marginTop: 12 }}>메인 컬러 (선택 — 비우면 기본 테마)</label>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
