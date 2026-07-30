@@ -146,7 +146,23 @@ export function parseEmployeeExcel(file) {
           employees.push(emp);
         });
 
-        resolve({ employees, errors, total: employees.length });
+        // 🔴 사번 중복 검출 (2026-07-30 배시현 개선요청: "241명 올렸는데 238명만 등록")
+        //   importEmployees 는 **사번을 문서 ID** 로 쓴다(passengers/{empNo}) → 엑셀에 같은
+        //   사번이 두 번 있으면 뒤 행이 앞 행을 **조용히 덮어써** 인원이 줄어든다. 화면에
+        //   이유가 안 나오면 담당자는 왜 줄었는지 알 수 없다 → 여기서 명시적으로 알린다.
+        //   ⚠ 행을 버리지는 않는다(어느 쪽이 정본인지 알 수 없다) — 보고만 하고 기존
+        //   덮어쓰기 동작을 유지해 담당자가 엑셀을 고쳐 다시 올릴 수 있게 한다.
+        const seenEmpNo = new Map();   // empNo → 처음 나온 행 번호
+        employees.forEach((e, i) => {
+          const line = headerIdx + i + 2;
+          if (seenEmpNo.has(e.empNo)) {
+            errors.push(`사번 ${e.empNo} 중복 — ${seenEmpNo.get(e.empNo)}행과 같습니다. 뒤 행이 앞 행을 덮어써 인원이 줄어듭니다`);
+          } else {
+            seenEmpNo.set(e.empNo, line);
+          }
+        });
+
+        resolve({ employees, errors, total: employees.length, uniqueCount: seenEmpNo.size });
       } catch (e) {
         reject(e);
       }

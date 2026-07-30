@@ -341,8 +341,17 @@ function FileUploadMode({ codeData, code, routes, onDone }) {
           </div>
           {parsed.errors.length > 0 && (
             <div style={S.warnBox}>
-              <div style={{ fontSize:12, color:"var(--color-destructive)", fontWeight:700, marginBottom:4 }}>⚠️ 오류 {parsed.errors.length}건 스킵</div>
-              {parsed.errors.slice(0,3).map((e,i)=><div key={i} style={{ fontSize:11, color:"#A81818" }}>{e}</div>)}
+              <div style={{ fontSize:12, color:"var(--color-destructive)", fontWeight:700, marginBottom:4 }}>⚠️ 확인 필요 {parsed.errors.length}건</div>
+              {parsed.errors.slice(0,6).map((e,i)=><div key={i} style={{ fontSize:11, color:"#A81818" }}>{e}</div>)}
+              {parsed.errors.length > 6 && (
+                <div style={{ fontSize:11, color:"#A81818" }}>… 외 {parsed.errors.length - 6}건</div>
+              )}
+              {/* 중복 사번이 있으면 실제 등록 인원이 줄어든다 — 숫자로 미리 알린다 */}
+              {typeof parsed.uniqueCount === "number" && parsed.uniqueCount < parsed.total && (
+                <div style={{ fontSize:11, color:"#A81818", fontWeight:700, marginTop:4 }}>
+                  사번이 겹쳐서 {parsed.total}명 중 실제로는 {parsed.uniqueCount}명만 등록됩니다
+                </div>
+              )}
             </div>
           )}
           <div style={S.previewTableWrap}>
@@ -746,6 +755,10 @@ function EmployeeManageMode({ codeData, code, routes }) {
   const [editEmp, setEditEmp] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
+  // 승객 삭제(2026-07-30) — 확인 단계를 거치는 인라인 방식. delTarget = 확인 중인 사번.
+  const [delTarget, setDelTarget] = useState(null);
+  const [delBusy, setDelBusy] = useState(false);
+  const [delMsg, setDelMsg] = useState("");
   const [msg, setMsg] = useState(null);
   // PIN 재발급 결과(평문 PIN 포함 — 모달을 닫으면 다시 볼 수 없다).
   const [pinResult, setPinResult] = useState(null);
@@ -807,6 +820,24 @@ function EmployeeManageMode({ codeData, code, routes }) {
     setSaving(false);
   };
 
+  // ── 승객 삭제(2026-07-30 배시현 개선요청 — 테스트·오류 계정 정리용) ──────
+  // 퇴사 처리(active=false)와 다른 동작이다. 퇴사는 목록에 남지만 삭제는 문서를 지운다.
+  // ⚠ 과거 탑승 기록(boardings)은 이름·사번을 자체 보관하므로 통계가 깨지지 않는다.
+  //   되돌릴 수 없으니 목록에서 한 단계 확인(delTarget)을 거친 뒤에만 실행한다.
+  const handleDelete = async (emp) => {
+    setDelBusy(true);
+    try {
+      await deleteDoc(doc(db, "companies", codeData.companyId, "passengers", emp.id));
+      setEmployees(prev => prev.filter(x => x.id !== emp.id));
+      setDelTarget(null);
+      setDelMsg(`${emp.name || emp.empNo} 삭제되었습니다`);
+      setTimeout(() => setDelMsg(""), 2500);
+    } catch (e) {
+      setDelMsg(`삭제하지 못했습니다: ${e.message}`);
+    }
+    setDelBusy(false);
+  };
+
   // ── PIN 재발급(2026-07-27) ─────────────────────────────
   // 예전엔 전원 "000000" 으로 되돌렸다. 사번만 알면 남의 계정에 들어갈 수 있어
   // 개인별 랜덤 발급으로 바꿨고, 평문은 저장하지 않으므로 발급 결과를 모달에서
@@ -852,6 +883,14 @@ function EmployeeManageMode({ codeData, code, routes }) {
           </button>
         ))}
       </div>
+
+      {delMsg && (
+        <div style={{ fontSize:12, fontWeight:700, padding:"8px 12px", borderRadius:8,
+          background: delMsg.includes("못했습니다") ? "#FDECEC" : "#E6F7EB",
+          color: delMsg.includes("못했습니다") ? "var(--color-destructive)" : "#007A29" }}>
+          {delMsg}
+        </div>
+      )}
 
       {/* 집계 — "미접속"(2026-07-27)은 계정을 아직 못 받았거나 안내문이 도달하지 않은 인원. */}
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:8 }}>
@@ -906,9 +945,23 @@ function EmployeeManageMode({ codeData, code, routes }) {
                     {emp.nfcUid && <> · <span style={{ fontFamily:"monospace" }}>{formatNfcUid(emp.nfcUid)}</span></>}
                   </div>
                 </div>
-                <div style={{ display:"flex", gap:4, flexShrink:0 }}>
+                <div style={{ display:"flex", gap:4, flexShrink:0, flexWrap:"wrap", justifyContent:"flex-end" }}>
                   <button onClick={()=>openEdit(emp)} style={S.smallBtn}>수정</button>
                   <button onClick={()=>handleResetPin(emp)} style={S.smallBtnWarn} disabled={pinBusy}>비밀번호 재발급</button>
+                  {/* 삭제 — 되돌릴 수 없으므로 한 단계 확인을 거친다(2026-07-30 요청:
+                      테스트·오류 계정 정리용). 퇴사 처리(재직 토글)와는 다른 동작임을
+                      문구로 구분해 실수로 지우지 않게 한다. */}
+                  {delTarget === emp.empNo ? (
+                    <span style={{ display:"inline-flex", gap:4, alignItems:"center" }}>
+                      <button onClick={()=>handleDelete(emp)} disabled={delBusy}
+                        style={{ ...S.smallBtnWarn, background:"var(--color-destructive)", color:"#fff", borderColor:"var(--color-destructive)" }}>
+                        {delBusy ? "삭제 중…" : "정말 삭제"}
+                      </button>
+                      <button onClick={()=>setDelTarget(null)} style={S.smallBtn}>취소</button>
+                    </span>
+                  ) : (
+                    <button onClick={()=>{ setDelTarget(emp.empNo); setDelMsg(""); }} style={S.smallBtn}>삭제</button>
+                  )}
                 </div>
               </div>
             </div>
