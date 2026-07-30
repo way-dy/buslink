@@ -56,9 +56,61 @@ const histEntry = (statusTo, comment) => {
 const [, , cmd, id, ...rest] = process.argv;
 const arg = rest.join(" ");
 
+// 이 uid 가 우리(처리자) 쪽인가 — `users/{uid}.role === "superadmin"`. 조회 결과는 캐시.
+const staffCache = new Map();
+async function isStaff(uid) {
+  if (!uid) return false;
+  if (staffCache.has(uid)) return staffCache.get(uid);
+  let staff = false;
+  try {
+    const u = await db.collection("users").doc(uid).get();
+    staff = u.exists && (u.data() || {}).role === "superadmin";
+  } catch (_) { /* 조회 실패는 '고객'으로 보수적 처리 — 놓치는 것보다 낫다 */ }
+  staffCache.set(uid, staff);
+  return staff;
+}
+
 (async () => {
   if (cmd === "list") {
     const snap = await db.collection(COL).orderBy("createdAt", "asc").get();
+
+    // 🔴 완료 처리 뒤 고객이 남긴 코멘트 — status 가 done 이라 미처리 목록에서 사라져
+    //   영영 못 본다(재현 정보·"고쳐준 게 안 된다" 신고가 그렇게 묻힌다).
+    //   판정 = 우리가 마지막으로 손댄 뒤(byUid === BYUID) 다른 사람이 남긴 코멘트.
+    //   최근 14일로 좁힌다 — 안 그러면 옛 "감사합니다"가 전부 딸려온다.
+    const cutoff = Date.now() - 14 * 86400000;
+    const followUps = [];
+    for (const d of snap.docs) {
+      const h = d.data().history || [];
+      let lastOurs = -1;
+      h.forEach((e, i) => { if (e && e.byUid === BYUID) lastOurs = i; });
+      if (lastOurs < 0) continue;                       // 우리가 손댄 적 없으면 미처리 목록에 이미 있다
+      const after = [];
+      for (const e of h.slice(lastOurs + 1)) {
+        if (!e || e.byUid === BYUID) continue;
+        if (!(e.comment || "").trim()) continue;
+        const ms = e.at && e.at.toMillis ? e.at.toMillis() : 0;
+        if (ms < cutoff) continue;
+        // ⚠ 슈퍼관리자(way)가 게시판에서 직접 남긴 안내도 '처리자' 다 — 고객 답변이 아니다.
+        //   uid 하드코딩 대신 **역할로 판정**해 새 계정·새 PC 에서도 맞게 동작한다.
+        //   byName 으로 판정하지 말 것(`WAY`/`시스템 관리자`/이메일로 표기가 흔들린다).
+        if (await isStaff(e.byUid)) continue;
+        after.push(e);
+      }
+      if (after.length) followUps.push({ id: d.id, title: d.data().title, status: d.data().status, items: after });
+    }
+    if (followUps.length) {
+      console.log(`🔔 완료 처리 뒤 새 코멘트 ${followUps.length}건 — 확인 필요\n`);
+      for (const f of followUps) {
+        console.log(`  #${f.id}  [${f.status}]  ${f.title || "(제목 없음)"}`);
+        f.items.forEach((e) => {
+          const t = e.at && e.at.toDate ? e.at.toDate().toISOString().slice(0, 16).replace("T", " ") : "";
+          console.log(`    · ${t} ${e.byName || "-"}: ${(e.comment || "").replace(/\n/g, " ").slice(0, 160)}`);
+        });
+        console.log("");
+      }
+    }
+
     const pending = snap.docs.filter((d) => !["done", "rejected"].includes(d.data().status));
     console.log(`미처리 ${pending.length}건 / 전체 ${snap.size}건`);
     for (const d of pending) {
