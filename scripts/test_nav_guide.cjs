@@ -266,5 +266,60 @@ console.log("\n[15] travelHeading — 차량이 향한 방향(지도 회전을 �
   ok("이동 벡터가 gpsHeading 보다 우선", Math.abs(travelHeading({ prev: a, cur: east, gpsHeading: 270 }) - 90) < 2);
 }
 
+// ── 지도 시점: 축척·전방 오프셋 (2026-07-31) ──────────────────────
+{
+  console.log("\n[navCenter · 진행 방향 앞쪽으로 시점 밀기]");
+  const { metersPerPixel, offsetLatLng, navCenter } = G;
+  eq("level 3 = 1m/px", metersPerPixel(3), 1);
+  eq("level 4 = 2m/px", metersPerPixel(4), 2);
+  eq("level 5 = 4m/px", metersPerPixel(5), 4);
+  eq("level 미지정은 4 기준", metersPerPixel(), 2);
+
+  const p = { lat: 37.4, lng: 127.0 };
+  const north = offsetLatLng(p, 0, 1000);
+  ok("북쪽 1km → 위도 증가", north.lat > p.lat && Math.abs(north.lng - p.lng) < 1e-9, north);
+  ok("북쪽 1km ≈ 0.009도", Math.abs(north.lat - p.lat - 0.00898) < 0.0005, north.lat - p.lat);
+  const east = offsetLatLng(p, 90, 1000);
+  ok("동쪽 1km → 경도만 증가", east.lng > p.lng && Math.abs(east.lat - p.lat) < 1e-9, east);
+  ok("동쪽 1km 실거리 ≈ 1000m", Math.abs(haversine(p, east) - 1000) < 5, haversine(p, east));
+  eq("이동 0m 는 그대로", offsetLatLng(p, 45, 0), { lat: 37.4, lng: 127.0 });
+  eq("좌표 없으면 null", offsetLatLng(null, 0, 100), null);
+
+  // 진행 방향을 모르면 밀지 않는다 — 엉뚱한 쪽으로 밀면 내 차가 화면 밖으로 나간다.
+  eq("heading 없으면 내 위치 그대로", navCenter({ pos: p, level: 3, heightPx: 400 }), { lat: 37.4, lng: 127.0 });
+  eq("pos 없으면 null", navCenter({ heading: 0, level: 3 }), null);
+  const c = navCenter({ pos: p, heading: 0, level: 3, heightPx: 400, aheadRatio: 0.25 });
+  ok("북진 시 중심이 앞(북)으로", c.lat > p.lat, c);
+  ok("민 거리 = 1m/px × 400px × 0.25 = 100m", Math.abs(haversine(p, c) - 100) < 3, haversine(p, c));
+  const c2 = navCenter({ pos: p, heading: 0, level: 5, heightPx: 400, aheadRatio: 0.25 });
+  ok("축척이 넓어지면 더 멀리 민다", haversine(p, c2) > haversine(p, c) * 3.5, [haversine(p, c), haversine(p, c2)]);
+  const c3 = navCenter({ pos: p, heading: 180, level: 3, heightPx: 400 });
+  ok("남진 시 중심이 남쪽으로", c3.lat < p.lat, c3);
+  ok("aheadRatio 0 이면 정중앙", haversine(p, navCenter({ pos: p, heading: 0, level: 3, heightPx: 400, aheadRatio: 0 })) < 0.5);
+}
+
+// ── 회귀 가드: 소스에 실제로 남아 있는지 코드로 단언 ──────────────
+{
+  console.log("\n[회귀 가드 — 소스 검사]");
+  const drv = fs.readFileSync(path.join(__dirname, "..", "src", "pages", "DriverApp.js"), "utf8");
+  ok("회전 판이 대각선 크기로 커진다(모서리 빔 방지)", /Math\.hypot\(clipBox\.w,\s*clipBox\.h\)/.test(drv));
+  ok("카카오 로고·축척을 회전 밖으로 옮긴다(약관 표시 유지)", /liftCredits/.test(drv) && /map\.kakao\.com/.test(drv));
+  ok("정류장 번호는 반대로 돌려 세운다", /counterRot/.test(drv));
+  ok("기사가 지도를 끌면 자동 추적 해제", /"dragstart"[\s\S]{0,80}setFollow\(false\)/.test(drv));
+  ok("정류장 사진은 길안내에서 제거됨", !/target\.photo/.test(drv));
+  ok("기본 확대는 크게(level 3)", /NAV_ZOOM_DEFAULT\s*=\s*3/.test(drv));
+
+  const fn = fs.readFileSync(path.join(__dirname, "..", "functions", "index.js"), "utf8");
+  ok("그린 경로 보정 임계 300m", /DRAWN_MATCH_THRESHOLD_M\s*=\s*300/.test(fn));
+  ok("보정점 상한이 정해져 있다(경유지 상한 방어)", /DRAWN_MATCH_MAX_POINTS\s*=\s*\d+/.test(fn));
+  ok("2차 호출로 그린 경로에 맞춘다", /worstDeviationPoints\(/.test(fn) && /matchedToDrawn/.test(fn));
+  ok("보정 실패해도 1차 결과 사용(안내가 사라지지 않는다)", /1차 결과 사용/.test(fn));
+  // 🔴 실측에서 보정이 오히려 이탈을 키운 노선이 있었다([압구정] 하교 42%→52%) →
+  //    무조건 채택 금지. 이 게이트를 빼면 그 회귀가 그대로 돌아온다.
+  ok("나빠지면 보정을 기각한다", /newScore\s*<\s*baseScore/.test(fn) && /drawnMismatchRatio\(/.test(fn));
+  ok("거리 부풀림(U턴)도 기각 조건", /DRAWN_MATCH_MAX_LEN_RATIO/.test(fn) && /noDetour/.test(fn));
+  ok("긴 우회 구간엔 점을 여러 개", /DRAWN_MATCH_KM_PER_POINT/.test(fn) && /DRAWN_MATCH_MAX_PER_RUN/.test(fn));
+}
+
 console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);
 process.exit(fail ? 1 : 0);

@@ -226,6 +226,49 @@ export function travelHeading({ prev, cur, gpsHeading, fallback = null, minMoveM
 }
 
 /**
+ * 카카오맵 확대 단계 → 화면 1픽셀이 몇 m인가.
+ * 실측 기준: level 4 에서 축척 막대가 "100m ≈ 50px" = 2 m/px 이고 단계마다 2배씩.
+ * (지도 시점을 "내 앞쪽"으로 밀 때 얼마나 밀지 계산하는 데 쓴다.)
+ */
+export function metersPerPixel(level) {
+  const lv = Number.isFinite(level) ? level : 4;
+  return Math.pow(2, lv - 3);
+}
+
+/** 한 점에서 방위 `headingDeg` 로 `meters` 만큼 이동한 좌표. */
+export function offsetLatLng(pos, headingDeg, meters) {
+  if (!pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lng)) return null;
+  if (!Number.isFinite(headingDeg) || !Number.isFinite(meters) || meters === 0) return { ...pos };
+  const rad = Math.PI / 180;
+  const dLat = (meters * Math.cos(headingDeg * rad)) / 111320;
+  const cosLat = Math.cos(pos.lat * rad);
+  const dLng = Math.abs(cosLat) < 1e-9 ? 0 : (meters * Math.sin(headingDeg * rad)) / (111320 * cosLat);
+  return { lat: pos.lat + dLat, lng: pos.lng + dLng };
+}
+
+/**
+ * 길안내 지도 중심 — 내 차를 화면 **아래쪽**에 두고 갈 길을 넓게 보여준다.
+ *
+ * 내 위치를 화면 정중앙에 두면 앞으로 갈 길이 화면의 절반밖에 안 보인다(뒤쪽 절반은
+ * 이미 지나온 길이라 볼 필요가 없다) — 그래서 실제 내비는 차를 아래쪽 1/4 지점에 둔다.
+ * 진행 방향을 모르면(정차 등) 밀지 않는다 — 엉뚱한 쪽으로 밀면 내 차가 화면 밖으로 나간다.
+ *
+ * @param {Object} p
+ * @param {Object} p.pos        내 위치
+ * @param {number} [p.heading]  진행 방위(도)
+ * @param {number} [p.level]    카카오 확대 단계
+ * @param {number} [p.heightPx] 지도 높이(px)
+ * @param {number} [p.aheadRatio] 화면 높이의 몇 배만큼 앞으로 밀지(0=정중앙)
+ */
+export function navCenter({ pos, heading, level = 4, heightPx = 400, aheadRatio = 0.25 } = {}) {
+  if (!pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lng)) return null;
+  if (!Number.isFinite(heading)) return { ...pos };
+  const h = Number.isFinite(heightPx) && heightPx > 0 ? heightPx : 400;
+  const meters = metersPerPixel(level) * h * aheadRatio;
+  return offsetLatLng(pos, heading, meters) || { ...pos };
+}
+
+/**
  * 지금 안내할 회전 지점 — 내 위치보다 **앞에 있는** 안내 중 가장 가까운 것.
  *
  * 카카오모빌리티 길찾기가 준 `guides`(회전 안내)를 경로 진행거리 기준으로 고른다.

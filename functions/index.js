@@ -354,6 +354,17 @@ exports.notifyPreArrival = onDocumentUpdated(
 
 const KAKAO_NAVI_URL = "https://apis-navi.kakaomobility.com/v1/waypoints/directions";
 const KAKAO_NAVI_MAX_WAYPOINTS = 30;   // API 상한(총 1,500km 미만)
+// 그린 경로 정합(2026-07-31). 300m = 옆 도로·중앙분리대를 오판하지 않으면서 "다른 길"은
+// 잡아내는 값(클라 OFF_ROUTE_M 과 같은 뜻).
+// 보정점 상한 12 = prod 8개 노선 실측에서 이탈 24~63% → 0~22% 로 떨어진 값(6개는 부족했다).
+// 경유지 상한 30 안에서만 쓰고, 결과가 나빠지면 아래 채택 판정이 통째로 기각한다.
+const DRAWN_MATCH_THRESHOLD_M = 300;
+const DRAWN_MATCH_MAX_POINTS = 12;
+// 보정 결과가 그린 경로보다 이만큼 길어지면 U턴이 쌓인 것으로 보고 기각한다.
+const DRAWN_MATCH_MAX_LEN_RATIO = 1.25;
+// 긴 우회 구간은 점 하나로 못 끌어온다 → 이만큼(km)마다 1점씩, 구간당 최대 3점.
+const DRAWN_MATCH_KM_PER_POINT = 2;
+const DRAWN_MATCH_MAX_PER_RUN = 3;
 
 /** 카카오모빌리티 길찾기 POST — 응답 JSON 반환. 저장하지 않는다. */
 function postKakaoNavi(body, restKey) {
@@ -389,6 +400,104 @@ function postKakaoNavi(body, restKey) {
   });
 }
 
+// ── 그린 경로 정합용 기하 헬퍼 (2026-07-31) ────────────────────────
+// 정류장만 경유지로 주면 그 사이 도로는 **카카오가 고른다** → 회사가 실제로 다니는 길과
+// 달라진다. prod 실측(dy001): 그린 경로 점의 21~25% 가 300m 넘게 벗어났고 최대 4.9km,
+// 즉 한 구간을 통째로 다른 길로 안내하고 있었다(기사 지적 "내가 그려놓은 노선대로 안내를
+// 하는 것 같지 않다"). 그린 경로를 통째로 경유지에 넣으면 이탈은 0 이 되지만 도로 스냅
+// U턴이 쌓여 총 거리가 55km→102km 로 부푼다(실측) → **벗어난 구간에만** 점을 꽂는다.
+
+/** 점 → 선분 최단거리(m). 수백 m 규모라 로컬 평면 근사로 충분. */
+function distToSegMeters(p, a, b) {
+  const R = Math.PI / 180;
+  const mLat = 111320, mLng = 111320 * Math.cos(p.lat * R);
+  const px = (p.lng - a.lng) * mLng, py = (p.lat - a.lat) * mLat;
+  const bx = (b.lng - a.lng) * mLng, by = (b.lat - a.lat) * mLat;
+  const len2 = bx * bx + by * by;
+  if (len2 === 0) return Math.hypot(px, py);
+  const t = Math.max(0, Math.min(1, (px * bx + py * by) / len2));
+  return Math.hypot(px - bx * t, py - by * t);
+}
+
+/** 점이 폴리라인에서 떨어진 최단거리(m). */
+function distToPathMeters(p, poly) {
+  let best = Infinity;
+  for (let i = 1; i < poly.length; i++) {
+    const d = distToSegMeters(p, poly[i - 1], poly[i]);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+/**
+ * 그린 경로에서 도로 경로가 `thresholdM` 이상 벗어난 **구간**을 찾아 보정 경유지를 뽑는다.
+ *
+ * 구간당 점을 많이 넣으면 도로 스냅 U턴으로 거리가 부푸므로 아껴 넣되(기본 1개),
+ * **긴 우회 구간**(수 km)은 점 하나로는 못 끌어온다(실측 [압구정] 하교: 5.9km 이탈 구간에
+ * 1점만 넣었더니 오히려 악화) → 구간 길이에 비례해 `DRAWN_MATCH_KM_PER_POINT` km 당
+ * 1점씩, 구간당 최대 `DRAWN_MATCH_MAX_PER_RUN` 개까지 고르게 배치한다.
+ * 그래도 나빠지면 호출부가 **결과를 통째로 기각**하므로 과감히 시도해도 안전하다.
+ *
+ * @returns {Array<{lat,lng,dev,idx}>} 이탈이 큰 구간 순
+ */
+function worstDeviationPoints(drawn, roadPath, thresholdM, limit) {
+  if (!Array.isArray(drawn) || drawn.length < 2 || !Array.isArray(roadPath) || roadPath.length < 2) return [];
+  const dev = drawn.map((p) => distToPathMeters(p, roadPath));
+  const runs = [];
+  let cur = null;
+  for (let i = 0; i < dev.length; i++) {
+    if (dev[i] > thresholdM) {
+      if (!cur) cur = { s: i, e: i, bi: i, bd: dev[i] };
+      else { cur.e = i; if (dev[i] > cur.bd) { cur.bd = dev[i]; cur.bi = i; } }
+    } else if (cur) { runs.push(cur); cur = null; }
+  }
+  if (cur) runs.push(cur);
+  runs.sort((a, b) => b.bd - a.bd);
+
+  const out = [];
+  for (const r of runs) {
+    if (out.length >= limit) break;
+    let runLen = 0;
+    for (let i = r.s + 1; i <= r.e; i++) {
+      runLen += distMeters(drawn[i - 1].lat, drawn[i - 1].lng, drawn[i].lat, drawn[i].lng);
+    }
+    const want = Math.max(1, Math.min(DRAWN_MATCH_MAX_PER_RUN,
+      Math.ceil(runLen / (DRAWN_MATCH_KM_PER_POINT * 1000))));
+    const n = Math.min(want, limit - out.length, r.e - r.s + 1);
+    if (n === 1) {
+      out.push({ ...drawn[r.bi], dev: r.bd, idx: r.bi });
+      continue;
+    }
+    // 구간 안에서 고르게 — 양 끝은 이미 정상 구간과 맞닿아 있으니 안쪽으로 배치한다.
+    for (let j = 1; j <= n; j++) {
+      const idx = Math.round(r.s + ((r.e - r.s) * j) / (n + 1));
+      out.push({ ...drawn[idx], dev: dev[idx], idx });
+    }
+  }
+  return out;
+}
+
+/**
+ * 그린 경로 점 중 도로 경로에서 `thresholdM` 넘게 벗어난 **비율**(0~1).
+ * "이 도로 경로가 회사가 다니는 길을 얼마나 따라가는가" 의 점수 — 낮을수록 좋다.
+ */
+function drawnMismatchRatio(drawn, roadPath, thresholdM) {
+  if (!Array.isArray(drawn) || !drawn.length || !Array.isArray(roadPath) || roadPath.length < 2) return 1;
+  let off = 0;
+  for (const p of drawn) if (distToPathMeters(p, roadPath) > thresholdM) off++;
+  return off / drawn.length;
+}
+
+/** 그린 경로 위 진행거리(m) — 경유지를 노선 진행 순서대로 정렬하는 데 쓴다. */
+function progressAlongDrawn(pt, drawn, cum) {
+  let best = Infinity, bp = 0;
+  for (let i = 1; i < drawn.length; i++) {
+    const d = distToSegMeters(pt, drawn[i - 1], drawn[i]);
+    if (d < best) { best = d; bp = cum[i - 1]; }
+  }
+  return bp;
+}
+
 exports.getNaviRoute = onCall(
   { region: "us-central1", secrets: [KAKAO_REST_KEY] },
   async (request) => {
@@ -408,14 +517,27 @@ exports.getNaviRoute = onCall(
       throw new HttpsError("permission-denied", "다른 회사의 노선입니다");
     }
 
-    const stopsSnap = await db.collection("companies").doc(companyId)
-      .collection("routes").doc(routeId).collection("stops").orderBy("order").get();
+    const routeRef = db.collection("companies").doc(companyId).collection("routes").doc(routeId);
+    const [routeSnap, stopsSnap] = await Promise.all([
+      routeRef.get(),
+      routeRef.collection("stops").orderBy("order").get(),
+    ]);
     const pts = [];
     stopsSnap.docs.forEach((d) => {
       const ll = stopLatLng(d.data() || {});
       if (ll) pts.push({ name: (d.data() || {}).name || "", x: ll.lng, y: ll.lat });
     });
     if (pts.length < 2) throw new HttpsError("failed-precondition", "좌표가 있는 정류장이 2곳 이상이어야 합니다");
+
+    // 관리자가 그린 노선 — 있으면 도로 경로를 여기에 맞춘다(아래 2차 호출).
+    const drawn = [];
+    const rawDrawn = (routeSnap.exists ? routeSnap.data() : {}).routePath;
+    if (Array.isArray(rawDrawn)) {
+      rawDrawn.forEach((p) => {
+        const ll = stopLatLng(p);
+        if (ll) drawn.push(ll);
+      });
+    }
 
     // 경유지 상한 초과 시 균등 간격으로 솎아낸다(정류장이 30개를 넘는 노선은 현재 없지만 방어).
     let mid = pts.slice(1, -1);
@@ -424,24 +546,92 @@ exports.getNaviRoute = onCall(
       mid = Array.from({ length: KAKAO_NAVI_MAX_WAYPOINTS }, (_, i) => mid[Math.floor(i * step)]);
     }
 
-    let json;
-    try {
-      json = await postKakaoNavi({
+    const callKakao = async (waypoints) => {
+      const json = await postKakaoNavi({
         origin: pts[0],
         destination: pts[pts.length - 1],
-        waypoints: mid,
+        waypoints,
         priority: "RECOMMEND",
         car_fuel: "DIESEL",   // 버스 — 요금 추정에만 쓰이고 경로에는 영향 미미
         summary: false,       // roads(vertexes)·guides 를 받으려면 false
       }, KAKAO_REST_KEY.value());
+      const r = (json.routes || [])[0];
+      if (!r || (r.result_code !== 0 && r.result_code !== undefined)) return null;
+      return r;
+    };
+
+    /** 응답 → 도로 좌표 배열(이탈 측정용). x=경도·y=위도 순서 주의. */
+    const roadPointsOf = (r) => {
+      const out = [];
+      (r.sections || []).forEach((sec) => {
+        (sec.roads || []).forEach((rd) => {
+          const v = rd.vertexes || [];
+          for (let i = 0; i + 1 < v.length; i += 2) {
+            const lng = Number(v[i]), lat = Number(v[i + 1]);
+            if (isFinite(lat) && isFinite(lng)) out.push({ lat, lng });
+          }
+        });
+      });
+      return out;
+    };
+
+    let route;
+    try {
+      route = await callKakao(mid);
     } catch (e) {
       console.warn(`[길안내] 카카오 호출 실패 ${companyId}/${routeId}: ${e.message}`);
       throw new HttpsError("unavailable", "길찾기를 불러오지 못했습니다");
     }
+    if (!route) throw new HttpsError("unavailable", "길찾기 결과 없음");
 
-    const route = (json.routes || [])[0];
-    if (!route || (route.result_code !== 0 && route.result_code !== undefined)) {
-      throw new HttpsError("unavailable", `길찾기 결과 없음: ${route ? route.result_msg : "빈 응답"}`);
+    // ── 2차: 그린 경로에서 벗어난 구간에만 경유지를 꽂아 다시 받는다 ──────────
+    // 실패하면 1차 결과를 그대로 쓴다(안내가 없는 것보다 대충이라도 있는 게 낫다).
+    let matchedToDrawn = false;
+    const room = Math.max(0, KAKAO_NAVI_MAX_WAYPOINTS - mid.length);
+    if (drawn.length >= 10 && room >= 1) {
+      try {
+        const worst = worstDeviationPoints(drawn, roadPointsOf(route), DRAWN_MATCH_THRESHOLD_M, Math.min(room, DRAWN_MATCH_MAX_POINTS));
+        if (worst.length) {
+          const cum = [0];
+          for (let i = 1; i < drawn.length; i++) {
+            cum.push(cum[i - 1] + distMeters(drawn[i - 1].lat, drawn[i - 1].lng, drawn[i].lat, drawn[i].lng));
+          }
+          // 정류장 + 보정점을 **노선 진행 순서대로** 섞는다(순서가 어긋나면 되돌아가는 경로가 나온다).
+          const merged = [
+            ...mid.map((w) => ({ w, prog: progressAlongDrawn({ lat: w.y, lng: w.x }, drawn, cum) })),
+            ...worst.map((p) => ({ w: { name: "", x: p.lng, y: p.lat }, prog: progressAlongDrawn(p, drawn, cum) })),
+          ].sort((a, b) => a.prog - b.prog).map((o) => o.w).slice(0, KAKAO_NAVI_MAX_WAYPOINTS);
+          const better = await callKakao(merged);
+          // 🔴 **보정을 무조건 채택하지 않는다** — 실측(2026-07-31 [압구정] 하교)에서 보정이
+          //   오히려 이탈을 42%→52% 로 키운 노선이 있었다(그린 경로가 도로가 아닌 곳을
+          //   지나면 보정점이 엉뚱한 도로에 붙는다). 두 결과를 같은 잣대로 재서 **더 나은
+          //   쪽만** 쓴다 → 최악의 경우에도 예전 동작(정류장만)으로 남는다.
+          const baseScore = drawnMismatchRatio(drawn, roadPointsOf(route), DRAWN_MATCH_THRESHOLD_M);
+          const newScore = better ? drawnMismatchRatio(drawn, roadPointsOf(better), DRAWN_MATCH_THRESHOLD_M) : 1;
+          // 경유지를 강제하면 U턴이 쌓여 거리가 부풀 수 있다 → 그것도 같이 본다.
+          let drawnLen = 0;
+          for (let i = 1; i < drawn.length; i++) {
+            drawnLen += distMeters(drawn[i - 1].lat, drawn[i - 1].lng, drawn[i].lat, drawn[i].lng);
+          }
+          let newLen = 0;
+          if (better) {
+            const rp2 = roadPointsOf(better);
+            for (let i = 1; i < rp2.length; i++) newLen += distMeters(rp2[i - 1].lat, rp2[i - 1].lng, rp2[i].lat, rp2[i].lng);
+          }
+          const noDetour = !drawnLen || newLen <= drawnLen * DRAWN_MATCH_MAX_LEN_RATIO;
+          if (better && newScore < baseScore && noDetour) {
+            route = better;
+            matchedToDrawn = true;
+            console.log(`[길안내] ${companyId}/${routeId} 그린 경로 보정 ${worst.length}점 채택(이탈 ${Math.round(baseScore * 100)}%→${Math.round(newScore * 100)}%)`);
+          } else {
+            console.log(`[길안내] ${companyId}/${routeId} 그린 경로 보정 기각(이탈 ${Math.round(baseScore * 100)}%→${Math.round(newScore * 100)}%${noDetour ? "" : "·거리 부풀림"}) — 정류장 경로 유지`);
+          }
+        } else {
+          matchedToDrawn = true; // 보정할 곳이 없다 = 이미 그린 경로와 일치
+        }
+      } catch (e) {
+        console.warn(`[길안내] 그린 경로 보정 실패(1차 결과 사용) ${companyId}/${routeId}: ${e.message}`);
+      }
     }
 
     // vertexes 는 [x1,y1,x2,y2,…] 1차원 배열이고 **x=경도, y=위도**다(뒤집으면 대서양으로 간다).
@@ -472,11 +662,12 @@ exports.getNaviRoute = onCall(
     });
     if (path.length < 2) throw new HttpsError("unavailable", "경로 좌표를 받지 못했습니다");
 
-    console.log(`[길안내] ${companyId}/${routeId} 경로 ${path.length}점·안내 ${guides.length}개 (정류장 ${pts.length})`);
+    console.log(`[길안내] ${companyId}/${routeId} 경로 ${path.length}점·안내 ${guides.length}개 (정류장 ${pts.length}·그린정합 ${matchedToDrawn ? "O" : "X"})`);
     // 저장하지 않고 그대로 반환한다(카카오 정책).
     return {
       path,
       guides,
+      matchedToDrawn,   // 화면이 "그린 노선 기준"인지 기사에게 알려주는 데 쓴다
       distance: route.summary ? route.summary.distance : null,
       duration: route.summary ? route.summary.duration : null,
     };
