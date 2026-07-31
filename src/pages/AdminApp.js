@@ -4927,6 +4927,11 @@ function NoticeTab({ companyId, allowed }) {
   // 진단 패널 silent-fail 방지: onSnapshot 권한 거부/네트워크 오류 등을 가시화.
   // notices·partnerCodes·fcmTokens 3개 구독 오류 모두 같은 state에 누적(나중 발생 오류로 덮어쓰기).
   const [snapshotError, setSnapshotError] = useState(null);
+  // 발송 이력 정리(2026-07-31 배시현 개선요청) — 목록 검색·상태 필터·더보기·삭제 확인.
+  const [histQuery, setHistQuery] = useState("");
+  const [histFilter, setHistFilter] = useState("표시중"); // 표시중 | 숨김 | 전체
+  const [histLimit, setHistLimit] = useState(10);
+  const [confirmDelete, setConfirmDelete] = useState(null); // 영구삭제 2단 확인 대상 id
 
   // 발송 이력 구독
   useEffect(() => {
@@ -5039,6 +5044,19 @@ function NoticeTab({ companyId, allowed }) {
 
   const handleDeactivate = async (id) => {
     await updateDoc(doc(db, "companies", companyId, "notices", id), { active: false });
+  };
+
+  // 숨긴 공지를 다시 앱에 노출. "숨기기 = 되돌릴 수 있다" 를 실제로 성립시키는 짝
+  // (되돌리기가 없으면 숨기기는 사실상 삭제이고, 잘못 숨긴 공지를 복구할 방법이 없다).
+  const handleReactivate = async (id) => {
+    await updateDoc(doc(db, "companies", companyId, "notices", id), { active: true });
+  };
+
+  // 영구 삭제 — 문서 자체를 지운다(되돌릴 수 없음). 2단 확인을 거친 뒤에만 호출.
+  // rules 는 이미 `allow delete: if isAdmin(companyId)` 라 백엔드 변경 없음.
+  const handleDelete = async (id) => {
+    await deleteDoc(doc(db, "companies", companyId, "notices", id));
+    setConfirmDelete(null);
   };
 
   const fmt = (ts) => {
@@ -5220,16 +5238,57 @@ function NoticeTab({ companyId, allowed }) {
 
         {/* 발송 이력 */}
         <div style={{ marginTop:8 }}>
-          <div style={{ fontSize:13, fontWeight:700, marginBottom:10 }}>발송 이력</div>
           {(() => {
-          // Phase B: 제한 admin 은 자기 allowed 협력사 공지만 이력 표시(회사 전체/타 협력사 비노출).
-          const visibleNotices = noticeRestricted
-            ? notices.filter(n => partnerCodeAllowed(allowed, n.partnerCode || null))
+          // Phase B: 타 협력사 공지는 계속 비노출. 단 **"전체" 발송 공지는 제한 admin 에게도 보인다**
+          //   — 그 공지는 자기 거래처 승객 앱에도 뜨는데 목록에서 빠지면 "무엇이 나가 있는지"조차
+          //   알 수 없다(2026-07-31 way 결정: 읽기만 허용). 손대는 건 canManage 로 따로 막는다.
+          const listed = noticeRestricted
+            ? notices.filter(n => !n.partnerCode || partnerCodeAllowed(allowed, n.partnerCode))
             : notices;
-          return visibleNotices.length === 0 ? (
-            <div style={{ color:"var(--color-label-alt)", fontSize:13, textAlign:"center", padding:"16px 0" }}>발송된 공지가 없습니다</div>
-          ) : visibleNotices.slice(0,10).map(n => (
-            <div key={n.id} style={{ background:"var(--color-bg)", borderRadius:10, padding:"12px 14px", marginBottom:8, border:`1px solid ${n.type==="emergency"?"#F6C9C9":"var(--color-line)"}`, boxShadow:"var(--shadow-emphasize)", opacity: n.active?1:0.5 }}>
+          // 🔴 "전체" 공지는 제한 admin 에게 읽기 전용 — 한 거래처 담당이 회사 전체 공지를 지우면
+          //   다른 거래처 승객의 공지까지 사라진다.
+          const canManage = (n) => !noticeRestricted || partnerCodeAllowed(allowed, n.partnerCode || null);
+          // 🔴 "앱에 보이는가" 의 정의는 소비측 쿼리와 **글자 그대로 같아야** 한다 —
+          //   EmployeeApp·PartnerApp 은 `where("active","==",true)` 라 필드가 아예 없는 레거시
+          //   문서도 앱에선 안 보인다. `!== false` 로 느슨하게 세면 관리 화면만 "표시 중"이라
+          //   말하는 유령 건수가 생긴다.
+          const isShown = (n) => n.active === true;
+          const q = histQuery.trim().toLowerCase();
+          const matched = listed.filter(n => {
+            if (histFilter === "표시중" && !isShown(n)) return false;
+            if (histFilter === "숨김" && isShown(n)) return false;
+            if (!q) return true;
+            return `${n.title || ""} ${n.body || ""}`.toLowerCase().includes(q);
+          });
+          const shownCount = listed.filter(isShown).length;
+          return (
+          <>
+          <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:8, flexWrap:"wrap" }}>
+            <div style={{ fontSize:13, fontWeight:700 }}>발송 이력</div>
+            <div style={{ fontSize:11, color:"var(--color-label-alt)" }}>
+              전체 {listed.length}건 · 앱에 표시 중 {shownCount}건
+            </div>
+          </div>
+          <input value={histQuery} onChange={e=>{ setHistQuery(e.target.value); setHistLimit(10); }}
+            placeholder="제목·내용 검색"
+            style={{ ...S.input, marginBottom:8 }} />
+          <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap" }}>
+            {["표시중","숨김","전체"].map(f => (
+              <button key={f} onClick={()=>{ setHistFilter(f); setHistLimit(10); }}
+                style={{ fontSize:11, fontWeight:700, padding:"5px 12px", borderRadius:14, cursor:"pointer", fontFamily:"inherit",
+                  border:`1px solid ${histFilter===f?"var(--color-primary)":"var(--color-line)"}`,
+                  background: histFilter===f?"var(--color-primary-soft)":"transparent",
+                  color: histFilter===f?"var(--color-primary-deep)":"var(--color-label-mute)" }}>
+                {f}
+              </button>
+            ))}
+          </div>
+          {matched.length === 0 ? (
+            <div style={{ color:"var(--color-label-alt)", fontSize:13, textAlign:"center", padding:"16px 0" }}>
+              {listed.length === 0 ? "발송된 공지가 없습니다" : "조건에 맞는 공지가 없습니다"}
+            </div>
+          ) : <>{matched.slice(0, histLimit).map(n => (
+            <div key={n.id} style={{ background:"var(--color-bg)", borderRadius:10, padding:"12px 14px", marginBottom:8, border:`1px solid ${n.type==="emergency"?"#F6C9C9":"var(--color-line)"}`, boxShadow:"var(--shadow-emphasize)", opacity: isShown(n)?1:0.5 }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4, flexWrap:"wrap" }}>
@@ -5248,21 +5307,58 @@ function NoticeTab({ companyId, allowed }) {
                         전체
                       </span>
                     )}
-                    {!n.active && <span style={{ fontSize:10, color:"var(--color-label-alt)" }}>비활성</span>}
+                    {!isShown(n) && <span style={{ fontSize:10, color:"var(--color-label-alt)" }}>숨김</span>}
                     <span style={{ fontSize:11, color:"var(--color-label-alt)", marginLeft:"auto" }}>{fmt(n.createdAt)}</span>
                   </div>
                   <div style={{ fontSize:13, fontWeight:700, marginBottom:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{n.title}</div>
                   <div style={{ fontSize:12, color:"var(--color-label-mute)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{n.body}</div>
                 </div>
-                {n.active && (
-                  <button onClick={()=>handleDeactivate(n.id)}
-                    style={{ background:"transparent", border:"1px solid var(--color-line)", borderRadius:6, padding:"4px 8px", color:"var(--color-label-mute)", fontSize:11, cursor:"pointer", fontFamily:"inherit", flexShrink:0 }}>
-                    숨기기
-                  </button>
-                )}
+                <div style={{ display:"flex", flexDirection:"column", gap:4, flexShrink:0, alignItems:"flex-end" }}>
+                  {!canManage(n) ? (
+                    <span style={{ fontSize:10, color:"var(--color-label-alt)", whiteSpace:"nowrap" }}>회사 전체 공지</span>
+                  ) : confirmDelete === n.id ? (
+                    <>
+                      <button onClick={()=>handleDelete(n.id)}
+                        style={{ background:"var(--color-destructive)", border:"none", borderRadius:6, padding:"4px 8px", color:"#fff", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+                        정말 삭제
+                      </button>
+                      <button onClick={()=>setConfirmDelete(null)}
+                        style={{ background:"transparent", border:"1px solid var(--color-line)", borderRadius:6, padding:"4px 8px", color:"var(--color-label-mute)", fontSize:11, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+                        취소
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {isShown(n) ? (
+                        <button onClick={()=>handleDeactivate(n.id)}
+                          style={{ background:"transparent", border:"1px solid var(--color-line)", borderRadius:6, padding:"4px 8px", color:"var(--color-label-mute)", fontSize:11, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+                          숨기기
+                        </button>
+                      ) : (
+                        <button onClick={()=>handleReactivate(n.id)}
+                          style={{ background:"transparent", border:"1px solid var(--color-primary)", borderRadius:6, padding:"4px 8px", color:"var(--color-primary-deep)", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+                          되돌리기
+                        </button>
+                      )}
+                      <button onClick={()=>setConfirmDelete(n.id)}
+                        style={{ background:"transparent", border:"1px solid var(--color-line)", borderRadius:6, padding:"4px 8px", color:"var(--color-destructive)", fontSize:11, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+                        삭제
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
-          ));
+          ))}
+          {matched.length > histLimit && (
+            <button onClick={()=>setHistLimit(l => l + 20)}
+              style={{ width:"100%", background:"transparent", border:"1px solid var(--color-line)", borderRadius:8, padding:"9px", color:"var(--color-label-mute)", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+              더 보기 (남은 {matched.length - histLimit}건)
+            </button>
+          )}
+          </>}
+          </>
+          );
           })()}
         </div>
       </div>
