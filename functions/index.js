@@ -2540,6 +2540,34 @@ function computeGpsWindow(meta) {
   return { startMin, endMin };
 }
 
+/** 오늘 여러 회차가 잡힌 차량에서 **지금 운행 중인** 배차 1건 선택 → { disp, meta } 또는 null.
+ *
+ *  통근/통학 차량은 한 대가 등교(오전)·하교(오후)를 모두 뛴다. 예전에는 vehicleId 를 키로 한
+ *  맵에 배차를 덮어써(last-wins) **문서 ID 순으로 마지막 1건만** 남겼고, 그 1건의 노선 시간창
+ *  으로만 판정해 나머지 회차는 좌표가 통째로 차단됐다(오전 관제 실종). 그래서 후보 전체를 보고
+ *  **현재 시각이 시간창 안에 드는 회차**를 고른다. 창이 겹치면 출발시각이 지금에 가까운 쪽
+ *  (정적 QR `resolveStaticDispatchAdmin` 의 다중 회차 선택과 같은 규칙).
+ *
+ *  🔴 departTime 미설정 노선(win=null=게이트 없음)은 **폴백으로만** 채택한다 — 시간창이 실제로
+ *  맞는 회차가 있으면 그쪽이 우선. 게이트 없는 회차가 다른 회차의 운행 시간을 가로채면 안 된다. */
+async function pickActiveDispatch(db, cid, candidates, nowMin, cache) {
+  let ungated = null;                       // 게이트 없는 회차(레거시 관대 폴백)
+  let best = null, bestDist = Infinity;
+  for (const disp of candidates) {
+    const meta = await loadRouteMeta(db, cid, disp.routeId, cache);
+    const win = computeGpsWindow(meta);
+    if (!win) {                             // departTime 미설정 → 기존 동작(항상 허용) 보존
+      if (!ungated) ungated = { disp, meta };
+      continue;
+    }
+    if (nowMin < win.startMin || nowMin > win.endMin) continue;
+    const dep = hhmmToMinutes(meta.departTime);
+    const dist = Math.abs((dep === null ? win.startMin : dep) - nowMin);
+    if (dist < bestDist) { best = { disp, meta }; bestDist = dist; }
+  }
+  return best || ungated;
+}
+
 // 창 밖/미배차 device 차량의 잔존 gps 문서 삭제 — mobile clearGPS(운행 종료 버튼) 대응물.
 // device 단말은 종료 버튼이 없어 문서가 영구 잔존 → 직원앱 노선탭 "N대 운행중"·홈탭 마커가
 // 운행 전/후에도 계속 표시되던 결함(2026-07-16 회의 #2). source==="device" 인 문서만 삭제
@@ -2637,7 +2665,9 @@ exports.pollDeviceVehicleGps = onSchedule(
           .get();
         if (vehSnap.empty) continue;
 
-        // 오늘 배차 1회 조회 → vehicleId → {dispatchId,routeId,routeName,driverId,driverName,stopArrivals}
+        // 오늘 배차 1회 조회 → vehicleId → [{dispatchId,routeId,routeName,driverId,driverName,departTime,stopArrivals}]
+        // ⚠ **배열로 모은다**(1건만 남기면 안 됨) — 한 차량이 등교·하교 여러 회차를 뛴다.
+        //   회차 선택은 아래 pickActiveDispatch(현재 시각이 든 시간창) 가 한다.
         const dispByVehicle = {};
         const dispSnap = await db
           .collection("companies").doc(cid)
@@ -2646,16 +2676,20 @@ exports.pollDeviceVehicleGps = onSchedule(
         dispSnap.docs.forEach(d => {
           const v = d.data() || {};
           if (v.vehicleId) {
-            dispByVehicle[v.vehicleId] = {
+            (dispByVehicle[v.vehicleId] = dispByVehicle[v.vehicleId] || []).push({
               dispatchId: d.id,
               routeId: v.routeId || "",
               routeName: v.routeName || "",
               driverId: v.driverId || "",
               driverName: v.driverName || "",
+              departTime: v.departTime || "",
               stopArrivals: v.stopArrivals || {},
-            };
+            });
           }
         });
+        // 출발시각 순 정렬 — 후보 순회를 결정적으로(문서 ID 순 우연 의존 제거).
+        Object.values(dispByVehicle).forEach(list =>
+          list.sort((a, b) => String(a.departTime).localeCompare(String(b.departTime))));
 
         // 회사별 노선 메타 캐시(이 폴 사이클 1회 로드) — device 차량 배차 routeId 한정.
         const routeMetaCache = {};
@@ -2667,8 +2701,8 @@ exports.pollDeviceVehicleGps = onSchedule(
           if (!carId) continue;
           targets++;
           try {
-            const disp = dispByVehicle[vehicleId];
-            if (!disp) {
+            const candidates = dispByVehicle[vehicleId] || [];
+            if (!candidates.length) {
               // 오늘 미운행 — routeId 없으면 승객앱 표시 불가. 잔존 device gps 문서가 있으면
               // 삭제(어제 창 종료 시점에 폴러가 안 돌았던 경우 등) — 없으면 no-op.
               await cleanupDeviceGpsDoc(db, cid, vehicleId);
@@ -2677,18 +2711,19 @@ exports.pollDeviceVehicleGps = onSchedule(
             }
 
             // 운행 시간 창 게이트 — 노선 시간표 밖(운행 전/후) 상시신호 좌표 차단.
-            // win=null(노선 departTime 미설정) 이면 게이트 없음 = 기존 동작 보존.
-            // meta 는 아래 도착감지에서도 재사용(routeMetaCache 로 1회 로드).
-            const meta = await loadRouteMeta(db, cid, disp.routeId, routeMetaCache);
-            const win = computeGpsWindow(meta);
-            if (win && (nowMin < win.startMin || nowMin > win.endMin)) {
-              // 창 밖 = 운행 종료/전. mobile 의 "운행 종료 → clearGPS(문서 삭제)" 대응물 —
-              // device 차량은 사람이 종료 버튼을 안 누르므로 폴러가 여기서 문서를 지워야
-              // 직원/승객/관제 앱의 "운행중" 표시가 꺼진다(2026-07-16 회의 #2, 소비자 코드 0 변경).
+            // 회차가 여럿이면 지금 운행 중인 회차를 고른다(등교/하교 각각 자기 창에서 잡힘).
+            // 어느 회차도 창 안이 아니면 = 운행 종료/전. meta 는 아래 도착감지에서 재사용.
+            const active = await pickActiveDispatch(db, cid, candidates, nowMin, routeMetaCache);
+            if (!active) {
+              // mobile 의 "운행 종료 → clearGPS(문서 삭제)" 대응물 — device 차량은 사람이 종료
+              // 버튼을 안 누르므로 폴러가 여기서 문서를 지워야 직원/승객/관제 앱의 "운행중"
+              // 표시가 꺼진다(2026-07-16 회의 #2, 소비자 코드 0 변경).
               await cleanupDeviceGpsDoc(db, cid, vehicleId);
               skipped++;
               continue; // busin 조회·gps write 모두 skip
             }
+            const disp = active.disp;
+            const meta = active.meta;
 
             const rows = await fetchVehicleLocations(carId, today);
             if (!rows.length) { skipped++; continue; } // 좌표 0건
