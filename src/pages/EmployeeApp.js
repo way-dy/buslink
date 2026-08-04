@@ -1332,8 +1332,12 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
                     <div style={{ position: 'relative', width: '100%', height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {j > 0 && <span style={{ position: 'absolute', left: 0, right: '50%', top: '50%', height: 3, transform: 'translateY(-50%)', background: leftOn ? 'var(--color-primary)' : 'var(--color-line)' }} />}
                       {j < nodes.length - 1 && <span style={{ position: 'absolute', left: '50%', right: 0, top: '50%', height: 3, transform: 'translateY(-50%)', background: rightOn ? 'var(--color-primary)' : 'var(--color-line)' }} />}
-                      {/* 현재(깜빡) 마커만 살짝 위로(-4px) — 사용자 점검 요청(2026-07-13). 연결선/정류장명 레이아웃 무영향(transform). */}
-                      {n.current && <span style={{ position: 'absolute', left: '50%', top: '50%', width: 22, height: 22, transform: 'translate(-50%,calc(-50% - 4px))', borderRadius: '50%', background: 'var(--color-primary)', opacity: 0.45, animation: 'buspulse 2s ease-out infinite', pointerEvents: 'none' }} />}
+                      {/* 현재(깜빡) 마커 — 점과 동심원. 🔴 여기에 transform 을 쓰지 말 것:
+                          `buspulse` 키프레임이 transform(scale) 을 애니메이션하므로 인라인 transform 이
+                          통째로 무시돼(0~100% 전 구간) 링이 점의 오른쪽 아래로 11px 씩 밀린다.
+                          2026-07-13 의 -4px 도 이 이유로 링에는 적용된 적이 없었다(2026-08-04 재신고).
+                          → 오프셋은 left/top 으로만. 점의 translateY(-4px) 만큼 top 에 −4px 반영. */}
+                      {n.current && <span style={{ position: 'absolute', left: 'calc(50% - 11px)', top: 'calc(50% - 15px)', width: 22, height: 22, borderRadius: '50%', background: 'var(--color-primary)', opacity: 0.45, animation: 'buspulse 2s ease-out infinite', pointerEvents: 'none' }} />}
                       <span style={{ position: 'relative', width: n.current ? 16 : 12, height: n.current ? 16 : 12, borderRadius: '50%', background: isReached ? 'var(--color-primary)' : 'var(--color-line)', border: '2px solid var(--color-bg)', boxShadow: n.current ? '0 0 0 3px rgba(0,102,255,.28)' : 'none', transform: n.current ? 'translateY(-4px)' : undefined }} />
                     </div>
                     {/* 정류장명 */}

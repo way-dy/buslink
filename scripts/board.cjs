@@ -12,6 +12,11 @@
 //   node scripts/board.cjs comment <id> <내용>     — 댓글(history) 추가. 사용자 용어만.
 //   node scripts/board.cjs comment <id> --file <경로> — 긴 안내(사용가이드 등)를 파일로.
 //        (여러 줄·한글이 셸 인자로 깨지는 것 방지. 파일은 UTF-8)
+//   node scripts/board.cjs dump <id> <출력폴더>    — 첨부 + **본문 인라인 이미지**를 파일로 저장
+//
+// ⚠ 첨부는 두 군데에 있다: `screenshots` 배열과 **본문 content 안의 인라인 `<img data:...>`**
+//   (2026-07-13 리치 텍스트 도입분). 목록의 "첨부 N장" 만 보면 본문 이미지를 못 보고
+//   "화면 못 고름"으로 헤맨다(2026-08-04 실제로 그럴 뻔했다) → 목록이 둘 다 센다.
 //
 // ⚠ 게시판은 고객이 보는 화면이다. 완료 코멘트는 항상 "반영완료되었습니다" 로 고정하고
 //   변경 상세·빌드 해시·파일명 등 시스템 용어는 절대 남기지 않는다(자유 메모 인자 없음).
@@ -47,6 +52,8 @@ const { serverTimestamp, arrayUnion } = admin.firestore.FieldValue;
 const Timestamp = admin.firestore.Timestamp;
 
 const plain = (h) => String(h || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+// 본문 HTML 안에 인라인으로 박힌 이미지(data URI). screenshots 와 별개 경로다.
+const inlineImages = (content) => [...String(content || "").matchAll(/<img[^>]*src="data:image\/([a-z]+);base64,([^"]+)"/g)];
 const histEntry = (statusTo, comment) => {
   const e = { byUid: BYUID, byName: BYNAME, at: Timestamp.now(), comment: comment || "" };
   if (statusTo) e.statusTo = statusTo;
@@ -119,8 +126,33 @@ async function isStaff(uid) {
       console.log(`\n[${d.id}] (${x.status}) ${x.title || "(제목 없음)"}`);
       console.log(`  요청자 ${x.requesterName || "-"} · ${x.companyId || "-"} · ${ts}`);
       console.log(`  내용: ${plain(x.content).slice(0, 300)}`);
-      console.log(`  첨부 ${(x.screenshots || []).length}장 · 이력 ${(x.history || []).length}건`);
+      const inline = inlineImages(x.content).length;
+      console.log(`  첨부 ${(x.screenshots || []).length}장` + (inline ? ` · 본문 이미지 ${inline}장 → dump ${d.id} <폴더>` : "") + ` · 이력 ${(x.history || []).length}건`);
     }
+    return;
+  }
+
+  if (cmd === "dump") {
+    if (!id || !rest[0]) { console.error("usage: dump <id> <출력폴더>"); process.exit(1); }
+    const outDir = rest[0];
+    const s = await db.collection(COL).doc(id).get();
+    if (!s.exists) { console.error(`문서 없음: ${id}`); process.exit(1); }
+    const x = s.data();
+    fs.mkdirSync(outDir, { recursive: true });
+    console.log(`[${id}] ${x.title}`);
+    console.log(`본문: ${plain(x.content).slice(0, 500)}`);
+    (x.screenshots || []).forEach((sc, i) => {
+      const m = /^data:image\/([a-z]+);base64,(.+)$/.exec(sc.dataUrl || "");
+      if (!m) return;
+      const p = path.join(outDir, `${id}_shot${i}.${m[1]}`);
+      fs.writeFileSync(p, Buffer.from(m[2], "base64"));
+      console.log(`  📎 ${p}`);
+    });
+    inlineImages(x.content).forEach((m, i) => {
+      const p = path.join(outDir, `${id}_inline${i}.${m[1]}`);
+      fs.writeFileSync(p, Buffer.from(m[2], "base64"));
+      console.log(`  🖼 ${p}`);
+    });
     return;
   }
 
@@ -150,6 +182,6 @@ async function isStaff(uid) {
     return;
   }
 
-  console.error("usage: node scripts/board.cjs list | done <id> | status <id> <상태> | comment <id> <내용>");
+  console.error("usage: node scripts/board.cjs list | dump <id> <폴더> | done <id> | status <id> <상태> | comment <id> <내용>");
   process.exit(1);
 })().catch((e) => { console.error(e.message); process.exit(1); });
