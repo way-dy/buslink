@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 const ANIM_DURATION = 1500; // 기본/폴백 이동 시간(첫 도착·간격 미기록 시)
 const MIN_DUR = 1200;       // per-vehicle 동적 duration 하한
@@ -30,6 +30,19 @@ export function useAnimatedPositions(rawVehicles) {
   // rawVehicles 변경 시 타겟 위치 업데이트
   useEffect(() => {
     rawRef.current = rawVehicles;
+
+    // 목록에서 빠진 차량의 보간 상태 정리(노선 변경·차량 선택 해제 등).
+    // 안 지우면 그 차량이 나중에 다시 목록에 들어올 때 몇 시간 전 좌표에서
+    // 현재 좌표까지 지도를 가로질러 미끄러진다.
+    const alive = new Set(rawVehicles.map((v) => v.id));
+    Object.keys(prevPositions.current).forEach((id) => {
+      if (alive.has(id)) return;
+      delete prevPositions.current[id];
+      delete targetPositions.current[id];
+      delete animStartTime.current[id];
+      delete lastArrivalTime.current[id];
+      delete durRef.current[id];
+    });
 
     rawVehicles.forEach((v) => {
       if (!v.lat || !v.lng) return;
@@ -107,7 +120,14 @@ export function useAnimatedPositions(rawVehicles) {
 
   // ★ rawVehicles 변경 시 rAF 루프 재시작 (멈춰있을 수 있으므로)
   useEffect(() => {
-    if (rawVehicles.length > 0 && !rafRef.current) {
+    if (rawVehicles.length === 0) {
+      // 🔴 표시 대상이 사라진 경우(노선 변경으로 그 노선에 운행 차량이 없음 등).
+      //   rAF 는 빈 목록에선 다시 돌지 않으므로 displayVehicles 를 여기서 비우지 않으면
+      //   이전 목록이 영구 잔존한다(= 이전 노선 버스가 그 자리에 멈춰 보이는 결함).
+      setDisplayVehicles((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
+    if (!rafRef.current) {
       rafRef.current = requestAnimationFrame(animate);
     }
   }, [rawVehicles, animate]);
@@ -119,5 +139,17 @@ export function useAnimatedPositions(rawVehicles) {
     };
   }, [animate]);
 
-  return displayVehicles.length > 0 ? displayVehicles : rawVehicles;
+  // 표시 목록의 "구성원"은 항상 rawVehicles 가 정한다 — 보간 좌표만 덮어쓴다.
+  // displayVehicles 를 그대로 반환하면 데이터가 바뀐 뒤 다음 프레임까지 사라진 차량이
+  // 남고, 프레임이 안 돌면(빈 목록) 영구 잔존한다.
+  return useMemo(() => {
+    if (displayVehicles.length === 0) return rawVehicles;
+    const animated = new Map(displayVehicles.map((v) => [v.id, v]));
+    return rawVehicles.map((v) => {
+      const a = animated.get(v.id);
+      return a && typeof a.lat === "number" && typeof a.lng === "number"
+        ? { ...v, lat: a.lat, lng: a.lng }
+        : v;
+    });
+  }, [rawVehicles, displayVehicles]);
 }
