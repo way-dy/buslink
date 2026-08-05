@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { auth, db } from "../firebase";
 import { signOut } from "firebase/auth";
 import { collection, query, where, getDocs, doc, updateDoc, getDoc, onSnapshot, orderBy } from "firebase/firestore";
@@ -8,6 +8,7 @@ import { planTimeForStop, computeStopEstimates, formatDelayLabel } from "../lib/
 import { buildCumulativeLengths, projectToPolyline, toLatLngPath, haversine } from "../lib/routeProgress";
 import { computeGuide, kakaoMapDirectionsUrl, stopLatLng, splitGuidePath, guideView, nextNaviGuide, travelHeading, navCenter, turnGlyph, rotateDragDelta } from "../lib/navGuide";
 import { Map, Polyline, CustomOverlayMap } from "react-kakao-maps-sdk";
+import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { buildRunId, recordEtaDiagnostic, throttleGate } from "../lib/etaDiag";
 import { ensureGeolocationPermission } from "../lib/usePermissions";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
@@ -1922,8 +1923,23 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
     return () => navigator.geolocation.clearWatch(w);
   }, []);
 
-  // 운행 중이면 서버에 올라간 위치(관제·승객앱이 보는 것과 동일), 아니면 내 폰 위치.
-  const pos = livePos || myPos;
+  // ── 내 위치 (2026-08-06 way "차량 위치가 뚝뚝 끊어져서 이동") ──────────────
+  // 🔴 예전엔 `livePos || myPos` 였다 — 운행 중에는 **서버에 올라간 위치**를 썼는데,
+  //   그건 `startGPS` 가 **5m/5초 스로틀**로 올린 것을 Firestore 왕복해 받은 값이라
+  //   기사 화면에서 5초마다 뚝 끊겨 튄다. 정작 **내 폰의 GPS 가 훨씬 촘촘한데** 안 쓰고 있었다.
+  //   → 내 폰 위치를 1순위로. 폰 측위가 없을 때만(권한 거부·device 차량) 서버 위치 폴백.
+  //   ⚠ 이건 **기사 본인 화면**의 이야기다. 관제·승객앱이 보는 값은 그대로 서버 위치다.
+  const rawPos = myPos || livePos;
+
+  // 승객·관제 지도와 같은 rAF 보간을 기사 화면에도 적용한다(여긴 빠져 있었다).
+  // 판정(회전 안내까지 남은 거리·정류장 도착)은 **원본 좌표**로, 보간값은 **그리기 전용**.
+  const posList = useMemo(
+    () => (rawPos ? [{ id: "me", lat: rawPos.lat, lng: rawPos.lng }] : []),
+    [rawPos && rawPos.lat, rawPos && rawPos.lng] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const smoothed = useAnimatedPositions(posList);
+  const pos = rawPos;                                  // 판정용(거리·안내 시점)
+  const drawPos = smoothed[0] || rawPos;               // 그리기용(마커·지도 중심·경로 분할)
 
   // 진행 방향 — 지도를 돌릴 수 없으니 마커를 돌린다. 직전 위치를 기억해 이동 벡터로 산출.
   const prevPosRef = useRef(null);
@@ -2017,7 +2033,7 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
   // 지나온 / **지금 가야 할** / 그 이후로 잘라 가야 할 구간만 굵게 뽑는다.
   // 직전 정류장 — 경로에서 멀리 떨어져 있을 때(차고지·출발 전) 기준점이 된다.
   const prevLL = guide.targetIdx > 0 ? stopLatLng(stops[guide.targetIdx - 1]) : null;
-  const seg = splitGuidePath({ path, pos, targetLL, prevLL });
+  const seg = splitGuidePath({ path, pos: drawPos, targetLL, prevLL }); // 그리기 — 마커와 굵은 구간이 어긋나지 않게 보간값 사용
 
   const beforeRun = currentStopIdx < 0;
 
@@ -2060,12 +2076,14 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeId, beforeRun, path.length, pos, targetLL]);
 
+  // 🔴 deps 는 **보간값(drawPos)** 이어야 한다 — 원본(pos)에 걸면 GPS 가 들어오는 순간에만
+  //   재센터돼 지도가 5초에 한 번 뚝 끊겨 움직인다(마커만 부드럽고 지도는 그대로 튀는 상태).
   useEffect(() => {
-    if (!follow || !pos) return;
-    const c = navCenter({ pos, heading, level: zoom, heightPx: clipBox.h || 420 });
+    if (!follow || !drawPos) return;
+    const c = navCenter({ pos: drawPos, heading, level: zoom, heightPx: clipBox.h || 420 });
     if (c) setCenter(c);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [follow, pos && pos.lat, pos && pos.lng, heading, zoom, clipBox.h]);
+  }, [follow, drawPos && drawPos.lat, drawPos && drawPos.lng, heading, zoom, clipBox.h]);
 
   // ── 지도를 손으로 만졌을 때 (2026-08-05 way 현장 지적 2건) ────────────────
   //   ① "지도 움직일 때 손가락 방향대로 안 움직임" — 판이 CSS 로 회전해 있으면 카카오는
@@ -2106,7 +2124,7 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
   };
   const endStagePan = () => { panRef.current = null; };
 
-  const mapCenter = center || targetLL || pos || path[0] || { lat: 37.3894, lng: 126.9522 };
+  const mapCenter = center || targetLL || drawPos || path[0] || { lat: 37.3894, lng: 126.9522 };
   const setZoomBy = (d) => {
     setZoom(z => Math.max(1, Math.min(10, (Number.isFinite(z) ? z : NAV_ZOOM_DEFAULT) + d)));
   };
@@ -2199,8 +2217,8 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
                 판이 -heading 만큼 돌아 있으므로 여기에 heading 을 주면 화면에선 정확히
                 위(=진행 방향)를 향한다. 북쪽 고정 모드(rot=0)에서는 실제 방위를 향한다.
                 방향을 아직 못 잡았으면 원형 점 — 없는 방향을 그리면 거짓말이 된다. */}
-            {pos && (
-              <CustomOverlayMap position={pos} yAnchor={0.5} zIndex={5}>
+            {drawPos && (
+              <CustomOverlayMap position={drawPos} yAnchor={0.5} zIndex={5}>
                 <div style={{
                   width: 38, height: 38, borderRadius: "50%",
                   background: "var(--color-primary)", border: "3px solid #fff",

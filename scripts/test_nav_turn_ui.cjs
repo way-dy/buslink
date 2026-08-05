@@ -111,6 +111,16 @@ console.log("\n[8] 회귀 가드 — 소스 단언");
   ok("배너가 ↱ 하드코딩으로 되돌아가지 않았다", !/fontSize: 26, lineHeight: 1 \}\}>↱</.test(drv));
   ok("배너가 turnGlyph 를 쓴다", /turnGlyph\(/.test(drv));
   ok("회전 중 드래그 보정이 배선돼 있다", /rotateDragDelta\(/.test(drv));
+
+  // 2026-08-06 way "차량 위치가 뚝뚝 끊어져서 이동" — 두 가지가 같이 필요하다.
+  ok("내 폰 위치를 1순위로 쓴다(서버 왕복 5초 스로틀 회피)", /const rawPos = myPos \|\| livePos;/.test(drv)
+    && !/const pos = livePos \|\| myPos;/.test(drv));
+  ok("기사 화면에도 rAF 보간을 적용한다", /useAnimatedPositions\(posList\)/.test(drv));
+  ok("마커는 보간값으로 그린다", /position=\{drawPos\}/.test(drv));
+  // 🔴 지도 재센터 deps 가 원본이면 지도만 5초마다 튄다(마커는 부드러운데 화면이 끊긴다)
+  ok("지도 재센터도 보간값을 따라간다", /\[follow, drawPos && drawPos\.lat, drawPos && drawPos\.lng/.test(drv));
+  // 판정은 원본이어야 "몇 m 앞 회전"이 늦지 않는다
+  ok("회전 안내 판정은 원본 좌표로", /nextNaviGuide\(\{ guides: navi\.guides, path, pos \}\)/.test(drv));
 }
 
 console.log(`\n${fail === 0 ? "✅" : "❌"} pass ${pass} / fail ${fail}`);
