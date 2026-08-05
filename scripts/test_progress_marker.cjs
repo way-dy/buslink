@@ -59,21 +59,25 @@ const cssText = (o) => Object.entries(o)
 const employee = fs.readFileSync(path.join(ROOT, "src", "pages", "EmployeeApp.js"), "utf8");
 const tokens = fs.readFileSync(path.join(ROOT, "src", "styles", "tokens.css"), "utf8");
 
-// 요약 진척바의 링·점 = "4노드 가로 진척" 블록 안 buspulse 링과 그 바로 뒤 점
-const barAt = employee.indexOf("4노드 가로 진척");
-ok(barAt > 0, "요약 진척바 블록을 소스에서 찾음");
-const objs = styleObjectsIn(employee).filter((o) => o.index > barAt && o.index < barAt + 6000);
+// ⚠ 2026-08-05 홈 통합(회의 #4)으로 **4노드 요약 진척바가 사라졌다** — 이 테스트가 재던
+//   링·점 쌍은 더 이상 없다. 지금 buspulse 를 쓰는 곳은 통합 스트립의 **버스 마커**이고,
+//   구조가 `transform 을 가진 래퍼 > inset:0 인 애니메이션 span` 이라 이 결함 클래스가
+//   원리적으로 성립하지 않는다(애니메이션 요소에 인라인 transform 이 없다).
+//   → 대상은 옮기고, **지켜야 할 불변식은 그대로** 검사한다.
+const stripAt = employee.indexOf("노선 진척 스트립(단일)");
+ok(stripAt > 0, "통합 노선 스트립 블록을 소스에서 찾음");
+const objs = styleObjectsIn(employee).filter((o) => o.index > stripAt && o.index < stripAt + 9000);
 const ringObj = objs.find((o) => /animation:\s*'buspulse/.test(o.text));
-const dotObj = objs.find((o) => /boxShadow:\s*n\.current/.test(o.text));
-ok(!!ringObj, "현재 마커(링) style 객체 추출");
-ok(!!dotObj, "현재 마커(점) style 객체 추출");
-if (!ringObj || !dotObj) { report(); process.exit(1); }
+ok(!!ringObj, "버스 마커 펄스(buspulse) style 객체 추출");
+if (!ringObj) { report(); process.exit(1); }
 
 // ── 회귀 가드(소스 단언) ───────────────────────────────────────────────────
-ok(!/transform:/.test(ringObj.text), "링 style 에 transform 없음(버스펄스가 덮어씀)", ringObj.text.match(/transform:[^,]*/)?.[0]);
-ok(/left:\s*'calc\(50% - 11px\)'/.test(ringObj.text), "링 가로 중앙 = left calc(50% - 11px)");
-ok(/top:\s*'calc\(50% - 15px\)'/.test(ringObj.text), "링 세로 = top calc(50% - 15px)  (중앙 −11 · 위로 −4)");
-ok(/translateY\(-4px\)/.test(dotObj.text), "점은 -4px 유지(애니메이션 없어 transform 안전)");
+// 🔴 핵심 불변식: **애니메이션이 transform 을 건드리는 요소에는 인라인 transform 을 두지 않는다.**
+//    위치 보정이 필요하면 애니메이션이 없는 바깥 래퍼가 지고, 안쪽은 inset 으로 꽉 채운다.
+ok(!/transform:/.test(ringObj.text), "펄스 style 에 인라인 transform 없음(buspulse 가 덮어쓴다)", ringObj.text.match(/transform:[^,]*/)?.[0]);
+ok(/inset:\s*0/.test(ringObj.text), "펄스는 inset:0 으로 래퍼를 꽉 채운다(자체 오프셋 금지)");
+ok(/position:\s*'relative'[\s\S]{0,120}transform:\s*'translateY\(-4px\)'/.test(employee.slice(stripAt, stripAt + 9000)),
+  "위치 보정은 애니메이션 없는 래퍼가 진다(-4px)");
 ok(/@keyframes\s+buspulse[^}]*}[^}]*transform:/s.test(tokens) || /buspulse[\s\S]{0,200}transform:/.test(tokens),
   "buspulse 가 여전히 transform 을 애니메이션(이 규칙의 전제)");
 
@@ -104,28 +108,39 @@ const keyframes = (tokens.match(/@keyframes\s+buspulse\s*\{[\s\S]*?\n\}/) || [""
 (async () => {
   const browser = await chromium.launch({ executablePath: CHROME });
   const page = await browser.newPage({ viewport: { width: 400, height: 200 } });
-  const ringCss = cssText(evalStyle(ringObj.text));
-  const dotCss = cssText(evalStyle(dotObj.text));
-  const row = "position:relative;width:200px;height:24px;display:flex;align-items:center;justify-content:center";
+  // 현재 구조 = [래퍼(transform·애니메이션 없음)] > [펄스 span(inset:0·buspulse)] + [버스 원(inset:0)]
+  const wrapObj = objs.find((o) => /position:\s*'relative'/.test(o.text) && /translateY\(-4px\)/.test(o.text));
+  const busObj = objs.find((o) => /inset:\s*0/.test(o.text) && /display:\s*'flex'/.test(o.text));
+  ok(!!wrapObj, "버스 마커 래퍼 style 객체 추출");
+  ok(!!busObj, "버스 원 style 객체 추출");
+  if (!wrapObj || !busObj) { await browser.close(); report(); process.exit(1); }
+
+  const wrapCss = cssText(evalStyle(wrapObj.text));
+  const pulseCss = cssText(evalStyle(ringObj.text));
+  const busCss = cssText(evalStyle(busObj.text));
+  const row = "position:relative;width:200px;height:28px;display:flex;align-items:center;justify-content:center";
+  const dotCss = "position:absolute;left:50%;top:50%;width:12px;height:12px;border-radius:50%;background:#333;transform:translate(-50%,-50%)";
   await page.setContent(`<style>${keyframes}</style><body style="margin:0">
-    <div id="row" style="${row}"><span id="ring" style="${ringCss}"></span><span id="dot" style="${dotCss}"></span></div>
+    <div id="row" style="${row}">
+      <div id="wrap" style="${wrapCss}"><span id="pulse" style="${pulseCss}"></span><div id="bus" style="${busCss}"></div></div>
+    </div>
     <div id="rowOld" style="${row}"><span id="ringOld" style="${OLD_RING}"></span><span id="dotOld" style="${dotCss}"></span></div>
   </body>`);
 
   const measure = () => page.evaluate(() => {
     const c = (id) => { const r = document.getElementById(id).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; };
     const row = document.getElementById("row").getBoundingClientRect();
-    return { ring: c("ring"), dot: c("dot"), ringOld: c("ringOld"), dotOld: c("dotOld"), rowMidY: row.y + row.height / 2 };
+    return { pulse: c("pulse"), bus: c("bus"), ringOld: c("ringOld"), dotOld: c("dotOld"), rowMidY: row.y + row.height / 2 };
   });
 
   // 애니메이션이 도는 두 시점에서 재서 "겹침"이 우연이 아님을 확인
   for (const waitMs of [0, 700]) {
     if (waitMs) await page.waitForTimeout(waitMs);
     const m = await measure();
-    ok(Math.abs(m.ring.x - m.dot.x) < 0.75, `링·점 가로 중심 일치(t=${waitMs}ms)`, `dx=${(m.ring.x - m.dot.x).toFixed(2)}px`);
-    ok(Math.abs(m.ring.y - m.dot.y) < 0.75, `링·점 세로 중심 일치(t=${waitMs}ms)`, `dy=${(m.ring.y - m.dot.y).toFixed(2)}px`);
-    ok(Math.abs((m.rowMidY - m.dot.y) - 4) < 0.75, `점이 연결선보다 4px 위(t=${waitMs}ms)`, `Δ=${(m.rowMidY - m.dot.y).toFixed(2)}px`);
-    // 재현: 옛 코드(transform 버전)는 링이 점보다 오른쪽·아래로 밀렸다
+    ok(Math.abs(m.pulse.x - m.bus.x) < 0.75, `펄스·버스원 가로 중심 일치(t=${waitMs}ms)`, `dx=${(m.pulse.x - m.bus.x).toFixed(2)}px`);
+    ok(Math.abs(m.pulse.y - m.bus.y) < 0.75, `펄스·버스원 세로 중심 일치(t=${waitMs}ms)`, `dy=${(m.pulse.y - m.bus.y).toFixed(2)}px`);
+    ok(Math.abs((m.rowMidY - m.bus.y) - 4) < 0.75, `마커가 연결선보다 4px 위(t=${waitMs}ms)`, `Δ=${(m.rowMidY - m.bus.y).toFixed(2)}px`);
+    // 재현: 옛 코드(애니메이션 요소에 인라인 transform)는 링이 오른쪽·아래로 밀렸다
     if (!waitMs) {
       ok(m.ringOld.x - m.dotOld.x > 8, "옛 코드 재현 — 링이 오른쪽으로 밀림", `dx=${(m.ringOld.x - m.dotOld.x).toFixed(2)}px`);
       ok(m.ringOld.y - m.dotOld.y > 8, "옛 코드 재현 — 링이 아래로 밀림(신고 증상)", `dy=${(m.ringOld.y - m.dotOld.y).toFixed(2)}px`);

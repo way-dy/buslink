@@ -6,7 +6,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { startGPS, stopGPS, clearGPS, triggerHeartbeat } from "../lib/gps";
 import { planTimeForStop, computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
 import { buildCumulativeLengths, projectToPolyline, toLatLngPath, haversine } from "../lib/routeProgress";
-import { computeGuide, kakaoMapDirectionsUrl, stopLatLng, splitGuidePath, guideView, nextNaviGuide, travelHeading, navCenter } from "../lib/navGuide";
+import { computeGuide, kakaoMapDirectionsUrl, stopLatLng, splitGuidePath, guideView, nextNaviGuide, travelHeading, navCenter, turnGlyph, rotateDragDelta } from "../lib/navGuide";
 import { Map, Polyline, CustomOverlayMap } from "react-kakao-maps-sdk";
 import { buildRunId, recordEtaDiagnostic, throttleGate } from "../lib/etaDiag";
 import { ensureGeolocationPermission } from "../lib/usePermissions";
@@ -2035,6 +2035,45 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [follow, pos && pos.lat, pos && pos.lng, heading, zoom, clipBox.h]);
 
+  // ── 지도를 손으로 만졌을 때 (2026-08-05 way 현장 지적 2건) ────────────────
+  //   ① "지도 움직일 때 손가락 방향대로 안 움직임" — 판이 CSS 로 회전해 있으면 카카오는
+  //      드래그를 **자기(판) 좌표계**로 해석하는데 손가락은 화면 좌표계로 움직여 각도만큼
+  //      어긋난다. 회전 중에는 카카오 기본 드래그를 끄고 우리가 델타를 되돌려 panBy 한다.
+  //   ② "움직이고 나서 제자리 안 돌아옴" — 추적을 놓기만 하고 복귀가 수동 버튼뿐이었다.
+  //      손을 뗀 뒤 일정 시간 조작이 없으면 자동으로 다시 따라간다(내비 관례).
+  const FOLLOW_RESUME_MS = 8000;
+  const resumeTimerRef = useRef(null);
+  const touchedMap = useCallback(() => {
+    setFollow(false);
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+    resumeTimerRef.current = setTimeout(() => { resumeTimerRef.current = null; setFollow(true); }, FOLLOW_RESUME_MS);
+  }, []);
+  useEffect(() => () => { if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current); }, []);
+
+  // 회전 중에는 카카오 기본 드래그를 끄고(어긋난 방향으로 끌리므로) 우리가 처리한다.
+  useEffect(() => {
+    const m = mapObjRef.current;
+    if (!m || typeof m.setDraggable !== "function") return;
+    m.setDraggable(!rotating);
+  }, [rotating]);
+
+  // 회전 중 수동 패닝 — 화면 델타를 판 좌표계로 되돌려 panBy. 판정은 순수 함수(격리 테스트).
+  const panRef = useRef(null);
+  const onStagePointerDown = (e) => {
+    if (!rotating) return;                      // 북쪽 고정이면 카카오 기본 드래그 그대로
+    panRef.current = { x: e.clientX, y: e.clientY };
+    touchedMap();
+  };
+  const onStagePointerMove = (e) => {
+    const p = panRef.current, m = mapObjRef.current;
+    if (!p || !m || typeof m.panBy !== "function") return;
+    const d = rotateDragDelta({ dx: e.clientX - p.x, dy: e.clientY - p.y, rotDeg: rot });
+    if (!d.dx && !d.dy) return;
+    panRef.current = { x: e.clientX, y: e.clientY };
+    m.panBy(-d.dx, -d.dy);                      // panBy 는 중심을 옮기므로 부호를 뒤집어야 내용이 손가락을 따라온다
+  };
+  const endStagePan = () => { panRef.current = null; };
+
   const mapCenter = center || targetLL || pos || path[0] || { lat: 37.3894, lng: 126.9522 };
   const setZoomBy = (d) => {
     setZoom(z => Math.max(1, Math.min(10, (Number.isFinite(z) ? z : NAV_ZOOM_DEFAULT) + d)));
@@ -2056,7 +2095,11 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
       {/* 지도가 이 화면의 본체다 — 안내는 **지도 위에 얹는다**.
           예전엔 안내 카드(사진 포함)를 지도 위에 쌓아 지도가 320px 로 밀려 있었다
           (2026-07-31 기사 지적: "사진까지 보기 어렵고 정작 지도가 잘 안 보인다"). */}
-      <div ref={clipRef} style={{ position: "relative", height: "64vh", minHeight: 340, overflow: "hidden", background: "#eef1f6" }}>
+      <div ref={clipRef}
+        onPointerDown={onStagePointerDown} onPointerMove={onStagePointerMove}
+        onPointerUp={endStagePan} onPointerCancel={endStagePan} onPointerLeave={endStagePan}
+        style={{ position: "relative", height: "64vh", minHeight: 340, overflow: "hidden", background: "#eef1f6",
+                 touchAction: rotating ? "none" : "auto" }}>
         {/* 회전 판 — 진행 방향이 위로 오게 통째로 돌린다. 회전 시 모서리가 비지 않도록
             판을 상자의 **대각선 길이**만큼 키우고 중심을 맞춰 둔다. */}
         <div ref={stageRef} style={{
@@ -2074,7 +2117,7 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
               const ev = window.kakao && window.kakao.maps && window.kakao.maps.event;
               if (ev) {
                 // 기사가 지도를 끌면 자동 추적을 놓는다(사용자 조작과 싸우지 않는다).
-                ev.addListener(m, "dragstart", () => setFollow(false));
+                ev.addListener(m, "dragstart", () => touchedMap());
                 ev.addListener(m, "zoom_changed", () => {
                   const l = m.getLevel();
                   if (Number.isFinite(l)) setZoom(l);
@@ -2149,7 +2192,12 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
               background: "var(--color-primary)", color: "#fff",
               boxShadow: "0 4px 14px rgba(0,0,0,.28)",
             }}>
-              <span style={{ fontSize: 26, lineHeight: 1 }}>↱</span>
+              {/* 🔴 화살표는 배너 문구와 **같은 문자열**에서 뽑는다 — 예전엔 `↱` 하드코딩이라
+                  좌회전 안내에도 우회전 화살표가 떴다(2026-08-05 way 현장 지적).
+                  방향을 못 정하는 안내(지하차도 옆길 등)는 null → 화살표를 안 그린다. */}
+              {turnGlyph(turn.guide.guidance, turn.guide.type) && (
+                <span style={{ fontSize: 26, lineHeight: 1 }}>{turnGlyph(turn.guide.guidance, turn.guide.type)}</span>
+              )}
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 21, fontWeight: 900, lineHeight: 1.2 }}>{turn.label}</div>
                 {turn.guide.name && (
@@ -2215,7 +2263,10 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
         {/* 시점 버튼 — 오른쪽 아래(왼쪽 아래는 카카오 로고 자리라 비워 둔다) */}
         <div style={{ position: "absolute", right: 10, bottom: 10, display: "flex", gap: 6, zIndex: 5, pointerEvents: "none" }}>
           {pos && !follow && (
-            <button onClick={() => { setFollow(true); setZoom(NAV_ZOOM_DEFAULT); }}
+            <button onClick={() => {
+                if (resumeTimerRef.current) { clearTimeout(resumeTimerRef.current); resumeTimerRef.current = null; }
+                setFollow(true); setZoom(NAV_ZOOM_DEFAULT);
+              }}
               style={{ ...ctlBtn, background: "var(--color-primary)", color: "#fff", border: "none" }}>
               내 위치
             </button>

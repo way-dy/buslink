@@ -305,7 +305,11 @@ console.log("\n[15] travelHeading — 차량이 향한 방향(지도 회전을 �
   ok("회전 판이 대각선 크기로 커진다(모서리 빔 방지)", /Math\.hypot\(clipBox\.w,\s*clipBox\.h\)/.test(drv));
   ok("카카오 로고·축척을 회전 밖으로 옮긴다(약관 표시 유지)", /liftCredits/.test(drv) && /map\.kakao\.com/.test(drv));
   ok("정류장 번호는 반대로 돌려 세운다", /counterRot/.test(drv));
-  ok("기사가 지도를 끌면 자동 추적 해제", /"dragstart"[\s\S]{0,80}setFollow\(false\)/.test(drv));
+  // dragstart 는 touchedMap() 을 부르고 그 안에서 setFollow(false) 한다(2026-08-05 자동 복귀 추가).
+  // 🔴 리터럴이 아니라 **관계**를 검사한다 — "끌면 추적이 풀리고, 잠시 뒤 스스로 돌아온다".
+  ok("기사가 지도를 끌면 자동 추적 해제", /"dragstart"[\s\S]{0,80}touchedMap\(\)/.test(drv)
+    && /const touchedMap[\s\S]{0,200}setFollow\(false\)/.test(drv));
+  ok("손 뗀 뒤 자동으로 추적 복귀", /FOLLOW_RESUME_MS/.test(drv) && /setTimeout\([\s\S]{0,60}setFollow\(true\)/.test(drv));
   ok("정류장 사진은 길안내에서 제거됨", !/target\.photo/.test(drv));
   ok("기본 확대는 크게(level 3)", /NAV_ZOOM_DEFAULT\s*=\s*3/.test(drv));
 
@@ -313,11 +317,19 @@ console.log("\n[15] travelHeading — 차량이 향한 방향(지도 회전을 �
   ok("그린 경로 보정 임계 300m", /DRAWN_MATCH_THRESHOLD_M\s*=\s*300/.test(fn));
   ok("보정점 상한이 정해져 있다(경유지 상한 방어)", /DRAWN_MATCH_MAX_POINTS\s*=\s*\d+/.test(fn));
   ok("2차 호출로 그린 경로에 맞춘다", /worstDeviationPoints\(/.test(fn) && /matchedToDrawn/.test(fn));
-  ok("보정 실패해도 1차 결과 사용(안내가 사라지지 않는다)", /1차 결과 사용/.test(fn));
+  // ⚠ 2026-08-05 우회·유턴 근절로 채택 판정이 바뀌었다(`drawnMismatchRatio` 단방향 비교
+  //   → `naviRouteScore` 양방향 점수 + 단계별 후보 비교). 아래 3개는 그때 갱신되지 않아
+  //   **stale 상태로 빨간불이던 가드**다(2026-08-05 재점검에서 발견) — 리터럴이 아니라
+  //   지금의 **관계**를 검사하도록 고쳤다. [[guard-must-check-the-relation-not-the-literal-value]]
+  ok("보정 실패해도 직전 후보 유지(안내가 사라지지 않는다)",
+    /let bestScore/.test(fn) && /cand = /.test(fn));
   // 🔴 실측에서 보정이 오히려 이탈을 키운 노선이 있었다([압구정] 하교 42%→52%) →
   //    무조건 채택 금지. 이 게이트를 빼면 그 회귀가 그대로 돌아온다.
-  ok("나빠지면 보정을 기각한다", /newScore\s*<\s*baseScore/.test(fn) && /drawnMismatchRatio\(/.test(fn));
-  ok("거리 부풀림(U턴)도 기각 조건", /DRAWN_MATCH_MAX_LEN_RATIO/.test(fn) && /noDetour/.test(fn));
+  ok("나빠지면 보정을 기각한다(점수가 나아질 때만 채택)",
+    /naviRouteScore\(/.test(fn) && /sc < bestScore/.test(fn));
+  ok("거리 부풀림(U턴)도 기각 조건", /newLen <= drawnLen \* DRAWN_MATCH_MAX_LEN_RATIO/.test(fn));
+  // 🔴 경유지를 뺄 때 정류장을 통째로 지나치는 경로가 채택되면 안 된다(2026-08-05 가드).
+  ok("경유지 제거·유턴 회피는 정류장 커버 검사를 통과해야 채택", /allStopsCovered\(pts,/.test(fn));
   ok("긴 우회 구간엔 점을 여러 개", /DRAWN_MATCH_KM_PER_POINT/.test(fn) && /DRAWN_MATCH_MAX_PER_RUN/.test(fn));
 }
 

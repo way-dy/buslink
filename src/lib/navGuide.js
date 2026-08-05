@@ -314,3 +314,50 @@ export function kakaoMapDirectionsUrl(stop) {
   const name = String(stop?.name || "정류장").replace(/[,\n\r]/g, " ").trim() || "정류장";
   return `https://map.kakao.com/link/to/${encodeURIComponent(name)},${ll.lat},${ll.lng}`;
 }
+
+/**
+ * 회전 안내 화살표 글리프 — 2026-08-05 way 현장 지적 "지시하고 방향하고 안맞음".
+ *
+ * 🔴 예전엔 배너에 `↱`(우회전) 를 **하드코딩**해서, 좌회전 안내에도 우회전 화살표가
+ *    떴다. 운전 중에는 글자보다 화살표가 먼저 읽히므로 이건 그냥 틀린 안내다.
+ *
+ * 🔴 판정은 **화면에 실제로 찍히는 문구(guidance)를 1순위**로 본다 — 화살표와 글자가
+ *    같은 문자열에서 나오면 둘이 어긋나는 일 자체가 불가능하다. `type` 은 문구로
+ *    못 가릴 때만 쓰는 보조 신호(카카오 type 표에 의존하면 표가 바뀌는 순간 조용히 틀린다).
+ * 🔴 **모르면 화살표를 그리지 않는다**(null 반환) — 없는 것보다 틀린 방향이 훨씬 나쁘다.
+ *    이 화면의 기존 원칙(경로 밖이면 회전 안내를 아예 안 준다)과 같은 판단.
+ */
+export function turnGlyph(guidance, type) {
+  const t = String(guidance || "").trim();
+  if (/유턴|U턴/i.test(t) || type === 4) return "⤶";
+  if (/좌회전/.test(t)) return "↰";
+  if (/우회전/.test(t)) return "↱";
+  if (/왼쪽|좌측/.test(t)) return "↖";
+  if (/오른쪽|우측/.test(t)) return "↗";
+  if (/직진|(^|\s)12시\s*방향/.test(t)) return "↑";
+  if (/목적지|도착/.test(t)) return "⚑";
+  return null;                                  // 고가도로·지하차도 옆길 등 방향이 안 정해지는 안내
+}
+
+/**
+ * 회전한 지도 판 위에서의 드래그 보정 — 2026-08-05 way 현장 지적
+ * "지도 움직일 때 손가락 방향대로 안 움직임".
+ *
+ * 지도 판을 CSS 로 `rotate(rotDeg)` 해 놓으면, 카카오는 자기 좌표계(=판 좌표계)로
+ * 드래그를 해석하는데 손가락은 **화면 좌표계**로 움직인다 → 회전각만큼 어긋난다.
+ * 화면 델타를 판 좌표계로 되돌린 뒤 `panBy` 에 넘겨야 손가락을 따라온다.
+ *
+ * @param dx,dy   화면 좌표계 이동량(px, 오른쪽·아래가 +)
+ * @param rotDeg  판에 걸린 회전각(deg). 0이면 그대로 통과.
+ * @returns {{dx,dy}} `map.panBy(-dx, -dy)` 에 넣을 판 좌표계 이동량
+ *          (panBy 는 중심을 옮기므로 내용이 손가락을 따라오려면 부호를 뒤집는다)
+ */
+export function rotateDragDelta({ dx, dy, rotDeg = 0 } = {}) {
+  const x = Number(dx), y = Number(dy);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return { dx: 0, dy: 0 };
+  const r = Number(rotDeg);
+  if (!Number.isFinite(r) || r % 360 === 0) return { dx: x, dy: y };
+  const a = (-r * Math.PI) / 180;               // 판 → 화면이 +r 이므로 되돌리려면 −r
+  const cos = Math.cos(a), sin = Math.sin(a);
+  return { dx: x * cos - y * sin, dy: x * sin + y * cos };
+}
