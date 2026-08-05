@@ -22,7 +22,7 @@ import { compareRoutes, sortRoutes } from "../lib/routeOrder";
 import { validateAndBoard, createPassengerToken, resolveStaticDispatch, validateAndBoardStatic } from "../lib/boarding";
 import { hashPin } from "../lib/partner";
 import QRCode from "qrcode";
-import { BusLinkLogo, StatusDot } from "../components/ui";
+import { BusLinkLogo, StatusDot, Icon } from "../components/ui";
 import InstallPrompt, { InstallGuide } from "../components/InstallPrompt";
 import { applyAppManifest } from "../lib/pwaManifest";
 import PermissionGate from "../components/PermissionGate";
@@ -211,12 +211,17 @@ function NoticeForceModal({ notice, onClose }) {
 }
 
 // ─── 탭 정의 ──────────────────────────────────────────
+// 아이콘은 이모지가 아니라 디자인시스템 벡터(`Icon`) — 이모지는 색을 못 바꿔
+// 거래처 브랜드 컬러(--color-primary)가 하단 탭에만 적용이 안 됐다(2026-08-05 회의 #5).
+// `Icon` 은 currentColor 기반이라 활성 탭이 자동으로 브랜드 색을 탄다.
+// 🔴 아이콘 파일 업로드는 도입하지 않는다(way 결정 — 크기·품질이 제각각이면 앱이 싸구려로 보인다).
+//    표준 아이콘 + 컬러 변경까지만.
 const TABS = [
-  { id: "home",     icon: "🏠", label: "홈" },
-  { id: "routes",   icon: "🗺", label: "노선" },
-  { id: "notices",  icon: "📢", label: "공지" },
-  { id: "scan",     icon: "📷", label: "탑승" },
-  { id: "settings", icon: "⚙️", label: "설정" },
+  { id: "home",     icon: "home",     label: "홈" },
+  { id: "routes",   icon: "route",    label: "노선" },
+  { id: "notices",  icon: "bell",     label: "공지" },
+  { id: "scan",     icon: "qr",       label: "탑승" },
+  { id: "settings", icon: "settings", label: "설정" },
 ];
 
 // ════════════════════════════════════════════════════════
@@ -438,8 +443,8 @@ export default function EmployeeApp() {
           <button key={t.id}
             onClick={() => { setTab(t.id); if (t.id === "notices") markNoticesRead(); }}
             style={{ ...S.tabBtn, color: tab === t.id ? "var(--color-primary)" : "var(--color-label-mute)" }}>
-            <span style={{ position: "relative", fontSize: 20, display: "inline-flex" }}>
-              {t.icon}
+            <span style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center", height: 22 }}>
+              <Icon name={t.icon} size={21} stroke={tab === t.id ? 2 : 1.7} />
               {/* 안 읽음 공지 배지 — 공지 탭에만, 안 읽음 1건 이상일 때 */}
               {t.id === "notices" && unreadCount > 0 && (
                 <span style={{
@@ -974,6 +979,9 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
   // 노선 변경 시 자동 재센터 억제 해제 — 새 노선은 기본 프레이밍(버스/내정류장)부터 시작.
   useEffect(() => { userCenteredRef.current = false; }, [activeRouteId]);
 
+  const stripRef = useRef(null);
+  const stripFocusRef = useRef(null);
+
   const timeSince = d => {
     if (!d) return '';
     const s = Math.floor((new Date() - d) / 1000);
@@ -996,6 +1004,20 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
         return idx;
       })()
     : _busStopIdx;
+
+  // 노선 스트립 자동 스크롤 — 2026-08-05 회의 #4 통합의 필수 짝.
+  //   요약바(4노드)는 전 구간이 한 화면에 들어와 진입 즉시 "지금 어디"가 보였는데,
+  //   전 정류장을 한 줄로 합치면 정류장 10곳짜리 노선은 앞 4곳만 보이고 버스가 화면 밖에 있다.
+  //   → 버스 위치(없으면 내 정류장)를 가로 스크롤 중앙으로 데려온다.
+  // ⚠ 세로 스크롤·지도는 건드리지 않는다(컨테이너 scrollLeft 만 조작).
+  // 🔴 이 훅은 반드시 busStopIdx 선언 **뒤**에 있어야 한다 — 의존성 배열은 렌더 중 평가되므로
+  //    위로 올리면 TDZ("Cannot access ... before initialization")로 화면이 통째로 죽는다.
+  useEffect(() => {
+    const box = stripRef.current, node = stripFocusRef.current;
+    if (!box || !node) return;
+    const left = node.offsetLeft - (box.clientWidth - node.offsetWidth) / 2;
+    box.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+  }, [busStopIdx, myStopIdx, activeRouteId, stops.length]);
 
   // 마지막 정류장 = 도착지(=회사, 탑승자 없음). 이 정류장을 내 정류장으로
   // 선택했을 때만 하단 ETA 패널 문구를 "목적지 도착" 류로 대체(표시 문자열만 분기).
@@ -1267,31 +1289,17 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
 
       {/* ── 스크롤 컨테이너: 노선도 스트립 + 하단 ETA/QR 패널 (지도 아래 남은 공간·하단 패널이 tabBar 뒤로 잘리는 것 방지, 2026-07-09 #3) ── */}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-      {/* ── 지하철식 진척 요약바 (#4, 2026-07-09) — 출발·현재·다음·도착 4노드 가로 진척 + 상태줄. 순수 추가 블록(아래 노선도 스트립·ETA 패널 100% 보존) ── */}
-      {stops.length >= 2 && (() => {
+      {/* ── 노선 진척 스트립(단일) — 2026-08-05 회의 #4 ──────────────────────
+          예전엔 여기에 ①4노드 요약 진척바(출발/현재/다음/도착)와 ②전 정류장 노선도
+          스트립이 위아래로 쌓여 있었다. 노선도처럼 생긴 게 두 줄이라 헷갈리고,
+          위 요약바를 눌러도 아무 일이 없어 "탑승객이 누르고 탑승 못 하는" 일이 있었다.
+          → 한 줄로 통합. **모양은 요약바 쪽**(역할 라벨·진척 색 연결선·상태줄)을 쓰고,
+            **기능은 스트립 쪽**(전 정류장 표시 + 눌러서 내 정류장 지정)을 그대로 가져온다.
+          🔴 정류장 전체를 그대로 두는 이유 = 4노드만 남기면 내 정류장을 고를 수가 없다
+             (요약바에는 출발·현재·다음·도착 4개뿐이라 그 사이 정류장이 선택 불가). */}
+      {(() => {
         const lastIdx = stops.length - 1;
         const inService = !!mainBus && busStopIdx >= 0;
-        // 4노드 산출 — 출발/현재/다음/도착. 같은 정류장 인덱스면 역할 병합(예 출발·현재).
-        const seen = new window.Map(); // ⚠ react-kakao-maps-sdk 의 Map import 가 native Map 을 shadow → new Map()=비생성자 throw(백지). window.Map 명시 필수(issues.md).
-        const addNode = (role, idx, current) => {
-          const stop = stops[idx];
-          if (!stop) return;
-          if (seen.has(idx)) {
-            const n = seen.get(idx);
-            if (!n.role.split('·').includes(role)) n.role += '·' + role;
-            n.current = n.current || current;
-          } else {
-            seen.set(idx, { role, idx, stop, current: !!current });
-          }
-        };
-        addNode('출발', 0, false);
-        if (inService) {
-          addNode('현재', busStopIdx, true);
-          if (busStopIdx + 1 <= lastIdx) addNode('다음', busStopIdx + 1, false); // 종점 임박이면 생략
-        }
-        addNode('도착', lastIdx, false);
-        const nodes = Array.from(seen.values()).sort((a, b) => a.idx - b.idx);
-        const reached = (idx) => inService && idx <= busStopIdx; // 통과/현재 구간
 
         // 상태줄 — 운행 중이면 다음(없으면 도착)역으로 이동 중 + 다음역 ETA
         const nextStop = inService
@@ -1311,144 +1319,136 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
         }
 
         return (
-          <div style={{ background: 'var(--color-bg)', borderBottom: '1px solid var(--color-line)', padding: '12px 14px 10px' }}>
-            {/* 4노드 가로 진척 */}
-            <div style={{ display: 'flex', alignItems: 'flex-start' }}>
-              {nodes.map((n, j) => {
-                const isReached = reached(n.idx) || n.current;
-                const est = estByStopId[n.stop.id];
-                const timeLabel = est && (est.estimatedAt || est.plannedAt);
-                const leftOn = j > 0 && reached(n.idx);
-                const rightOn = j < nodes.length - 1 && reached(nodes[j + 1].idx);
-                const nameColor = n.current ? 'var(--color-primary)'
-                  : n.role.includes('출발') ? 'var(--color-positive)'
-                  : n.role.includes('도착') ? 'var(--color-destructive)'
-                  : isReached ? 'var(--color-label)' : 'var(--color-label-mute)';
-                return (
-                  <div key={n.idx} style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    {/* 역할 라벨 */}
-                    <div style={{ fontSize: 11, fontWeight: 800, marginBottom: 3, color: n.current ? 'var(--color-primary)' : 'var(--color-label-mute)' }}>{n.role}</div>
-                    {/* 점 + 좌우 연결선(진척 색) */}
-                    <div style={{ position: 'relative', width: '100%', height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      {j > 0 && <span style={{ position: 'absolute', left: 0, right: '50%', top: '50%', height: 3, transform: 'translateY(-50%)', background: leftOn ? 'var(--color-primary)' : 'var(--color-line)' }} />}
-                      {j < nodes.length - 1 && <span style={{ position: 'absolute', left: '50%', right: 0, top: '50%', height: 3, transform: 'translateY(-50%)', background: rightOn ? 'var(--color-primary)' : 'var(--color-line)' }} />}
-                      {/* 현재(깜빡) 마커 — 점과 동심원. 🔴 여기에 transform 을 쓰지 말 것:
-                          `buspulse` 키프레임이 transform(scale) 을 애니메이션하므로 인라인 transform 이
-                          통째로 무시돼(0~100% 전 구간) 링이 점의 오른쪽 아래로 11px 씩 밀린다.
-                          2026-07-13 의 -4px 도 이 이유로 링에는 적용된 적이 없었다(2026-08-04 재신고).
-                          → 오프셋은 left/top 으로만. 점의 translateY(-4px) 만큼 top 에 −4px 반영. */}
-                      {n.current && <span style={{ position: 'absolute', left: 'calc(50% - 11px)', top: 'calc(50% - 15px)', width: 22, height: 22, borderRadius: '50%', background: 'var(--color-primary)', opacity: 0.45, animation: 'buspulse 2s ease-out infinite', pointerEvents: 'none' }} />}
-                      <span style={{ position: 'relative', width: n.current ? 16 : 12, height: n.current ? 16 : 12, borderRadius: '50%', background: isReached ? 'var(--color-primary)' : 'var(--color-line)', border: '2px solid var(--color-bg)', boxShadow: n.current ? '0 0 0 3px rgba(0,102,255,.28)' : 'none', transform: n.current ? 'translateY(-4px)' : undefined }} />
-                    </div>
-                    {/* 정류장명 */}
-                    <div style={{ fontSize: 12.5, fontWeight: n.current ? 800 : 700, marginTop: 5, maxWidth: '100%', color: nameColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.stop.name}</div>
-                    {/* 시각(있을 때만) */}
-                    {timeLabel && <div style={{ fontSize: 10, color: 'var(--color-label-alt)', marginTop: 1 }}>{timeLabel}</div>}
+          <div style={{ background: 'var(--color-bg)', borderTop: '1px solid var(--color-line)', borderBottom: '1px solid var(--color-line)', flexShrink: 0, padding: '10px 0 12px' }}>
+            {stops.length === 0 ? (
+              <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--color-label-alt)', padding: '4px 0' }}>
+                {activeRoute ? '정류장 정보가 없습니다' : '노선을 선택해주세요'}
+              </div>
+            ) : (
+              <>
+                {/* 가로 스크롤 — 정류장이 많으면 넘치므로 스크롤(스크롤바는 숨김·모바일 친화) */}
+                <div data-route-strip ref={stripRef} style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', paddingLeft: 16, paddingRight: 16, minWidth: 'max-content', gap: 0 }}>
+                    {stops.map((s, i) => {
+                      const isMyStop  = myStopIdx === i;
+                      const isFirst   = i === 0;
+                      const isLast    = i === lastIdx;
+                      const isBusHere = busStopIdx === i;
+                      const isReached = inService && i <= busStopIdx;
+
+                      // 역할 라벨(요약바에서 흡수) — 한 정류장이 여러 역할이면 병합("다음·도착")
+                      const roles = [];
+                      if (isFirst) roles.push('출발');
+                      if (inService && i === busStopIdx) roles.push('현재');
+                      if (inService && i === busStopIdx + 1) roles.push('다음');
+                      if (isLast) roles.push('도착');
+                      const role = roles.join('·');
+
+                      const est = estByStopId[s.id];
+                      // 시각은 내 정류장·역할이 있는 정류장에만(전 정류장에 붙이면 글자가 뒤엉킨다 — 2026-06-26 #5 와 같은 이유)
+                      const timeLabel = (role || isMyStop) ? (est && (est.estimatedAt || est.plannedAt)) : null;
+
+                      const nameColor = isMyStop ? 'var(--color-primary)'
+                        : isFirst ? 'var(--color-positive)'
+                        : isLast ? 'var(--color-destructive)'
+                        : isReached ? 'var(--color-label)' : 'var(--color-label-mute)';
+
+                      return (
+                        <div key={s.id} style={{ display: 'flex', alignItems: 'center' }}>
+                          {/* 자동 스크롤 기준점 = 버스 위치(운행 중) → 없으면 내 정류장 */}
+                          <div ref={(inService ? isBusHere : isMyStop) ? stripFocusRef : undefined}
+                            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 78, cursor: 'pointer' }}
+                            onClick={() => {
+                              // #3(2026-06-26) — 터치한 정류장을 지도 중앙으로. 자동 재센터 억제.
+                              userCenteredRef.current = true;
+                              setCenter({ lat: s.lat, lng: s.lng });
+                              // 같은 정류장을 다시 누르면 해제(토글), 아니면 선택. 둘 다 fcmTokens 영속.
+                              if (isMyStop) { selectMyStop(null); }
+                              else { selectMyStop(i); }
+                            }}>
+                            {/* 역할 라벨 — 없으면 자리만 차지(노드 높이 정렬 유지) */}
+                            <div style={{ height: 14, fontSize: 11, fontWeight: 800, lineHeight: '14px', whiteSpace: 'nowrap', color: isBusHere ? 'var(--color-primary)' : 'var(--color-label-mute)' }}>
+                              {role}
+                            </div>
+                            {/* 버스 아이콘 (이 정류장 근처) */}
+                            <div style={{ height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 2 }}>
+                              {isBusHere && (
+                                /* 버스(깜빡) 마커만 살짝 위로(-4px). 🔴 여기 transform 은 애니메이션 대상이
+                                   아니므로 안전하다(요약바 링에서 났던 문제와 다름 — 2026-08-04 참조). */
+                                <div style={{ position: 'relative', width: 24, height: 24, transform: 'translateY(-4px)' }}>
+                                  <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'var(--color-primary)', opacity: 0.5, animation: 'buspulse 2s ease-out infinite', pointerEvents: 'none' }} />
+                                  <div style={{ position: 'absolute', inset: 0, background: 'var(--color-primary)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: '#fff', boxShadow: '0 0 0 4px rgba(0,102,255,.40), 0 4px 12px rgba(0,102,255,.45)' }}>🚌</div>
+                                </div>
+                              )}
+                            </div>
+                            {/* 정류장 원 */}
+                            <div style={{
+                              width: isMyStop ? 20 : isFirst || isLast ? 15 : 11,
+                              height: isMyStop ? 20 : isFirst || isLast ? 15 : 11,
+                              borderRadius: '50%', flexShrink: 0,
+                              background: isMyStop ? 'var(--color-primary)' : isBusHere ? 'var(--color-primary)' : isFirst ? 'var(--color-positive)' : isLast ? 'var(--color-destructive)' : isReached ? 'var(--color-primary)' : 'var(--color-line)',
+                              border: isMyStop ? '2px solid #fff' : '2px solid var(--color-bg)',
+                              boxShadow: isMyStop ? '0 0 0 3px rgba(0,102,255,.30)' : 'var(--shadow-emphasize)'
+                            }} />
+                            {/* 정류장 이름 */}
+                            <div style={{
+                              fontSize: 13, marginTop: 6, textAlign: 'center', width: 72,
+                              color: nameColor,
+                              fontWeight: isMyStop ? 900 : isFirst || isLast ? 800 : 700,
+                              wordBreak: 'keep-all', lineHeight: 1.25,
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                            }}>
+                              {s.name}
+                            </div>
+                            {timeLabel && <div style={{ fontSize: 10, color: 'var(--color-label-alt)', marginTop: 1 }}>{timeLabel}</div>}
+                            {isMyStop && <div style={{ color: 'var(--color-primary)', fontSize: 10, fontWeight: 800, marginTop: 1 }}>내 정류장</div>}
+                          </div>
+
+                          {/* 연결선 (마지막 제외) — 정류장 원 높이에 맞춤.
+                              🔴 -21 은 계산값이다: 예전(역할 라벨 없음) 정렬값이 -28 이었고,
+                                 위에 14px 짜리 역할 라벨 줄이 생기면서 컬럼 중심이 7px 내려갔다
+                                 (-28 + 14/2 = -21). 라벨 줄 높이를 바꾸면 이 값도 같이 바꿀 것. */}
+                          {!isLast && (
+                            <div style={{
+                              width: 28, height: 3, flexShrink: 0, marginTop: -21,
+                              background: inService && i < busStopIdx ? 'var(--color-primary)' : 'var(--color-line)',
+                              borderRadius: 2, position: 'relative'
+                            }}>
+                              {/* 버스가 이 구간(i → i+1) 이동 중 — 점멸 방향 화살표(버스 2대 오인 방지, 2026-06-24) */}
+                              {isBusHere && mainBus && (
+                                <div style={{ position: 'absolute', top: -11, left: '50%', transform: 'translateX(-50%)', fontSize: 18, fontWeight: 900, color: 'var(--color-primary)', lineHeight: 1, animation: 'busblink 1s ease-in-out infinite', pointerEvents: 'none' }}>›</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
-            </div>
-            {/* 상태줄 */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
-              {inService && nextStop ? (
-                <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--color-label)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  🚌 {nextStop.name}(으)로 이동 중{etaText ? <> · <span style={{ color: 'var(--color-primary)', fontWeight: 800 }}>{nextStop.name}까지 {etaText}</span></> : null}
                 </div>
-              ) : (
-                <div style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: 'var(--color-label-mute)' }}>운행 중인 버스가 없습니다</div>
-              )}
-              {inService && mainBus && (
-                <button onClick={() => { userCenteredRef.current = true; setCenter({ lat: mainBus.lat, lng: mainBus.lng }); }}
-                  style={{ flexShrink: 0, background: 'var(--color-primary)', border: 'none', borderRadius: 'var(--radius-8)', padding: '6px 12px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', boxShadow: 'var(--shadow-strong)' }}>
-                  🚌 차량 위치 보기
-                </button>
-              )}
-            </div>
+
+                {/* 상태줄 — 요약바에 있던 것을 그대로 스트립 아래로 */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '8px 16px 0' }}>
+                  {inService && nextStop ? (
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--color-label)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      🚌 {nextStop.name}(으)로 이동 중{etaText ? <> · <span style={{ color: 'var(--color-primary)', fontWeight: 800 }}>{nextStop.name}까지 {etaText}</span></> : null}
+                    </div>
+                  ) : (
+                    <div style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: 'var(--color-label-mute)' }}>
+                      {myStopIdx === null ? '정류장을 눌러 내 탑승 정류장을 정하세요' : '운행 중인 버스가 없습니다'}
+                    </div>
+                  )}
+                  {inService && mainBus && (
+                    <button onClick={() => { userCenteredRef.current = true; setCenter({ lat: mainBus.lat, lng: mainBus.lng }); }}
+                      style={{ flexShrink: 0, background: 'var(--color-primary)', border: 'none', borderRadius: 'var(--radius-8)', padding: '6px 12px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', boxShadow: 'var(--shadow-strong)' }}>
+                      🚌 차량 위치 보기
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         );
       })()}
-      {/* ── 노선도 스트립 (중간) ── */}
-      <div style={{ background: 'var(--color-bg)', borderTop: '1px solid var(--color-line)', borderBottom: '1px solid var(--color-line)', flexShrink: 0, padding: '10px 0' }}>
-        {stops.length === 0 ? (
-          <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--color-label-alt)', padding: '4px 0' }}>
-            {activeRoute ? '정류장 정보가 없습니다' : '노선을 선택해주세요'}
-          </div>
-        ) : (
-          /* 가로 스크롤 — 폰트 키움으로 가로 공간 부족 가능, 스크롤바 숨김(모바일 친화) */
-          <div data-route-strip style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: 4 }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', paddingLeft: 16, paddingRight: 16, minWidth: 'max-content', gap: 0 }}>
-              {stops.map((s, i) => {
-                const isMyStop  = myStopIdx === i;
-                const isFirst   = i === 0;
-                const isLast    = i === stops.length - 1;
-                const isBusHere = busStopIdx === i;
-                const isPassed  = myStopIdx !== null && i < myStopIdx && busStopIdx >= 0 && i <= busStopIdx;
-
-                return (
-                  <div key={s.id} style={{ display: 'flex', alignItems: 'center' }}>
-                    {/* 정류장 노드 — 폰트/점 크기 키움(모바일 시인성) */}
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 78 }}
-                      onClick={() => {
-                        // #3 — 터치한 정류장을 지도 중앙으로(확대/축소 무관). 자동 재센터 억제.
-                        userCenteredRef.current = true;
-                        setCenter({ lat: s.lat, lng: s.lng });
-                        // 같은 정류장을 다시 누르면 해제(토글), 아니면 선택. 둘 다 fcmTokens 영속.
-                        if (isMyStop) { selectMyStop(null); }
-                        else { selectMyStop(i); }
-                      }}>
-                      {/* 버스 아이콘 (이 정류장 근처) — 펄스 ring + 키운 크기 */}
-                      <div style={{ height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 2 }}>
-                        {isBusHere && (
-                          /* 버스(깜빡) 마커만 살짝 위로(-4px) — 사용자 점검 요청(2026-07-13). 연결선 marginTop 정렬 무영향(transform). */
-                          <div style={{ position: 'relative', width: 24, height: 24, transform: 'translateY(-4px)' }}>
-                            <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'var(--color-primary)', opacity: 0.5, animation: 'buspulse 2s ease-out infinite', pointerEvents: 'none' }} />
-                            <div style={{ position: 'absolute', inset: 0, background: 'var(--color-primary)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: '#fff', boxShadow: '0 0 0 4px rgba(0,102,255,.40), 0 4px 12px rgba(0,102,255,.45)' }}>🚌</div>
-                          </div>
-                        )}
-                      </div>
-                      {/* 정류장 원 — 시인성 키움(10→11, 14→15, 18→20) */}
-                      <div style={{
-                        width: isMyStop ? 20 : isFirst||isLast ? 15 : 11,
-                        height: isMyStop ? 20 : isFirst||isLast ? 15 : 11,
-                        borderRadius: '50%', flexShrink: 0,
-                        background: isMyStop ? 'var(--color-primary)' : isBusHere ? 'var(--color-primary)' : isFirst ? 'var(--color-positive)' : isLast ? 'var(--color-destructive)' : 'var(--color-primary)',
-                        border: isMyStop ? '2px solid #fff' : '2px solid var(--color-bg)',
-                        boxShadow: isMyStop ? '0 0 0 3px rgba(0,102,255,.30)' : 'var(--shadow-emphasize)',
-                        cursor: 'pointer'
-                      }} />
-                      {/* 정류장 이름 — 13px·700 으로 키움. 길이 길면 한 줄 ellipsis */}
-                      <div style={{
-                        fontSize: 13, marginTop: 6, textAlign: 'center', width: 72,
-                        color: isMyStop ? 'var(--color-primary)' : isFirst ? 'var(--color-positive)' : isLast ? 'var(--color-destructive)' : 'var(--color-label)',
-                        fontWeight: isMyStop ? 900 : isFirst||isLast ? 800 : 700,
-                        wordBreak: 'keep-all', lineHeight: 1.25,
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-                      }}>
-                        {s.name}
-                      </div>
-                      {isMyStop && <div style={{ color: 'var(--color-primary)', fontSize: 10, fontWeight: 800, marginTop: 1 }}>내 정류장</div>}
-                    </div>
-
-                    {/* 연결선 (마지막 제외) — 정류장 원 위치(상단 28px[버스슬롯]+상단여백) 맞춤 */}
-                    {!isLast && (
-                      <div style={{
-                        width: 28, height: 3, flexShrink: 0, marginTop: -28,
-                        background: busStopIdx >= 0 && i < busStopIdx ? 'var(--color-primary)' : 'var(--color-line)',
-                        borderRadius: 2, position: 'relative'
-                      }}>
-                        {/* 버스가 이 구간(i → i+1) 이동 중 — 점멸 방향 화살표(버스 2대 오인 방지, 2026-06-24 채드윅) */}
-                        {busStopIdx === i && mainBus && (
-                          <div style={{ position: 'absolute', top: -11, left: '50%', transform: 'translateX(-50%)', fontSize: 18, fontWeight: 900, color: 'var(--color-primary)', lineHeight: 1, animation: 'busblink 1s ease-in-out infinite', pointerEvents: 'none' }}>›</div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
 
       {/* ── 하단 ETA + QR 패널 ── */}
       <div style={{ background: 'var(--color-bg)', flexShrink: 0, padding: '12px 14px', borderTop: '1px solid var(--color-line)' }}>
@@ -1847,6 +1847,15 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
   //   회의 결정 "자기 거래처만 보이게"(드롭다운 필터 불필요). partnerCode 미설정 직원은
   //   전체 노출(하위호환) — 노선 변경 모달 filteredAllRoutes(2026-06-17)와 동일 규칙.
   const myPartner = session.partnerCode || null;
+
+  // 필터 칩 — 노선 구분(type)은 관리자가 "출근/퇴근/셔틀" 중 고른다(2026-06-22 셔틀 추가).
+  // 승객앱 칩에는 셔틀이 빠져 있어 셔틀 노선을 따로 골라볼 수 없었다(2026-08-05 회의 #7).
+  // 🔴 셔틀 칩은 실제로 셔틀 노선이 있을 때만 노출 — 항상 띄우면 249명에게 "눌러도 0건"인
+  //    칩이 상시로 보인다. 관리자가 노선 구분을 셔틀로 지정하면 자동으로 나타난다.
+  const partnerScoped = routes.filter(r => !myPartner || (r.partnerCode || null) === myPartner);
+  const hasShuttle = partnerScoped.some(r => r.type === "셔틀");
+  const FILTER_CHIPS = ["전체", "즐겨찾기", "운행중", "출근", "퇴근", ...(hasShuttle || filter === "셔틀" ? ["셔틀"] : [])];
+
   const filtered = routes.filter(r => {
     if (myPartner && (r.partnerCode || null) !== myPartner) return false;
     if (filter === "즐겨찾기" && !favorites.includes(r.id)) return false;
@@ -1873,7 +1882,7 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
         <input style={{ ...S.input, marginBottom: 10 }} placeholder="🔍 노선명·코드 검색"
           value={search} onChange={e => setSearch(e.target.value)} />
         <div style={{ display: "flex", gap: 6, overflowX: "auto" }}>
-          {["전체", "즐겨찾기", "운행중", "출근", "퇴근"].map(f => (
+          {FILTER_CHIPS.map(f => (
             <button key={f} onClick={() => setFilter(f)}
               style={{ flexShrink: 0, padding: "5px 13px", borderRadius: "var(--radius-pill)", border: `1px solid ${filter === f ? "var(--color-primary)" : "var(--color-line)"}`, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
                 background: filter === f ? "var(--color-primary)" : "var(--color-bg-soft)",
