@@ -40,6 +40,19 @@ const OFF_ROUTE_M = 70;
 const PASSED_MARGIN_M = 40;
 // 남은 경로거리가 이 값 미만이면 '곧 도착'(arriving).
 const ARRIVING_M = 150;
+// 경로 진행거리를 못 쓸 때(routePath 없음·아직 노선에 안 오름) 쓰는 최근접 정류장 폴백의
+// **거리 상한**. 이보다 멀면 "어느 정류장에도 있지 않다"(-1)로 본다 — 몇 km 밖 버스를
+// 정류장에 세워 두면 그 앞 정류장이 전부 '지나침'으로 표시된다(2026-08-06 신고).
+const NEAR_STOP_M = 400;
+
+/** 두 점 사이 실거리(m). 좌표가 없으면 null. */
+function haversineM(a, b) {
+  if (!a || !b || !isFinite(a.lat) || !isFinite(a.lng) || !isFinite(b.lat) || !isFinite(b.lng)) return null;
+  const R = 6371000, r = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * r, dLng = (b.lng - a.lng) * r;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.asin(Math.sqrt(s));
+}
 // 지나온 경로(회색) 색상 — Polyline strokeColor는 SDK prop이라 토큰값 직접.
 const TRAVELED_COLOR = "#9AA3B2";
 
@@ -879,6 +892,13 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
     : null;
 
   // ── 노선 순서 기반(폴백용) — 버스→가장 가까운 정류장 인덱스 ──
+  // 🔴 **거리 상한이 있어야 한다**(2026-08-06 배시현 "첫 정류장 도착 전인데 이미 지나쳤다고 나온다").
+  //   경로(routePath)가 있어도 버스가 아직 그 경로에 안 올랐으면(차고지→첫 정류장 이동 중)
+  //   perpDist>OFF_ROUTE_M 이라 busProgress 가 null 이 되고 **이 폴백으로 떨어진다**.
+  //   그런데 예전엔 상한이 없어 **몇 km 밖에서도 가장 가까운 정류장을 "현재"로 골랐고**,
+  //   그 앞 정류장이 전부 '지나침'으로 표시됐다(내 정류장 카드의 "이미 지나침"도 같은 값을 탄다).
+  //   prod 실측: [서초] 등교에서 버스가 경로 2.8km 밖·서초역 3.0km 밖인데 서초역을 '현재'로 골랐다.
+  //   → 정류장 반경 밖이면 **-1**(어느 정류장에도 있지 않음) 을 돌려 아무것도 지나쳤다고 하지 않는다.
   const _busStopIdx = (() => {
     if (!mainBus || stops.length === 0) return -1;
     let minDist = Infinity, idx = 0;
@@ -886,7 +906,10 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
       const d = Math.hypot(s.lat - mainBus.lat, s.lng - mainBus.lng);
       if (d < minDist) { minDist = d; idx = i; }
     });
-    return idx;
+    // Math.hypot 은 위경도 차라 m 로 다시 잰다(위도별 경도 길이 차이를 무시하지 않게).
+    // 🔴 거리를 못 재면(좌표 결손·NaN) -1 — 모르는 상태를 "0번 정류장에 있다"로 지어내지 않는다.
+    const meters = haversineM(mainBus, stops[idx]);
+    return meters === null || meters > NEAR_STOP_M ? -1 : idx;
   })();
 
   // 버스와 내 정류장의 직선 거리(m) 계산 (폴백용)
@@ -1472,10 +1495,16 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
                           안 그러면 "왜 버스가 안 보이지"가 문의로 돌아온다. */}
                       {!windowOpen && routeWindow
                         ? `${describeRouteWindow(routeWindow)} 에 운행 정보가 표시됩니다`
-                        : myStopIdx === null ? '정류장을 눌러 내 탑승 정류장을 정하세요' : '운행 중인 버스가 없습니다'}
+                        /* 🔴 버스는 뜨는데 아직 노선 정류장 근처가 아닌 상태(차고지→첫 정류장 이동 중).
+                           예전엔 이 경우에도 최근접 정류장을 '현재'로 찍어 앞 정류장이 지나침으로
+                           보였다(2026-08-06). 이제는 지나쳤다고 하지 않고 상태를 그대로 알린다. */
+                        : mainBus
+                          ? '🚌 첫 정류장으로 이동 중입니다'
+                          : myStopIdx === null ? '정류장을 눌러 내 탑승 정류장을 정하세요' : '운행 중인 버스가 없습니다'}
                     </div>
                   )}
-                  {inService && mainBus && (
+                  {/* 노선 진입 전에도 "지금 어디 있나"는 봐야 한다 — mainBus 만 있으면 노출 */}
+                  {mainBus && (
                     <button onClick={() => { userCenteredRef.current = true; setCenter({ lat: mainBus.lat, lng: mainBus.lng }); }}
                       style={{ flexShrink: 0, background: 'var(--color-primary)', border: 'none', borderRadius: 'var(--radius-8)', padding: '6px 12px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', boxShadow: 'var(--shadow-strong)' }}>
                       🚌 차량 위치 보기
