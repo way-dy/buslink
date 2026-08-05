@@ -444,12 +444,21 @@ export default function EmployeeApp() {
           <button key={t.id}
             onClick={() => { setTab(t.id); if (t.id === "notices") markNoticesRead(); }}
             style={{ ...S.tabBtn, color: tab === t.id ? "var(--color-primary)" : "var(--color-label-mute)" }}>
-            <span style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center", height: 22 }}>
-              <Icon name={t.icon} size={21} stroke={tab === t.id ? 2 : 1.7} />
+            {/* 선택 탭 = 채움 아이콘 + 브랜드 톤 알약(2026-08-05 way "감각적인 것으로").
+                알약색 `--color-primary-soft` 는 거래처 브랜드색에서 자동 파생되므로
+                (partnerBranding 이 primary 를 흰색과 90% 섞어 만든다) 거래처마다 톤이 맞는다.
+                🔴 비선택은 라인 유지 — 전부 채우면 무엇이 선택인지 안 읽힌다. */}
+            <span style={{
+              position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center",
+              width: 34, height: 30, borderRadius: 11,
+              background: tab === t.id ? "var(--color-primary-soft)" : "transparent",
+              transition: "background .15s ease",
+            }}>
+              <Icon name={t.icon} size={21} solid={tab === t.id} />
               {/* 안 읽음 공지 배지 — 공지 탭에만, 안 읽음 1건 이상일 때 */}
               {t.id === "notices" && unreadCount > 0 && (
                 <span style={{
-                  position: "absolute", top: -4, right: -8, minWidth: 16, height: 16,
+                  position: "absolute", top: 0, right: 0, minWidth: 16, height: 16,
                   padding: "0 4px", borderRadius: 8, background: "var(--color-destructive)",
                   color: "#fff", fontSize: 10, fontWeight: 800, lineHeight: "16px",
                   textAlign: "center", boxShadow: "0 0 0 2px var(--color-bg)"
@@ -458,7 +467,7 @@ export default function EmployeeApp() {
                 </span>
               )}
             </span>
-            <span style={{ fontSize: 10, fontWeight: tab === t.id ? 700 : 500 }}>{t.label}</span>
+            <span style={{ fontSize: 10.5, fontWeight: tab === t.id ? 800 : 600, letterSpacing: "-0.02em" }}>{t.label}</span>
           </button>
         ))}
       </div>
