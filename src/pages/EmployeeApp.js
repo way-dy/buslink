@@ -23,6 +23,7 @@ import { validateAndBoard, createPassengerToken, resolveStaticDispatch, validate
 import { hashPin } from "../lib/partner";
 import QRCode from "qrcode";
 import { BusLinkLogo, StatusDot, Icon } from "../components/ui";
+import { computeRouteWindow, isWithinRouteWindow, normalizeWindowOpts, nowMinutesKST, describeRouteWindow } from "../lib/routeWindow";
 import InstallPrompt, { InstallGuide } from "../components/InstallPrompt";
 import { applyAppManifest } from "../lib/pwaManifest";
 import PermissionGate from "../components/PermissionGate";
@@ -639,7 +640,31 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
   const [rvOk, setRvOk]             = useState(true);  // 거리뷰 커버리지(반경 내 파노라마 유무) — 없으면 사진 폴백
   const [manualTick, setManualTick] = useState(0);     // 노선 새로고침 버튼 → onSnapshot 재구독
   const [refreshing, setRefreshing] = useState(false); // 새로고침 진행 표시
-  const buses = useAnimatedPositions(rawBuses);
+  const busesRaw = useAnimatedPositions(rawBuses);
+
+  // ── 노선 표시 시간창 (2026-08-05 회의 #2·#3) ────────────────────────────
+  // 운행 시간 밖에 있는 차량은 승객 화면 노선도에 띄우지 않는다("출발도착지에 아예
+  // 가지도 않았는데 노선도상에 버스가 표시되고 있다"). 창은 노선에 직접 입력한
+  // displayStart~displayEnd 가 최우선, 없으면 departTime ± 회사 기본값에서 파생.
+  // 🔴 관제(AdminApp)·협력사 포털에는 적용하지 않는다 — way "관제의 핵심은 차량
+  //    위치가 잘 보이는 것". 가리는 건 승객이 보는 화면뿐.
+  // 🔴 창이 null(출발시각·표시시간 둘 다 없음)이면 게이트 없음 = 예전 동작 그대로.
+  //    설정을 안 넣은 노선의 차가 통째로 사라지면 안 된다.
+  // 1초 tick(setTick) 재렌더가 있어 시각 경과가 자연히 반영된다.
+  const [companyCfg, setCompanyCfg] = useState(null);
+  useEffect(() => {
+    if (!companyId) return;
+    let alive = true;
+    getDoc(doc(db, 'companies', companyId))
+      .then(s => { if (alive && s.exists()) setCompanyCfg(s.data()); })
+      .catch(() => {});   // 실패 = 기본값(30/30)으로 동작
+    return () => { alive = false; };
+  }, [companyId]);
+  const routeForWindow = routes.find(r => r.id === activeRouteId) || allRoutes.find(r => r.id === activeRouteId) || null;
+  const routeWindow = computeRouteWindow(routeForWindow, stops, normalizeWindowOpts(companyCfg));
+  const windowOpen = isWithinRouteWindow(routeWindow, nowMinutesKST());
+  const buses = windowOpen ? busesRaw : [];
+
   const favorites = session.favorites || [];
   const lastBusProgressRef = useRef(null); // 경로 이탈 시 직전 유효 진행거리 유지
   // 정류장 탭 시 사용자가 직접 센터를 옮긴 상태 — true 면 GPS 갱신 자동 재센터를 억제
@@ -1434,7 +1459,11 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
                     </div>
                   ) : (
                     <div style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: 'var(--color-label-mute)' }}>
-                      {myStopIdx === null ? '정류장을 눌러 내 탑승 정류장을 정하세요' : '운행 중인 버스가 없습니다'}
+                      {/* 시간창 때문에 가린 것이면 그 이유를 화면에 드러낸다 —
+                          안 그러면 "왜 버스가 안 보이지"가 문의로 돌아온다. */}
+                      {!windowOpen && routeWindow
+                        ? `${describeRouteWindow(routeWindow)} 에 운행 정보가 표시됩니다`
+                        : myStopIdx === null ? '정류장을 눌러 내 탑승 정류장을 정하세요' : '운행 중인 버스가 없습니다'}
                     </div>
                   )}
                   {inService && mainBus && (

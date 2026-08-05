@@ -4,6 +4,7 @@ import { db, auth } from "../firebase";
 import { signInAnonymously } from "firebase/auth";
 import { collection, onSnapshot, query, where, doc, getDoc, getDocs, orderBy } from "firebase/firestore";
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
+import { computeRouteWindow, isWithinRouteWindow, normalizeWindowOpts, nowMinutesKST } from "../lib/routeWindow";
 import { calcETA } from "../lib/gps";
 import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom } from "../lib/routeProgress";
 import { computeStopEstimates, formatDelayLabel, formatPassengerEta, describeEtaSource } from "../lib/stopSchedule";
@@ -70,7 +71,12 @@ export default function PassengerApp() {
   const [route, setRoute] = useState(null);
   const [stops, setStops] = useState([]);
   const [rawBuses, setRawBuses] = useState([]);
-  const buses = useAnimatedPositions(rawBuses);
+  const busesRaw = useAnimatedPositions(rawBuses);
+  // 노선 표시 시간창(2026-08-05 회의 #2·#3) — 직원앱 HomeTab 과 같은 판정.
+  // 창 없음(출발시각·표시시간 미설정)이면 게이트 없음 = 예전 동작 보존.
+  const routeWindow = computeRouteWindow(route, stops, normalizeWindowOpts(company));
+  const windowOpen = isWithinRouteWindow(routeWindow, nowMinutesKST());
+  const buses = windowOpen ? busesRaw : [];
   const [selected, setSelected] = useState(null);
   const [myStopIdx, setMyStopIdx] = useState(null); // 내 정류장 인덱스
   const [photoView, setPhotoView] = useState(null); // 정류장 사진 라이트박스(data URI)

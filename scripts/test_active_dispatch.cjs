@@ -32,12 +32,15 @@ const ROUTES = {
   nodepart:{ departTime: "",     stops: [{ id: "n1", offsetMin: 0 }] },                                  // 게이트 없음
 };
 
-const ctx = vm.createContext({ console });
+// Number/isFinite = computeGpsWindow 이 회사 기본값(opts)을 검사할 때 쓴다(2026-08-05).
+const ctx = vm.createContext({ console, Number, isFinite, Math, String });
 vm.runInContext(grab("hhmmToMinutes"), ctx);
 vm.runInContext(`var GPS_WINDOW_PRE_MIN=${constOf("GPS_WINDOW_PRE_MIN")};`, ctx);
 vm.runInContext(`var GPS_WINDOW_POST_MIN=${constOf("GPS_WINDOW_POST_MIN")};`, ctx);
 vm.runInContext(`var GPS_WINDOW_DEFAULT_DURATION_MIN=${constOf("GPS_WINDOW_DEFAULT_DURATION_MIN")};`, ctx);
 vm.runInContext(grab("computeGpsWindow"), ctx);
+// gpsWindowContains — pickActiveDispatch 가 창 포함 판정에 쓴다(2026-08-05 자정 넘김 대응).
+vm.runInContext(grab("gpsWindowContains"), ctx);
 // loadRouteMeta stub — 픽스처만 반환(실제 구현은 Firestore 읽기라 격리 대상에서 제외).
 ctx.ROUTES = ROUTES;
 vm.runInContext(`async function loadRouteMeta(db, cid, routeId, cache){ return ROUTES[routeId] || null; }`, ctx);

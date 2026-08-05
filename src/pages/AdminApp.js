@@ -39,6 +39,7 @@ import { PartnerFilter } from "../components/PartnerFilter";
 import { resolveAllowed, isAllAccess, partnerCodeAllowed, SEAT_MODES, SEAT_MODE_LABELS, seatReservationMode, canEnableSeatReservation } from "../lib/partnerAccess";
 // 포탈 설정 모달(협력사 브랜딩 검증·미리보기) — 2026-07-16 회의 #3·#5
 import { isValidHexColor, mixHex } from "../lib/partnerBranding";
+import { normalizeWindowOpts, WINDOW_PRE_MIN_DEFAULT, WINDOW_POST_MIN_DEFAULT } from "../lib/routeWindow";
 // 탭 단위 에러 경계 — 자식 throw 시 흰 화면 방지 + 에러 메시지 가시화
 import { ErrorBoundary } from "../components/ErrorBoundary";
 // 관제도 PWA 설치 자동 안내(2026-05-27) — PC Chrome 에서 "앱 설치" 버튼 노출.
@@ -2085,7 +2086,30 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
   const [editItem, setEditItem] = useState(null);
   const [filter, setFilter] = useState("전체");
   const [search, setSearch] = useState("");
-  const [form, setForm] = useState({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"", boardingMode:"", order:"" });
+  const [form, setForm] = useState({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"", boardingMode:"", order:"", displayStart:"", displayEnd:"" });
+  // 회사 기본 표시 범위(2026-08-05) — companies/{cid}.gpsWindowPreMin / gpsWindowPostMin.
+  // 미설정이면 30/30(routeWindow.js 기본값과 같은 수). 노선 '표시 시간'이 있으면 그쪽이 우선.
+  const [winPre, setWinPre] = useState(WINDOW_PRE_MIN_DEFAULT);
+  const [winPost, setWinPost] = useState(WINDOW_POST_MIN_DEFAULT);
+  const [winSaving, setWinSaving] = useState(false);
+  useEffect(() => {
+    if (!companyId) return;
+    return onSnapshot(doc(db, "companies", companyId), snap => {
+      const o = normalizeWindowOpts(snap.data());
+      setWinPre(o.preMin); setWinPost(o.postMin);
+    });
+  }, [companyId]);
+  const saveWindowDefaults = async () => {
+    const clamp = (v, d) => { const n = Number(v); return isFinite(n) && n >= 0 && n <= 240 ? Math.round(n) : d; };
+    setWinSaving(true);
+    try {
+      await updateDoc(doc(db, "companies", companyId), {
+        gpsWindowPreMin: clamp(winPre, WINDOW_PRE_MIN_DEFAULT),
+        gpsWindowPostMin: clamp(winPost, WINDOW_POST_MIN_DEFAULT),
+      });
+    } catch (e) { alert("저장 실패: " + (e?.message || e)); }
+    setWinSaving(false);
+  };
   const [loading, setLoading] = useState(false);
   const [reordering, setReordering] = useState(false); // 노선 순서 ▲▼ 저장 중
   const [partners, setPartners] = useState([]); // 협력사 목록
@@ -2158,10 +2182,10 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
     );
   }, [stopsRoute, companyId]);
 
-  const openAdd = () => { setEditItem(null); setForm({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"", boardingMode:"", order:"" }); setShowForm(true); };
+  const openAdd = () => { setEditItem(null); setForm({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"", boardingMode:"", order:"", displayStart:"", displayEnd:"" }); setShowForm(true); };
   const openEdit = (item) => {
     setEditItem(item);
-    setForm({ name:item.name||"", code:item.code||"", type:item.type||"출근", shift:item.shift||"주간조", seats:item.seats?.toString()||"", departTime:item.departTime||"", memo:item.memo||"", partnerCode:item.partnerCode||"", partnerName:item.partnerName||"", boardingMode:item.boardingMode||"", order: typeof item.order === "number" ? String(item.order) : "" });
+    setForm({ name:item.name||"", code:item.code||"", type:item.type||"출근", shift:item.shift||"주간조", seats:item.seats?.toString()||"", departTime:item.departTime||"", memo:item.memo||"", partnerCode:item.partnerCode||"", partnerName:item.partnerName||"", boardingMode:item.boardingMode||"", order: typeof item.order === "number" ? String(item.order) : "", displayStart:item.displayStart||"", displayEnd:item.displayEnd||"" });
     setShowForm(true);
   };
 
@@ -2174,7 +2198,10 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
     const rawOrder = (form.order ?? "").toString().trim();
     const orderVal = rawOrder === "" ? null : parseInt(rawOrder, 10);
     if (rawOrder !== "" && !Number.isFinite(orderVal)) { setLoading(false); return alert("표시 순서는 숫자로 입력해주세요"); }
-    const data = { name:form.name.trim(), code:form.code.trim(), type:form.type, shift:form.shift, seats:form.seats?parseInt(form.seats):null, departTime:form.departTime, memo:form.memo.trim(), partnerCode:form.partnerCode, partnerName:form.partnerName, boardingMode:form.boardingMode||"", order:orderVal, updatedAt:new Date().toISOString() };
+    // 표시 시간(2026-08-05) — 둘 다 넣어야 명시 창으로 인정. 한쪽만 넣으면 판정이 애매해지므로 거부.
+    const ds = (form.displayStart || "").trim(), de = (form.displayEnd || "").trim();
+    if ((ds && !de) || (!ds && de)) { setLoading(false); return alert("표시 시간은 시작·종료를 모두 입력하거나 둘 다 비워주세요"); }
+    const data = { name:form.name.trim(), code:form.code.trim(), type:form.type, shift:form.shift, seats:form.seats?parseInt(form.seats):null, departTime:form.departTime, memo:form.memo.trim(), partnerCode:form.partnerCode, partnerName:form.partnerName, boardingMode:form.boardingMode||"", order:orderVal, displayStart:ds||null, displayEnd:de||null, updatedAt:new Date().toISOString() };
     try {
       if (editItem) {
         await updateDoc(doc(db, "companies", companyId, "routes", editItem.id), data);
@@ -2214,6 +2241,8 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
         partnerCode: item.partnerCode || "",
         partnerName: item.partnerName || "",
         boardingMode: item.boardingMode || "",
+        displayStart: item.displayStart || null, // 표시 시간은 계획 정보 → 복사본도 물려받는다(2026-08-05)
+        displayEnd: item.displayEnd || null,
         routePath: Array.isArray(item.routePath) ? item.routePath : [], // 수동 경로 폴리라인 보존(plain number 배열)
         createdBy: currentUserUid || null, // 복사본도 본인 소유로(제한 admin 열람 보장)
         createdAt: new Date().toISOString(),
@@ -2593,6 +2622,26 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
           <span style={{ fontSize:12, color:"var(--color-label-mute)" }}>총 {routes.length}개</span>
           <button style={S.addBtn} onClick={openAdd}>+ 노선 추가</button>
         </div>
+      </div>
+
+      {/* 기본 표시 범위(2026-08-05 회의 #2) — 노선에 '표시 시간'을 직접 넣지 않은 노선에
+          적용되는 회사 기본값. 승객·직원앱에서 이 범위 밖 차량은 안 보인다(관제는 항상 보임). */}
+      <div style={{ padding:"10px 16px", display:"flex", flexWrap:"wrap", gap:8, alignItems:"center", borderBottom:"1px solid var(--color-line)", background:"var(--color-bg-soft)" }}>
+        <span style={{ fontSize:12, fontWeight:700, color:"var(--color-label)" }}>🕒 기본 표시 범위</span>
+        <span style={{ fontSize:12, color:"var(--color-label-mute)" }}>출발</span>
+        <input type="number" min="0" max="240" value={winPre} onChange={e=>setWinPre(e.target.value)}
+          style={{ ...S.input, width:66, padding:"5px 8px", margin:0, fontSize:12 }} />
+        <span style={{ fontSize:12, color:"var(--color-label-mute)" }}>분 전 ~ 도착</span>
+        <input type="number" min="0" max="240" value={winPost} onChange={e=>setWinPost(e.target.value)}
+          style={{ ...S.input, width:66, padding:"5px 8px", margin:0, fontSize:12 }} />
+        <span style={{ fontSize:12, color:"var(--color-label-mute)" }}>분 후</span>
+        <button style={{ ...S.editBtn, marginRight:0, fontSize:11 }} disabled={winSaving} onClick={saveWindowDefaults}>
+          {winSaving ? "저장 중…" : "저장"}
+        </button>
+        <span style={{ fontSize:11, color:"var(--color-label-mute)", flexBasis:"100%", lineHeight:1.5 }}>
+          승객·직원앱에 차량이 보이는 시간대입니다. 노선별로 다르게 하려면 노선 수정의 <b>표시 시간</b>에 직접 넣으세요.
+          관리자 실시간 관제에는 시간과 무관하게 항상 보입니다.
+        </span>
       </div>
 
       <div style={{ padding:"10px 16px", display:"flex", flexWrap:"wrap", gap:6, alignItems:"center", borderBottom:"1px solid var(--color-line)" }}>
@@ -3120,6 +3169,20 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
           <input style={S.input} type="number" placeholder="비워두면 맨 뒤 (작을수록 위)" value={form.order} onChange={e=>setForm({...form,order:e.target.value})} />
           <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:-6, marginBottom:8 }}>
             승객·직원앱 노선 목록에 보이는 순서입니다. 목록에서 ▲▼ 버튼으로도 바꿀 수 있습니다.
+          </div>
+          {/* 표시 시간 — 승객·직원앱에서 이 노선 차량을 보여줄 시간대(2026-08-05 회의 #2·#3).
+              비우면 출발시간 ± 회사 기본값에서 자동 계산. 하루 여러 번 도는 노선(온세미 등)은
+              여기에 직접 넣으면 그 시간 내내 차량이 보인다. */}
+          <label style={S.label}>표시 시간</label>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <input style={{...S.input, flex:1}} type="time" value={form.displayStart} onChange={e=>setForm({...form,displayStart:e.target.value})} />
+            <span style={{ fontSize:13, color:"var(--color-label-mute)" }}>~</span>
+            <input style={{...S.input, flex:1}} type="time" value={form.displayEnd} onChange={e=>setForm({...form,displayEnd:e.target.value})} />
+          </div>
+          <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:-2, marginBottom:8, lineHeight:1.5 }}>
+            승객·직원앱에 이 노선 차량이 보이는 시간대입니다. <b>비워두면 출발시간 기준으로 자동</b>
+            (회사 관리 &gt; 기본 표시 범위). 하루에 여러 번 도는 노선은 직접 넣어주세요.
+            <br />관리자 실시간 관제에는 시간과 무관하게 항상 보입니다.
           </div>
           {/* 탑승 QR 방향(노선 단위 override) — 혼승 노선 대응. 미설정 시 협력사 정책 따름. 2026-05-27 */}
           <label style={S.label}>탑승 QR 방향 (노선 override)</label>

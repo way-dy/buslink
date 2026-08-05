@@ -2816,7 +2816,9 @@ async function loadRouteMeta(db, cid, routeId, cache) {
         order: typeof sv.order === "number" ? sv.order : null,
       });
     });
-    meta = { departTime: rv.departTime || "", stops };
+    // displayStart/End = 관리자가 노선에 직접 넣은 표시 시간(2026-08-05). computeGpsWindow 가
+    // 이걸 최우선으로 본다 — 빠뜨리면 폴러만 파생 창을 쓰게 돼 표시와 수집이 어긋난다.
+    meta = { departTime: rv.departTime || "", displayStart: rv.displayStart || "", displayEnd: rv.displayEnd || "", stops };
   } catch (e) {
     console.error(`[단말도착] 노선 로드 오류 cid=${cid} route=${routeId}:`, e.message);
     meta = null;
@@ -2839,10 +2841,21 @@ const GPS_WINDOW_DEFAULT_DURATION_MIN = 120; // 정류장 offsetMin 이 전무�
 /** 노선 메타 → GPS 수신 허용 분(minute-of-day) 창 { startMin, endMin } 또는 null.
  *  null = 게이트 없음(관대한 폴백): meta 부재/로드실패 또는 departTime 미설정 시.
  *  → 노선에 출발시각을 넣기 전(레거시)에는 기존 동작(항상 허용, 신선도만) 그대로. */
-function computeGpsWindow(meta) {
+function computeGpsWindow(meta, opts) {
   if (!meta) return null;
+
+  // ① 관리자가 노선에 직접 넣은 표시 시간이 최우선(2026-08-05 회의 #2·#3).
+  //    하루 4~6회 도는 노선(온세미 등)은 파생 창이 첫 회차 뒤 닫혀 오후 좌표가 통째로
+  //    끊긴다 → 여기서도 명시 창을 존중해야 표시(클라)와 수집(폴러)이 어긋나지 않는다.
+  //    ⚠ 클라 미러 = src/lib/routeWindow.js computeRouteWindow. 한쪽만 고치지 말 것.
+  const es = hhmmToMinutes(meta.displayStart);
+  const ee = hhmmToMinutes(meta.displayEnd);
+  if (es !== null && ee !== null) return { startMin: es, endMin: ee };
+
   const dep = hhmmToMinutes(meta.departTime);
   if (dep === null) return null; // 출발시각 미설정 → 시간창 게이트 없음
+  const pre = Number.isFinite(opts?.preMin) ? opts.preMin : GPS_WINDOW_PRE_MIN;
+  const post = Number.isFinite(opts?.postMin) ? opts.postMin : GPS_WINDOW_POST_MIN;
   let maxOffset = 0;
   for (const st of (meta.stops || [])) {
     if (typeof st.offsetMin === "number" && isFinite(st.offsetMin) && st.offsetMin > maxOffset) {
@@ -2850,11 +2863,30 @@ function computeGpsWindow(meta) {
     }
   }
   const span = maxOffset > 0 ? maxOffset : GPS_WINDOW_DEFAULT_DURATION_MIN;
-  let startMin = dep - GPS_WINDOW_PRE_MIN;
-  let endMin = dep + span + GPS_WINDOW_POST_MIN;
+  let startMin = dep - pre;
+  let endMin = dep + span + post;
   if (startMin < 0) startMin = 0;          // 자정 이전 클램프
   if (endMin > 1439) endMin = 1439;        // 자정 넘김 클램프(그날 끝까지 허용)
   return { startMin, endMin };
+}
+
+/** 창 안 판정 — end < start 면 자정을 넘긴 창(예 22:00~02:00). 창 null 이면 항상 허용. */
+function gpsWindowContains(win, nowMin) {
+  if (!win) return true;
+  if (win.startMin <= win.endMin) return nowMin >= win.startMin && nowMin <= win.endMin;
+  return nowMin >= win.startMin || nowMin <= win.endMin;
+}
+
+/** 회사 문서 → { preMin, postMin }. 클라 normalizeWindowOpts 미러. */
+function normalizeGpsWindowOpts(company) {
+  const pick = (v, dflt) => {
+    const n = Number(v);
+    return isFinite(n) && n >= 0 && n <= 240 ? n : dflt;
+  };
+  return {
+    preMin: pick(company && company.gpsWindowPreMin, GPS_WINDOW_PRE_MIN),
+    postMin: pick(company && company.gpsWindowPostMin, GPS_WINDOW_POST_MIN),
+  };
 }
 
 /** 오늘 여러 회차가 잡힌 차량에서 **지금 운행 중인** 배차 1건 선택 → { disp, meta } 또는 null.
@@ -2867,17 +2899,17 @@ function computeGpsWindow(meta) {
  *
  *  🔴 departTime 미설정 노선(win=null=게이트 없음)은 **폴백으로만** 채택한다 — 시간창이 실제로
  *  맞는 회차가 있으면 그쪽이 우선. 게이트 없는 회차가 다른 회차의 운행 시간을 가로채면 안 된다. */
-async function pickActiveDispatch(db, cid, candidates, nowMin, cache) {
+async function pickActiveDispatch(db, cid, candidates, nowMin, cache, winOpts) {
   let ungated = null;                       // 게이트 없는 회차(레거시 관대 폴백)
   let best = null, bestDist = Infinity;
   for (const disp of candidates) {
     const meta = await loadRouteMeta(db, cid, disp.routeId, cache);
-    const win = computeGpsWindow(meta);
+    const win = computeGpsWindow(meta, winOpts);
     if (!win) {                             // departTime 미설정 → 기존 동작(항상 허용) 보존
       if (!ungated) ungated = { disp, meta };
       continue;
     }
-    if (nowMin < win.startMin || nowMin > win.endMin) continue;
+    if (!gpsWindowContains(win, nowMin)) continue;
     const dep = hhmmToMinutes(meta.departTime);
     const dist = Math.abs((dep === null ? win.startMin : dep) - nowMin);
     if (dist < bestDist) { best = { disp, meta }; bestDist = dist; }
@@ -2974,6 +3006,9 @@ exports.pollDeviceVehicleGps = onSchedule(
         const v = (c.data() || {}).stopArriveRadiusM;
         return (typeof v === "number" && isFinite(v) && v > 0) ? v : STOP_ARRIVE_M;
       })();
+      // 회사 기본 표시 범위(2026-08-05) — 노선에 '표시 시간'이 없을 때 쓰는 ±분.
+      // 승객앱 표시 게이트(src/lib/routeWindow.js)와 같은 값을 써야 두 쪽이 어긋나지 않는다.
+      const winOpts = normalizeGpsWindowOpts(c.data() || {});
       try {
         const vehSnap = await db
           .collection("companies").doc(cid)
@@ -3030,7 +3065,7 @@ exports.pollDeviceVehicleGps = onSchedule(
             // 운행 시간 창 게이트 — 노선 시간표 밖(운행 전/후) 상시신호 좌표 차단.
             // 회차가 여럿이면 지금 운행 중인 회차를 고른다(등교/하교 각각 자기 창에서 잡힘).
             // 어느 회차도 창 안이 아니면 = 운행 종료/전. meta 는 아래 도착감지에서 재사용.
-            const active = await pickActiveDispatch(db, cid, candidates, nowMin, routeMetaCache);
+            const active = await pickActiveDispatch(db, cid, candidates, nowMin, routeMetaCache, winOpts);
             if (!active) {
               // mobile 의 "운행 종료 → clearGPS(문서 삭제)" 대응물 — device 차량은 사람이 종료
               // 버튼을 안 누르므로 폴러가 여기서 문서를 지워야 직원/승객/관제 앱의 "운행중"
