@@ -650,13 +650,19 @@ exports.getNaviRoute = onCall(
       }, KAKAO_REST_KEY.value());
       const r = (json.routes || [])[0];
       if (!r || (r.result_code !== 0 && r.result_code !== undefined)) return null;
-      const path = [], sectionOf = [], guides = [];
+      // speeds/states = path 와 **같은 길이**로 나란히 채운다(그 좌표가 속한 도로의 교통 정보).
+      // 기사 화면이 내 위치를 경로에 투영해 얻은 segIndex 로 바로 집어 쓴다(2026-08-06 way 요청).
+      const path = [], sectionOf = [], guides = [], speeds = [], states = [];
       (r.sections || []).forEach((sec, si) => {
         (sec.roads || []).forEach((rd) => {
           const v = rd.vertexes || [];
           for (let i = 0; i + 1 < v.length; i += 2) {
             const lng = Number(v[i]), lat = Number(v[i + 1]);
-            if (isFinite(lat) && isFinite(lng)) { path.push({ lat, lng }); sectionOf.push(si); }
+            if (isFinite(lat) && isFinite(lng)) {
+              path.push({ lat, lng }); sectionOf.push(si);
+              speeds.push(Number.isFinite(Number(rd.traffic_speed)) ? Math.round(Number(rd.traffic_speed)) : null);
+              states.push(Number.isFinite(Number(rd.traffic_state)) ? Number(rd.traffic_state) : 0);
+            }
           }
         });
         (sec.guides || []).forEach((g) => {
@@ -668,7 +674,7 @@ exports.getNaviRoute = onCall(
           guides.push({ lat, lng, name: g.name || "", guidance: g.guidance || "", type: g.type });
         });
       });
-      return { route: r, path, sectionOf, guides, waypoints, avoidUturn: !!avoidUturn };
+      return { route: r, path, sectionOf, guides, speeds, states, waypoints, avoidUturn: !!avoidUturn };
     };
 
     let cand;
@@ -793,6 +799,9 @@ exports.getNaviRoute = onCall(
     return {
       path,
       guides,
+      // path 와 같은 길이. 기사 화면이 내 위치의 segIndex 로 "지금 이 구간 22km/h·서행"을 띄운다.
+      speeds: cand.speeds || [],
+      states: cand.states || [],
       matchedToDrawn,   // 화면이 "그린 노선 기준"인지 기사에게 알려주는 데 쓴다
       distance: route.summary ? route.summary.distance : null,
       duration: route.summary ? route.summary.duration : null,

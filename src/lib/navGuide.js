@@ -327,16 +327,50 @@ export function kakaoMapDirectionsUrl(stop) {
  * 🔴 **모르면 화살표를 그리지 않는다**(null 반환) — 없는 것보다 틀린 방향이 훨씬 나쁘다.
  *    이 화면의 기존 원칙(경로 밖이면 회전 안내를 아예 안 준다)과 같은 판단.
  */
-export function turnGlyph(guidance, type) {
+/* 2026-08-06 실측한 카카오 안내 type 표(과천대로·군포 노선 실호출):
+ *   1 좌회전 · 2 우회전 · 3 유턴 · 5 왼쪽 방향 · 6 오른쪽 방향 · 9 고속도로 출구
+ *   12 고속도로 입구 · 14 고가도로 진입 · 15 지하차도 진입 · 16 고가도로 옆길
+ *   17 지하차도 옆길 · 29 12시 방향 · 44 도시고속 출구 · 47 도시고속 입구
+ *   49 고속도로 진입 · 82 왼쪽 직진 · 83 오른쪽 직진 · 84 톨게이트 진입
+ *   100 출발지 · 101 목적지 · 1000 경유지
+ * 🔴 그래도 판정은 문구 우선이다. 예전 코드에 `type === 4` 를 유턴으로 둔 자리가 있었는데
+ *    **카카오 유턴은 3 이다** — 숫자표를 짐작으로 박으면 이렇게 조용히 틀린다.
+ *    (문구가 항상 "유턴"을 담고 있어 화면에는 안 드러났다.) */
+export function turnGlyph(guidance) {
   const t = String(guidance || "").trim();
-  if (/유턴|U턴/i.test(t) || type === 4) return "⤶";
+  if (/유턴|U턴/i.test(t)) return "⤶";
+  if (/지하차도/.test(t)) return "⤓";           // 진입·옆길 모두 — 좌우는 카카오가 안 준다
+  if (/고가도로/.test(t)) return "⤒";
+  if (/톨게이트|하이패스/.test(t)) return "⌸";
   if (/좌회전/.test(t)) return "↰";
   if (/우회전/.test(t)) return "↱";
   if (/왼쪽|좌측/.test(t)) return "↖";
   if (/오른쪽|우측/.test(t)) return "↗";
   if (/직진|(^|\s)12시\s*방향/.test(t)) return "↑";
   if (/목적지|도착/.test(t)) return "⚑";
-  return null;                                  // 고가도로·지하차도 옆길 등 방향이 안 정해지는 안내
+  return null;                                  // 방향이 안 정해지는 안내 — 틀린 화살표보다 없는 게 낫다
+}
+
+/** 교통 상태 코드 → 짧은 라벨·색. 카카오 `traffic_state`(도로 단위).
+ *  0 정보없음 · 1 원활 · 2 서행 · 3 지체 · 4 정체 (실측 응답의 값 범위). */
+export function trafficLabel(state) {
+  switch (Number(state)) {
+    case 1: return { text: "원활", tone: "positive" };
+    case 2: return { text: "서행", tone: "cautionary" };
+    case 3: return { text: "지체", tone: "cautionary" };
+    case 4: return { text: "정체", tone: "destructive" };
+    default: return null;                       // 0·미상은 표시하지 않는다(모르는 걸 지어내지 않는다)
+  }
+}
+
+/** m/s → km/h 정수. 음수·비수치·미측정(null)은 null. */
+export function speedKmh(metersPerSec) {
+  // 🔴 `Number(null)`·`Number("")` 은 **0** 이다 — 그대로 통과시키면 측정이 안 된 상태를
+  //    화면에 "0 km/h" 로 지어내 보여준다(정차와 구분이 안 된다). 먼저 걸러낸다.
+  if (metersPerSec === null || metersPerSec === undefined || metersPerSec === "") return null;
+  const v = Number(metersPerSec);
+  if (!Number.isFinite(v) || v < 0) return null;
+  return Math.round(v * 3.6);
 }
 
 /**

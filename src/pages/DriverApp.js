@@ -6,7 +6,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { startGPS, stopGPS, clearGPS, triggerHeartbeat } from "../lib/gps";
 import { planTimeForStop, computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
 import { buildCumulativeLengths, projectToPolyline, toLatLngPath, haversine } from "../lib/routeProgress";
-import { computeGuide, kakaoMapDirectionsUrl, stopLatLng, splitGuidePath, guideView, nextNaviGuide, travelHeading, navCenter, turnGlyph, rotateDragDelta } from "../lib/navGuide";
+import { computeGuide, kakaoMapDirectionsUrl, stopLatLng, splitGuidePath, guideView, nextNaviGuide, travelHeading, navCenter, turnGlyph, rotateDragDelta, trafficLabel, speedKmh } from "../lib/navGuide";
 import { Map, Polyline, CustomOverlayMap } from "react-kakao-maps-sdk";
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { buildRunId, recordEtaDiagnostic, throttleGate } from "../lib/etaDiag";
@@ -1876,6 +1876,7 @@ const navChip = {
 function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, livePos, estByStopId, deviceGps, compact = false }) {
   const [myPos, setMyPos] = useState(null);
   const [myGpsHeading, setMyGpsHeading] = useState(null); // navigator 가 준 진행 방향(정차 시 null)
+  const [mySpeed, setMySpeed] = useState(null);           // 내 속도 m/s (정차·미지원이면 null)
   const [center, setCenter] = useState(null);
   const [zoom, setZoom] = useState(NAV_ZOOM_DEFAULT);
   const [follow, setFollow] = useState(true);       // 내 위치 자동 추적(기사가 지도를 만지면 해제)
@@ -1896,7 +1897,8 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
       const r = await fn({ companyId, routeId });
       const d = r?.data || {};
       if (Array.isArray(d.path) && d.path.length >= 2) {
-        setNavi({ path: d.path, guides: Array.isArray(d.guides) ? d.guides : [], matchedToDrawn: !!d.matchedToDrawn });
+        setNavi({ path: d.path, guides: Array.isArray(d.guides) ? d.guides : [], matchedToDrawn: !!d.matchedToDrawn,
+                  speeds: Array.isArray(d.speeds) ? d.speeds : [], states: Array.isArray(d.states) ? d.states : [] });
         setNaviState("ok");
       } else setNaviState("fail");
     } catch (e) {
@@ -1916,6 +1918,8 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
       p => {
         setMyPos({ lat: p.coords.latitude, lng: p.coords.longitude });
         if (typeof p.coords.heading === "number" && !isNaN(p.coords.heading)) setMyGpsHeading(p.coords.heading);
+        // 내 속도 — 폰이 주는 m/s. 정차·미지원이면 null 이라 화면에서 감춘다(0 으로 지어내지 않는다).
+        setMySpeed(typeof p.coords.speed === "number" && !isNaN(p.coords.speed) ? p.coords.speed : null);
       },
       () => {},
       { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 }
@@ -2028,6 +2032,24 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
     : drawn.length >= 2 ? drawn : stops.map(stopLatLng).filter(Boolean);
   // 회전 안내는 카카오 경로가 있을 때만(손으로 그린 경로로는 회전을 못 잡는다 — 실측 확인).
   const turn = navi ? nextNaviGuide({ guides: navi.guides, path, pos }) : null;
+
+  // ── 속도 표시(2026-08-06 way 요청) ─────────────────────────────────────────
+  //   ① 내 속도 = 폰 GPS(coords.speed). 정차·미지원이면 null → 감춘다.
+  //   ② 지금 달리는 구간의 교통 속도·정체 단계 = 카카오가 도로마다 주는 traffic_speed/state
+  //      (CF 가 path 와 같은 길이의 speeds/states 로 내려준다) → 내 위치를 경로에 투영해
+  //      얻은 segIndex 로 집는다. 경로 밖이거나 값이 없으면 표시하지 않는다.
+  //   🔴 모르는 값을 0 으로 지어내지 않는다 — 운전 중 화면에서 0km/h 는 오해를 만든다.
+  const myKmh = speedKmh(mySpeed);
+  const roadTraffic = (() => {
+    if (!navi || !Array.isArray(navi.speeds) || !navi.speeds.length || !pos || path.length < 2) return null;
+    const pr = projectToPolyline(pos, path, buildCumulativeLengths(path));
+    if (!pr || pr.perpDist > 300) return null;          // 경로 밖이면 엉뚱한 구간을 집는다
+    const i = Math.min(pr.segIndex, navi.speeds.length - 1);
+    const kmh = navi.speeds[i];
+    const lab = trafficLabel(navi.states && navi.states[i]);
+    if (!Number.isFinite(kmh) && !lab) return null;
+    return { kmh: Number.isFinite(kmh) ? kmh : null, label: lab };
+  })();
 
   // 길안내의 핵심 — 노선 전체를 한 줄로 그리면 "지금 어디로 가라"가 안 읽힌다.
   // 지나온 / **지금 가야 할** / 그 이후로 잘라 가야 할 구간만 굵게 뽑는다.
@@ -2249,8 +2271,8 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
               {/* 🔴 화살표는 배너 문구와 **같은 문자열**에서 뽑는다 — 예전엔 `↱` 하드코딩이라
                   좌회전 안내에도 우회전 화살표가 떴다(2026-08-05 way 현장 지적).
                   방향을 못 정하는 안내(지하차도 옆길 등)는 null → 화살표를 안 그린다. */}
-              {turnGlyph(turn.guide.guidance, turn.guide.type) && (
-                <span style={{ fontSize: 26, lineHeight: 1 }}>{turnGlyph(turn.guide.guidance, turn.guide.type)}</span>
+              {turnGlyph(turn.guide.guidance) && (
+                <span style={{ fontSize: 26, lineHeight: 1 }}>{turnGlyph(turn.guide.guidance)}</span>
               )}
               <div style={{ minWidth: 0, flex: 1 }}>
                 {/* 한국어는 keep-all 이라야 낱말 중간에서 끊기지 않는다(글자가 잘려 보이는 원인) */}
@@ -2300,6 +2322,32 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
             </div>
           )}
         </div>
+
+        {/* 속도 — 왼쪽 아래. 🔴 위쪽은 회전 안내 배너 자리라 절대 쓰지 않는다(글씨 가림).
+            카카오 로고는 왼쪽 아래 "가장 밑"이라 그 위로 띄운다. */}
+        {(myKmh !== null || roadTraffic) && (
+          <div style={{ position: "absolute", left: 10, bottom: 40, zIndex: 5, display: "flex", alignItems: "center", gap: 6, pointerEvents: "none" }}>
+            {myKmh !== null && (
+              <div style={{
+                background: "rgba(255,255,255,.94)", borderRadius: 10, padding: "4px 10px",
+                boxShadow: "0 2px 8px rgba(0,0,0,.18)", display: "flex", alignItems: "baseline", gap: 3,
+              }}>
+                <span style={{ fontSize: 20, fontWeight: 900, color: "var(--color-label)", lineHeight: 1 }}>{myKmh}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--color-label-mute)" }}>km/h</span>
+              </div>
+            )}
+            {roadTraffic && (
+              <div style={{
+                background: "rgba(255,255,255,.94)", borderRadius: 10, padding: "5px 9px",
+                boxShadow: "0 2px 8px rgba(0,0,0,.18)", fontSize: 11, fontWeight: 800,
+                color: roadTraffic.label ? `var(--color-${roadTraffic.label.tone})` : "var(--color-label-mute)",
+                whiteSpace: "nowrap",
+              }}>
+                이 구간 {roadTraffic.kmh !== null ? `${roadTraffic.kmh}km/h` : ""}{roadTraffic.label ? ` ${roadTraffic.label.text}` : ""}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 확대/축소 + 회전 전환 — 오른쪽 가운데(운전 중 한 손 조작).
             🔴 회전 전환은 예전에 **오른쪽 위**에 있었는데 그 자리가 회전 안내 배너와 겹쳐

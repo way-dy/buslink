@@ -19,7 +19,7 @@ function loadModule(relPath) {
   return ctx;
 }
 const M = loadModule("src/lib/navGuide.js");
-const { turnGlyph, rotateDragDelta } = M;
+const { turnGlyph, rotateDragDelta, trafficLabel, speedKmh } = M;
 
 let pass = 0, fail = 0;
 const ok = (n, c, x) => { if (c) { pass++; console.log(`  ✅ ${n}`); } else { fail++; console.log(`  ❌ ${n}${x !== undefined ? ` — ${JSON.stringify(x)}` : ""}`); } };
@@ -47,16 +47,47 @@ console.log("\n[2] prod 에서 실제로 관측된 안내 문구 전수");
   ];
   cases.forEach(([t, e]) => eq(t, turnGlyph(t), e));
   // 방향이 안 정해지는 안내 = 화살표 없음(틀린 방향보다 없는 게 낫다)
-  eq("지하차도 옆길은 화살표 없음", turnGlyph("반포(우면산터널) 양재IC 방면으로 지하차도 옆길"), null);
-  eq("고가도로 진입도 없음", turnGlyph("고가도로 진입"), null);
+  eq("지하차도 옆길은 전용 픽토그램", turnGlyph("반포(우면산터널) 양재IC 방면으로 지하차도 옆길"), "⤓");
+  eq("고가도로 진입도 전용 픽토그램", turnGlyph("고가도로 진입"), "⤒");
   eq("빈 문구", turnGlyph(""), null);
   eq("null 입력", turnGlyph(null), null);
 }
 
-console.log("\n[3] type 은 보조 신호 — 문구가 우선");
+console.log("\n[3] 숫자 type 은 아예 안 쓴다 — 문구만 본다");
 {
-  eq("type 4(유턴)만 있어도 유턴", turnGlyph("", 4), "⤶");
-  eq("문구가 좌회전이면 type 3 이어도 좌회전", turnGlyph("좌회전", 3), "↰");
+  // 🔴 2026-08-06 실측: 카카오 유턴은 type **3** 이다. 예전 코드엔 type===4 가 유턴으로
+  //    박혀 있었다(문구가 항상 "유턴"이라 화면에는 안 드러났을 뿐 틀린 값). 짐작한 코드표는
+  //    이렇게 조용히 틀리므로 판정에서 숫자를 뺐다.
+  eq("type 을 넘겨도 무시하고 문구로 판정", turnGlyph("좌회전", 3), "↰");
+  eq("문구가 없으면 화살표 없음(숫자로 지어내지 않는다)", turnGlyph("", 4), null);
+}
+
+console.log("\n[3-b] 실측 type 표에서 나온 안내 문구들(2026-08-06)");
+{
+  eq("지하차도 진입", turnGlyph("북수원IC 수원 방면으로 지하차도 진입"), "⤓");
+  eq("지하차도 옆길", turnGlyph("지하차도 옆길"), "⤓");
+  eq("고가도로 진입", turnGlyph("신갈동 시청 방면으로 고가도로 진입"), "⤒");
+  eq("고가도로 옆길", turnGlyph("과천 안양 방면으로 고가도로 옆길"), "⤒");
+  eq("톨게이트 진입", turnGlyph("톨게이트 진입"), "⌸");
+  eq("왼쪽 직진(type 82)", turnGlyph("의왕 방면으로 왼쪽 직진"), "↖");
+  eq("오른쪽 직진(type 83)", turnGlyph("과천 안양 방면으로 오른쪽 직진"), "↗");
+  eq("고속도로 출구는 좌우 문구를 따른다", turnGlyph("오창 방면으로 오른쪽에 고속도로 출구"), "↗");
+}
+
+console.log("\n[3-c] 속도·교통 표시");
+{
+  eq("m/s → km/h", speedKmh(16.6667), 60);
+  eq("0 은 0", speedKmh(0), 0);
+  eq("null 은 null(정차·미지원)", speedKmh(null), null);
+  eq("음수는 null", speedKmh(-1), null);
+  eq("문자열 숫자 허용", speedKmh("10"), 36);
+  eq("원활", trafficLabel(1).text, "원활");
+  eq("서행", trafficLabel(2).text, "서행");
+  eq("지체", trafficLabel(3).text, "지체");
+  eq("정체", trafficLabel(4).text, "정체");
+  eq("0(정보없음)은 표시 안 함", trafficLabel(0), null);
+  eq("모르는 값도 표시 안 함", trafficLabel(99), null);
+  eq("undefined 도 null", trafficLabel(undefined), null);
 }
 
 console.log("\n[4] 드래그 보정 — 회전 0도면 그대로");
@@ -106,7 +137,10 @@ console.log("\n[7] 나쁜 입력");
 console.log("\n[8] 회귀 가드 — 소스 단언");
 {
   const nav = fs.readFileSync(path.join(__dirname, "..", "src/lib/navGuide.js"), "utf8");
-  ok("모르는 안내는 null 반환 유지", /return null;\s*\/\/ 고가도로/.test(nav));
+  ok("방향을 못 정하는 안내는 null 반환 유지", /return null;\s*\/\/ 방향이 안 정해지는/.test(nav));
+  // 🔴 Number(null)===0 함정 — 측정 안 된 속도를 "0 km/h" 로 지어내면 정차와 구분이 안 된다
+  ok("속도 변환이 null·빈문자열을 먼저 걸러낸다",
+    /metersPerSec === null \|\| metersPerSec === undefined \|\| metersPerSec === ""/.test(nav));
   const drv = fs.readFileSync(path.join(__dirname, "..", "src/pages/DriverApp.js"), "utf8");
   ok("배너가 ↱ 하드코딩으로 되돌아가지 않았다", !/fontSize: 26, lineHeight: 1 \}\}>↱</.test(drv));
   ok("배너가 turnGlyph 를 쓴다", /turnGlyph\(/.test(drv));
@@ -121,6 +155,14 @@ console.log("\n[8] 회귀 가드 — 소스 단언");
   ok("지도 재센터도 보간값을 따라간다", /\[follow, drawPos && drawPos\.lat, drawPos && drawPos\.lng/.test(drv));
   // 판정은 원본이어야 "몇 m 앞 회전"이 늦지 않는다
   ok("회전 안내 판정은 원본 좌표로", /nextNaviGuide\(\{ guides: navi\.guides, path, pos \}\)/.test(drv));
+
+  // 2026-08-06 속도 표시 — 지도 위쪽(배너 자리)에 두면 다시 글씨를 가린다
+  ok("속도 칩이 배선돼 있다", /const myKmh = speedKmh\(mySpeed\)/.test(drv) && /roadTraffic/.test(drv));
+  ok("속도 칩은 지도 왼쪽 아래(배너 자리 침범 금지)", /속도 — 왼쪽 아래[\s\S]{0,400}left: 10, bottom: 40/.test(drv));
+  ok("모르는 속도를 0 으로 지어내지 않는다", /myKmh !== null/.test(drv));
+  const fn = fs.readFileSync(path.join(__dirname, "..", "functions", "index.js"), "utf8");
+  ok("CF 가 path 와 같은 길이로 speeds/states 를 채운다", /speeds\.push\(/.test(fn) && /states\.push\(/.test(fn));
+  ok("CF 응답에 speeds/states 가 실려 나간다", /speeds: cand\.speeds \|\| \[\]/.test(fn));
 }
 
 console.log(`\n${fail === 0 ? "✅" : "❌"} pass ${pass} / fail ${fail}`);
