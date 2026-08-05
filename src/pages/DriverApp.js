@@ -80,6 +80,9 @@ export default function DriverApp({ companyId: propCompanyId }) {
   const [qrUrl, setQrUrl] = useState(null);        // 탑승 링크 URL
   const [qrDataUrl, setQrDataUrl] = useState(null); // canvas → base64 이미지
   const [activeTab, setActiveTab] = useState("운행");          // "운행" | "QR"
+  // 길안내 = 지도 중심 모드(2026-08-05 way). 인사·배차 히어로·상태 스트립을 접고
+  // 지도를 화면 높이만큼 키운다 — 운전 중 필요한 건 지도와 다음 회전뿐이다.
+  const navFocus = activeTab === "길안내";
   const tokenTimerRef = useRef(null);
   // 협력사 boardingMode (2026-05-27, 역방향 QR) — 'driver-qr'(기본·null도 동치) | 'passenger-qr'
   // dispatch.routeId → routes/{id}.partnerCode → partnerCodes/{code}.boardingMode 체인.
@@ -918,16 +921,20 @@ export default function DriverApp({ companyId: propCompanyId }) {
           </div>
         )}
 
-        {/* 인사 */}
-        <div>
-          <div style={S.greetingDate}>{todayLabel}</div>
-          <div style={S.greetingName}>
-            {driver?.name ? `${driver.name} 기사님, 안녕하세요` : "안녕하세요"}
+        {/* 인사 — 길안내에서는 감춘다(아래 navFocus 참고) */}
+        {!navFocus && (
+          <div>
+            <div style={S.greetingDate}>{todayLabel}</div>
+            <div style={S.greetingName}>
+              {driver?.name ? `${driver.name} 기사님, 안녕하세요` : "안녕하세요"}
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* 배차 정보 — 그라데이션 히어로 카드 */}
-        {dispatch ? (
+        {/* 배차 정보 — 그라데이션 히어로 카드.
+            🔴 길안내 탭에서는 감춘다(2026-08-05 way "길안내할 때는 최대한 지도 중심으로,
+            상단 메뉴도 최소화"). 다음 정류장·남은거리·예정시각은 지도 위 칩이 이미 보여준다. */}
+        {!navFocus && (dispatch ? (
           <div style={S.heroCard}>
             {/* 흐린 버스 아이콘 */}
             <svg viewBox="0 0 100 100" style={S.heroBusIcon}>
@@ -1012,7 +1019,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
             <Icon name="bus" size={28} />
             <div style={{ marginTop: 8 }}>오늘 배차된 노선이 없습니다</div>
           </div>
-        )}
+        ))}
 
         {/* GPS 단말 차량 안내 배너 — 앱이 위치를 전송하지 않고 단말로 서버 자동 추적. */}
         {driving && deviceGps && (
@@ -1025,8 +1032,10 @@ export default function DriverApp({ companyId: propCompanyId }) {
           </div>
         )}
 
-        {/* 라이브 상태 스트립 — GPS 전송 상태(실제 driving / Wake Lock 만, 가짜 수치 없음) */}
-        {driving && (
+        {/* 라이브 상태 스트립 — GPS 전송 상태(실제 driving / Wake Lock 만, 가짜 수치 없음).
+            길안내에서는 감춘다 — 운전 중에 계속 볼 정보가 아니고 지도 높이를 크게 먹는다.
+            (GPS 가 실제로 끊기면 지도 위 "위치를 확인하는 중입니다" 칩이 따로 뜬다) */}
+        {driving && !navFocus && (
           <div style={S.statStrip}>
             <div style={S.miniStat}>
               <div style={S.miniStatLabel}>상태</div>
@@ -1082,6 +1091,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
             livePos={liveVehiclePos}
             estByStopId={estByStopId}
             deviceGps={deviceGps}
+            compact
           />
         )}
 
@@ -1862,7 +1872,7 @@ const navChip = {
   boxShadow: "0 2px 10px rgba(0,0,0,.16)", color: "var(--color-label)", fontSize: 13,
 };
 
-function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, livePos, estByStopId, deviceGps }) {
+function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, livePos, estByStopId, deviceGps, compact = false }) {
   const [myPos, setMyPos] = useState(null);
   const [myGpsHeading, setMyGpsHeading] = useState(null); // navigator 가 준 진행 방향(정차 시 null)
   const [center, setCenter] = useState(null);
@@ -1966,6 +1976,28 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // 지도 중심 모드 높이 — 화면 아래 끝까지 채운다(2026-08-05 way "최대한 지도 중심으로").
+  // 🔴 고정 px 을 빼는 방식(예 `calc(100dvh - 128px)`)은 기기·글꼴·안전영역에 따라 어긋난다
+  //   → 지도 상자의 실제 위치를 재서 남은 높이를 그대로 준다.
+  //   상자 top 은 위쪽 내용만으로 정해지고 자기 높이와 무관하므로 되먹임 루프가 없다.
+  const [compactH, setCompactH] = useState(0);
+  useEffect(() => {
+    if (!compact) { setCompactH(0); return undefined; }
+    const measure = () => {
+      const el = clipRef.current;
+      if (!el) return;
+      const top = el.getBoundingClientRect().top;
+      setCompactH(Math.max(360, Math.round(window.innerHeight - top - 12)));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("orientationchange", measure);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("orientationchange", measure);
+    };
+  }, [compact]);
 
   const guide = computeGuide({ stops, currentStopIdx, pos, estByStopId });
   const target = guide.stop;
@@ -2098,7 +2130,11 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
       <div ref={clipRef}
         onPointerDown={onStagePointerDown} onPointerMove={onStagePointerMove}
         onPointerUp={endStagePan} onPointerCancel={endStagePan} onPointerLeave={endStagePan}
-        style={{ position: "relative", height: "64vh", minHeight: 340, overflow: "hidden", background: "#eef1f6",
+        style={{ position: "relative",
+                 // 지도 중심 모드 = 실측한 남은 높이(위 compactH). 측정 전 첫 프레임만 폴백.
+                 height: compact ? (compactH ? `${compactH}px` : "calc(100dvh - 128px)") : "64vh",
+                 minHeight: compact ? 420 : 340,
+                 overflow: "hidden", background: "#eef1f6",
                  touchAction: rotating ? "none" : "auto" }}>
         {/* 회전 판 — 진행 방향이 위로 오게 통째로 돌린다. 회전 시 모서리가 비지 않도록
             판을 상자의 **대각선 길이**만큼 키우고 중심을 맞춰 둔다. */}
@@ -2198,8 +2234,9 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
               {turnGlyph(turn.guide.guidance, turn.guide.type) && (
                 <span style={{ fontSize: 26, lineHeight: 1 }}>{turnGlyph(turn.guide.guidance, turn.guide.type)}</span>
               )}
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 21, fontWeight: 900, lineHeight: 1.2 }}>{turn.label}</div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                {/* 한국어는 keep-all 이라야 낱말 중간에서 끊기지 않는다(글자가 잘려 보이는 원인) */}
+                <div style={{ fontSize: 21, fontWeight: 900, lineHeight: 1.25, wordBreak: "keep-all" }}>{turn.label}</div>
                 {turn.guide.name && (
                   <div style={{ fontSize: 12, opacity: 0.9, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {turn.guide.name}
@@ -2246,16 +2283,15 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
           )}
         </div>
 
-        {/* 회전 전환 — 오른쪽 위 */}
-        <div style={{ position: "absolute", right: 10, top: 10, zIndex: 5, pointerEvents: "none" }}>
-          <button onClick={() => setHeadingUp(v => !v)}
-            style={{ ...ctlBtn, background: headingUp ? "var(--color-primary)" : "rgba(255,255,255,.94)", color: headingUp ? "#fff" : "var(--color-label)", border: headingUp ? "none" : ctlBtn.border }}>
-            {headingUp ? "↑ 진행방향" : "N 북쪽"}
-          </button>
-        </div>
-
-        {/* 확대/축소 — 오른쪽 가운데(운전 중 한 손 조작) */}
+        {/* 확대/축소 + 회전 전환 — 오른쪽 가운데(운전 중 한 손 조작).
+            🔴 회전 전환은 예전에 **오른쪽 위**에 있었는데 그 자리가 회전 안내 배너와 겹쳐
+               배너 글씨를 가렸다(2026-08-05 way "방향안내 글씨가 잘려서 보임").
+               배너는 가로 전체를 써야 문구가 안 잘리므로, 지도 위쪽에는 아무 버튼도 두지 않는다. */}
         <div style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", zIndex: 5, display: "flex", flexDirection: "column", gap: 6, pointerEvents: "none" }}>
+          <button onClick={() => setHeadingUp(v => !v)}
+            style={{ ...ctlBtn, padding: "7px 9px", background: headingUp ? "var(--color-primary)" : "rgba(255,255,255,.94)", color: headingUp ? "#fff" : "var(--color-label)", border: headingUp ? "none" : ctlBtn.border }}>
+            {headingUp ? "↑ 진행" : "N 북쪽"}
+          </button>
           <button onClick={() => setZoomBy(-1)} style={{ ...ctlBtn, fontSize: 18, padding: "6px 12px" }}>＋</button>
           <button onClick={() => setZoomBy(1)} style={{ ...ctlBtn, fontSize: 18, padding: "6px 12px" }}>－</button>
         </div>
