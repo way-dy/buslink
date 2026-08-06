@@ -74,13 +74,15 @@ g("지하차도 ≠ 고가도로(옆길)", byKind["underpass-side"] !== byKind["
     String((byKind[k].match(/<(rect|path)/g) || []).length)));
 if (guardFail) { console.error("\n🔴 소스 가드 실패 — 렌더 안 함"); process.exit(1); }
 
-const keyframes = (css.match(/@keyframes navturn-[\s\S]*?\n\}/g) || []).join("\n");
-if (!/navturn-left/.test(keyframes)) { console.error("🔴 navturn 키프레임 없음"); process.exit(1); }
+// 2026-08-07 — 방향별로 아이콘을 흔들던 키프레임은 way 지적("장난감스럽다")으로 폐기됐다.
+// 이 화면은 **도형 자체**를 보는 자리라 애니메이션 없이 정지 상태로 렌더한다.
+const keyframes = (css.match(/@keyframes navturnring[\s\S]*?\n\}/g) || []).join("\n");
+if (!keyframes) { console.error("🔴 navturnring 키프레임 없음"); process.exit(1); }
 
 const cell = (k, near) => `
 <div class="cell">
   <div class="map">
-    <div class="ico ${near ? "near" : "far"}" style="animation-name:navturn-${motionOf(k.kind)}">
+    <div class="ico ${near ? "near" : "far"}">
       <svg width="${near ? 168 : 124}" height="${near ? 168 : 124}" viewBox="0 0 64 64">${k.svg}</svg>
     </div>
   </div>

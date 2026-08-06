@@ -6,7 +6,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { startGPS, stopGPS, clearGPS, triggerHeartbeat } from "../lib/gps";
 import { planTimeForStop, computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
 import { buildCumulativeLengths, projectToPolyline, toLatLngPath, haversine } from "../lib/routeProgress";
-import { computeGuide, kakaoMapDirectionsUrl, stopLatLng, splitGuidePath, guideView, nextNaviGuide, travelHeading, navCenter, turnGlyph, turnIconKind, rotateDragDelta, trafficLabel, speedKmh } from "../lib/navGuide";
+import { computeGuide, kakaoMapDirectionsUrl, stopLatLng, splitGuidePath, guideView, nextNaviGuide, travelHeading, navCenter, turnGlyph, turnIconKind, rotateDragDelta, trafficLabel, speedKmh, formatDistance } from "../lib/navGuide";
 // 회전 픽토그램(2026-08-06) — 큰 표시는 글리프 문자 대신 직접 그린 SVG(폰트에 없으면 두부가 된다).
 import { NavTurnIcon } from "../components/NavTurnIcon";
 import { Map, Polyline, CustomOverlayMap } from "react-kakao-maps-sdk";
@@ -2247,6 +2247,60 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
                 </div>
               </CustomOverlayMap>
             ))}
+            {/* ★ 회전 지점 표시 — 2026-08-07 way 실주행 지적 3건을 한 번에 푼다.
+                  "화살표가 너무 가운데라 경로를 가린다 · 화살표 있는 지점에 나타날 수 없나"
+                  "방향전환까지 남은 m 를 같이"  "직진이 긴데도 계속 방향표시가 나온다"
+                🔴 지도 한가운데 고정이 아니라 **실제 회전 지점 좌표**에 얹는다 — 그러면
+                   ① 경로 위를 안 가리고 ② "저기서 꺾는다"가 위치로 읽히고
+                   ③ 멀면 화면 밖이라 저절로 사라진다(긴 직진에 계속 뜨던 문제).
+                🔴 판이 돌아도 패널은 세운다(정류장 번호와 같은 counterRot).
+                🔴 애니메이션은 **패널이 아니라 뒤 고리**에 건다 — 패널엔 인라인 rotate 가
+                   걸려 있어 키프레임이 transform 을 건드리면 그 선언이 조용히 사라진다. */}
+            {turn && turnIcon && Number.isFinite(turn.guide.lat) && Number.isFinite(turn.guide.lng) && (
+              <CustomOverlayMap position={{ lat: turn.guide.lat, lng: turn.guide.lng }} yAnchor={1} zIndex={4}>
+                <div style={{ position: "relative", transform: counterRot ? `rotate(${counterRot}deg)` : "none" }}>
+                  {/* 다 와 갈 때만 조용히 번지는 고리 — 흔들지 않는다 */}
+                  {turnNear && (
+                    <span style={{
+                      position: "absolute", left: "50%", top: "50%", width: 92, height: 92,
+                      marginLeft: -46, marginTop: -46, borderRadius: "50%",
+                      border: "2px solid var(--color-primary)",
+                      animation: "navturnring 2s ease-out infinite", pointerEvents: "none",
+                    }} />
+                  )}
+                  <div style={{
+                    position: "relative",
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "7px 11px 7px 8px", borderRadius: 13,
+                    background: turnNear ? "var(--color-primary)" : "rgba(23,34,54,.93)",
+                    color: "#fff", whiteSpace: "nowrap",
+                    boxShadow: "0 3px 12px rgba(0,0,0,.32), 0 0 0 2px rgba(255,255,255,.9)",
+                    transition: "background .3s ease",
+                  }}>
+                    <NavTurnIcon kind={turnIcon.kind} size={34} title={turn.label} />
+                    <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1 }}>
+                      <span style={{ fontSize: 19, fontWeight: 900, letterSpacing: "-0.02em" }}>
+                        {formatDistance(turn.aheadMeters)}
+                      </span>
+                      {turn.guide.name && (
+                        <span style={{ fontSize: 10, fontWeight: 700, opacity: 0.8, maxWidth: 108,
+                          overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {turn.guide.name}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {/* 아래로 뻗는 꼬리 — 패널이 가리키는 지점을 명확히 */}
+                  <span style={{
+                    position: "absolute", left: "50%", bottom: -6, marginLeft: -6,
+                    width: 0, height: 0, borderLeft: "6px solid transparent",
+                    borderRight: "6px solid transparent",
+                    borderTop: `7px solid ${turnNear ? "var(--color-primary)" : "rgba(23,34,54,.93)"}`,
+                  }} />
+                </div>
+              </CustomOverlayMap>
+            )}
+
             {/* 내 차량 — 화살표는 **화면 기준 진행 방향**을 가리킨다.
                 판이 -heading 만큼 돌아 있으므로 여기에 heading 을 주면 화면에선 정확히
                 위(=진행 방향)를 향한다. 북쪽 고정 모드(rot=0)에서는 실제 방위를 향한다.
@@ -2322,6 +2376,30 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
             </div>
           )}
 
+          {/* 속도 · 구간 교통 — 🔴 2026-08-07 way "속도표시가 없어졌음".
+              2026-08-06 에 "메뉴를 가리지 않게" 지도 **밖** 줄로 내렸는데, 지도 중심 모드는
+              지도가 `compactH`(화면 끝까지)라 그 줄이 통째로 **화면 밖**으로 밀렸다.
+              게다가 지도 아래쪽은 고정 하단 바(운행 중 — 종료)가 덮는다.
+              → 아무도 안 가리면서 항상 보이는 자리 = **상단 스택**(배너·정류장 칩과 같은 흐름).
+              🔴 지도 위 떠 있는 칩(`position:absolute` + bottom)으로 되돌리지 말 것 —
+                 그 띠는 카카오 로고·시점 버튼·하단 바가 이미 나눠 쓰고 있다. */}
+          {(myKmh !== null || roadTraffic) && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+              {myKmh !== null && (
+                <div style={{ ...navChip, display: "flex", alignItems: "baseline", gap: 3, padding: "5px 10px" }}>
+                  <span style={{ fontSize: 18, fontWeight: 900, color: "var(--color-label)", lineHeight: 1 }}>{myKmh}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--color-label-mute)" }}>km/h</span>
+                </div>
+              )}
+              {roadTraffic && (
+                <div style={{ ...navChip, padding: "6px 10px", fontSize: 11, fontWeight: 800,
+                  color: roadTraffic.label ? `var(--color-${roadTraffic.label.tone})` : "var(--color-label-mute)" }}>
+                  이 구간 {roadTraffic.kmh !== null ? `${roadTraffic.kmh}km/h` : ""}{roadTraffic.label ? ` ${roadTraffic.label.text}` : ""}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* 정류장 안내문은 **다 와 갈 때만** — 그때가 "어디에 세우나"가 필요한 순간이다 */}
           {target && nearTarget && target.description && (
             <div style={{ ...navChip, marginTop: 6, fontSize: 13, whiteSpace: "pre-wrap" }}>
@@ -2334,33 +2412,6 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
             </div>
           )}
         </div>
-
-        {/* ★ 대형 회전 픽토그램 (2026-08-06 way "지도 위에 엄청 크게 잘 보이게 · 애니메이션으로")
-            배너의 작은 화살표는 운전 중 한눈에 안 들어온다 → 같은 판정을 지도 한가운데에 크게 그린다.
-            🔴 종류는 **배너와 같은 문구**(turn.guide.guidance)에서 뽑는다(문구↔그림 어긋남 원천 차단).
-            🔴 지도를 통째로 가리면 안 되므로 평소엔 옅게, **가까워질수록 진하고 크게**.
-            🔴 `pointerEvents:none` — 이 위로도 지도를 끌 수 있어야 한다.
-            🔴 인라인 transform 금지(키프레임이 transform 을 애니메이션한다) → 위치는 래퍼가 잡는다. */}
-        {turnIcon && (
-          <div style={{
-            position: "absolute", left: 0, right: 0, top: "42%", zIndex: 3,
-            display: "flex", justifyContent: "center", pointerEvents: "none",
-          }}>
-            <div style={{
-              color: turnNear ? "var(--color-primary)" : "#1b2942",
-              // 🔴 실측(2026-08-06 `headless_check_nav_overlay.cjs`, 진짜 카카오 지도 위) —
-              //    옅게(0.34) 두니 도로·글자에 묻혀 **사실상 안 보였다**. 어중간하게 보이는 그림은
-              //    지도만 더럽히므로 안 보이게 하든 보이게 하든 둘 중 하나여야 한다 → 0.6.
-              opacity: turnNear ? 0.95 : 0.6,
-              // 🔴 흰 그림자 2겹으로는 부족했다(지도 위에서 윤곽이 안 산다) → 흰 후광 4겹.
-              filter: "drop-shadow(0 0 3px #fff) drop-shadow(0 0 3px #fff) drop-shadow(0 0 2px #fff) drop-shadow(0 2px 5px rgba(0,0,0,.25))",
-              animation: `navturn-${turnIcon.motion} ${turnNear ? 0.9 : 1.8}s ease-in-out infinite`,
-              transition: "opacity .3s ease, color .3s ease",
-            }}>
-              <NavTurnIcon kind={turnIcon.kind} size={turnNear ? 168 : 124} title={turn.label} />
-            </div>
-          </div>
-        )}
 
         {/* 확대/축소 + 회전 전환 — 오른쪽 가운데(운전 중 한 손 조작).
             🔴 회전 전환은 예전에 **오른쪽 위**에 있었는데 그 자리가 회전 안내 배너와 겹쳐
@@ -2398,32 +2449,12 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
         </div>
       </div>
 
-      {/* 지도 아래 한 줄 — 속도·구간 교통 + 경로 출처 + 외부 내비. 지도를 밀어내지 않게 최소 높이로.
-          🔴 속도는 예전에 **지도 위 왼쪽 아래 떠 있는 칩**이었는데, 그 자리가 시점 버튼줄·
-             카카오 로고·아래 운행/종료 메뉴와 한 띠에서 겹쳤다(2026-08-06 way "잘 보이도록 하되
-             어떤 메뉴도 가리지 않도록"). 지도 밖 고정 자리로 내리면 **아무것도 가리지 않고**
-             위치가 흔들리지 않아 오히려 눈에 잘 들어온다. 지도 위로 되돌리지 말 것. */}
+      {/* 지도 아래 한 줄 — 경로 출처 + 외부 내비.
+          ⚠ **지도 중심 모드에서는 이 줄이 화면 밖이다**(지도가 `compactH` 로 화면 끝까지 찬다).
+             그래서 운전 중 반드시 보여야 하는 것(속도 등)을 여기 두면 안 된다 —
+             2026-08-06 에 속도를 여기 내렸다가 way 가 "속도표시가 없어졌음" 으로 신고했다.
+             운행 중 필요한 표시는 상단 스택(배너 아래)에 둔다. */}
       <div style={{ padding: "8px 12px 12px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        {myKmh !== null && (
-          <div style={{
-            display: "flex", alignItems: "baseline", gap: 3, flexShrink: 0,
-            background: "var(--color-bg-alt)", border: "1px solid var(--color-line)",
-            borderRadius: 10, padding: "4px 10px",
-          }}>
-            <span style={{ fontSize: 20, fontWeight: 900, color: "var(--color-label)", lineHeight: 1 }}>{myKmh}</span>
-            <span style={{ fontSize: 10, fontWeight: 700, color: "var(--color-label-mute)" }}>km/h</span>
-          </div>
-        )}
-        {roadTraffic && (
-          <div style={{
-            flexShrink: 0, borderRadius: 10, padding: "5px 9px", fontSize: 11, fontWeight: 800,
-            background: "var(--color-bg-alt)", border: "1px solid var(--color-line)",
-            color: roadTraffic.label ? `var(--color-${roadTraffic.label.tone})` : "var(--color-label-mute)",
-            whiteSpace: "nowrap",
-          }}>
-            이 구간 {roadTraffic.kmh !== null ? `${roadTraffic.kmh}km/h` : ""}{roadTraffic.label ? ` ${roadTraffic.label.text}` : ""}
-          </div>
-        )}
         <div style={{ fontSize: 11, color: "var(--color-label-mute)", flex: 1, minWidth: 150, lineHeight: 1.45 }}>
           {/* 노선에서 멀리 떨어져 있으면 회전 안내를 끄고 그 사실을 말해준다 —
               안내가 그냥 없으면 기사는 고장으로 오해한다. */}

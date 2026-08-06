@@ -218,22 +218,33 @@ console.log("\n[8] 회귀 가드 — 소스 단언");
   // 아래 운행/종료 메뉴와 한 띠에서 겹쳤다(way "잘 보이도록 하되 어떤 메뉴도 가리지 않도록").
   // 🔴 새 불변식 = 속도는 **지도 오버레이가 아니라 지도 밖 고정 줄**에 있다.
   ok("속도 칩이 배선돼 있다", /const myKmh = speedKmh\(mySpeed\)/.test(drv) && /roadTraffic/.test(drv));
-  ok("속도가 지도 아래 고정 줄에 있다", /지도 아래 한 줄 — 속도[\s\S]{0,900}\{myKmh !== null && \(/.test(drv));
+  // 🔴 2026-08-07 way "속도표시가 없어졌음" — 지도 밖 줄로 내렸더니 지도 중심 모드에서
+  //    지도가 화면 끝까지(compactH) 차서 그 줄이 통째로 화면 밖으로 밀렸다.
+  ok("속도가 상단 스택에 있다(항상 보이는 자리)",
+    /속도 · 구간 교통[\s\S]{0,900}\{myKmh !== null && \(/.test(drv));
   ok("속도를 지도 위 떠 있는 칩으로 되돌리지 않았다", !/position: "absolute"[^}]*bottom: 40/.test(drv));
+  ok("속도를 지도 밖 줄로 되돌리지 않았다(화면 밖으로 밀린다)",
+    !/지도 아래 한 줄 — 속도/.test(drv));
   ok("모르는 속도를 0 으로 지어내지 않는다", /myKmh !== null/.test(drv));
 
-  // 2026-08-06 대형 회전 픽토그램 — way "지도 위에 엄청 크게 잘 보이게 · 애니메이션으로"
-  ok("대형 픽토그램이 배선돼 있다", /turnIconKind\(turn\.guide\.guidance\)/.test(drv) && /<NavTurnIcon/.test(drv));
+  // 2026-08-07 회전 지점 표시 — way "화살표가 경로 가운데라 가려진다 · 화살표 있는 지점에"
+  ok("픽토그램이 배선돼 있다", /turnIconKind\(turn\.guide\.guidance\)/.test(drv) && /<NavTurnIcon/.test(drv));
   // 🔴 배너와 같은 문구에서 종류를 뽑아야 그림과 글자가 어긋나지 않는다(2026-08-05 가드의 확장)
   ok("픽토그램 종류를 문구에서 뽑는다(리터럴 하드코딩 아님)",
     /const turnIcon = turn \? turnIconKind\(turn\.guide\.guidance\) : null/.test(drv));
-  ok("가까워지면 진하게 — 거리 필드는 aheadMeters", /turn\.aheadMeters <= NAV_TURN_NEAR_M/.test(drv));
-  // 🔴 키프레임이 transform 을 애니메이션하므로 그 요소에 인라인 transform 을 쓰면 조용히 사라진다
-  ok("대형 픽토그램 래퍼에 인라인 transform 없음",
-    !/animation: `navturn-[\s\S]{0,200}transform:/.test(drv));
-  ok("애니메이션 키프레임 5종이 tokens.css 에 있다", (() => {
+  ok("가까워지면 강조 — 거리 필드는 aheadMeters", /turn\.aheadMeters <= NAV_TURN_NEAR_M/.test(drv));
+  // 🔴 지도 한가운데 고정으로 되돌리면 경로를 가리고 긴 직진에도 계속 뜬다
+  ok("🔴 회전 지점 좌표에 얹는다", /position=\{\{ lat: turn\.guide\.lat, lng: turn\.guide\.lng \}\}/.test(drv));
+  ok("🔴 지도 한가운데 고정 오버레이로 되돌아가지 않았다", !/top: "42%"/.test(drv));
+  ok("남은 거리를 함께 표시한다", /formatDistance\(turn\.aheadMeters\)/.test(drv));
+  ok("판이 돌아도 패널은 세운다", /transform: counterRot \? `rotate\(\$\{counterRot\}deg\)`[\s\S]{0,600}navturnring/.test(drv));
+  // 🔴 인라인 rotate 가 걸린 요소에 키프레임을 걸면 그 rotate 가 조용히 사라진다
+  ok("애니메이션은 패널이 아니라 뒤 고리에 건다",
+    /animation: "navturnring[\s\S]{0,40}pointerEvents/.test(drv));
+  ok("장난감 같던 방향별 흔들림 키프레임은 폐기됐다", (() => {
     const css = fs.readFileSync(path.join(__dirname, "..", "src", "styles", "tokens.css"), "utf8");
-    return ["left", "right", "up", "down", "spin"].every((m) => css.includes(`@keyframes navturn-${m}`));
+    return css.includes("@keyframes navturnring") &&
+      !["left", "right", "up", "down", "spin"].some((m) => css.includes(`@keyframes navturn-${m}`));
   })());
   ok("픽토그램은 SVG 로 그린다(큰 글리프는 폰트에 없으면 두부)", (() => {
     const ico = fs.readFileSync(path.join(__dirname, "..", "src", "components", "NavTurnIcon.js"), "utf8");
