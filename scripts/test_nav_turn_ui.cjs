@@ -19,7 +19,7 @@ function loadModule(relPath) {
   return ctx;
 }
 const M = loadModule("src/lib/navGuide.js");
-const { turnGlyph, rotateDragDelta, trafficLabel, speedKmh } = M;
+const { turnGlyph, turnIconKind, rotateDragDelta, trafficLabel, speedKmh } = M;
 
 let pass = 0, fail = 0;
 const ok = (n, c, x) => { if (c) { pass++; console.log(`  ✅ ${n}`); } else { fail++; console.log(`  ❌ ${n}${x !== undefined ? ` — ${JSON.stringify(x)}` : ""}`); } };
@@ -72,6 +72,64 @@ console.log("\n[3-b] 실측 type 표에서 나온 안내 문구들(2026-08-06)")
   eq("왼쪽 직진(type 82)", turnGlyph("의왕 방면으로 왼쪽 직진"), "↖");
   eq("오른쪽 직진(type 83)", turnGlyph("과천 안양 방면으로 오른쪽 직진"), "↗");
   eq("고속도로 출구는 좌우 문구를 따른다", turnGlyph("오창 방면으로 오른쪽에 고속도로 출구"), "↗");
+}
+
+console.log("\n[3-e] 🔴 지명에 도로 이름이 섞인 문구 — 동작 부분만 본다(2026-08-06 prod 실측 결함)");
+{
+  const { guidanceAction } = M;
+  // prod 실호출에서 실제로 나온 문구. 동작은 '왼쪽 출구'인데 지명이 '매헌지하차도' 다.
+  const g = "매헌지하차도 수서IC 방면으로 왼쪽에 도시고속도로 출구";
+  eq("동작만 떼어낸다", guidanceAction(g), "왼쪽에 도시고속도로 출구");
+  eq("🔴 지하차도로 오판하지 않는다(글리프)", turnGlyph(g), "↖");
+  eq("🔴 지하차도로 오판하지 않는다(픽토그램)", turnIconKind(g).kind, "slight-left");
+  // 정상 케이스는 그대로여야 한다
+  eq("방면으로 뒤가 진짜 지하차도면 그대로", turnIconKind("북수원IC 수원 방면으로 지하차도 진입").kind, "underpass-enter");
+  eq("방면으로 가 없는 짧은 문구", guidanceAction("지하차도 진입"), "지하차도 진입");
+  eq("빈 문구", guidanceAction(""), "");
+  eq("여러 번 나오면 마지막 기준", guidanceAction("가 방면으로 나 방면으로 우회전"), "우회전");
+  // 🔴 배너 글리프와 큰 그림이 **같은 전처리**를 타야 한다
+  ["매헌지하차도 수서IC 방면으로 왼쪽에 도시고속도로 출구", "판교고가도로 방면으로 우회전"]
+    .forEach((s) => ok(`글리프↔픽토그램 일치: ${s.slice(0, 18)}…`,
+      (turnGlyph(s) === "↖" && turnIconKind(s).kind === "slight-left") ||
+      (turnGlyph(s) === "↱" && turnIconKind(s).kind === "right")));
+}
+
+console.log("\n[3-d] 픽토그램 종류 — 진입/옆길 구분(2026-08-06 way \"아이콘 모양과 화살표 조합\")");
+{
+  const k = (g) => { const r = turnIconKind(g); return r ? r.kind : null; };
+  const m = (g) => { const r = turnIconKind(g); return r ? r.motion : null; };
+  // 🔴 이 둘은 운전자가 할 행동이 정반대다 — 같은 그림으로 뭉뚱그리면 안 된다
+  eq("지하차도 진입", k("북수원IC 수원 방면으로 지하차도 진입"), "underpass-enter");
+  eq("지하차도 옆길", k("반포(우면산터널) 양재IC 방면으로 지하차도 옆길"), "underpass-side");
+  ok("지하차도 진입과 옆길이 다른 그림", k("지하차도 진입") !== k("지하차도 옆길"));
+  eq("고가도로 진입", k("신갈동 시청 방면으로 고가도로 진입"), "overpass-enter");
+  eq("고가도로 옆길", k("과천 안양 방면으로 고가도로 옆길"), "overpass-side");
+  ok("고가도로 진입과 옆길이 다른 그림", k("고가도로 진입") !== k("고가도로 옆길"));
+  // 🔴 지하/고가는 전부 전진(up) — 좌우로 흔들면 옆길이 우회전으로 읽힌다.
+  //    (카카오가 옆길 좌우를 안 주므로 애니메이션으로 방향을 지어내면 안 된다)
+  ["지하차도 진입", "지하차도 옆길", "고가도로 진입", "고가도로 옆길"].forEach((g) =>
+    eq(`${g} 은 좌우를 주장하지 않는다`, m(g), "up"));
+  // 회전
+  eq("좌회전", k("백운호수 성남 서판교 방면으로 좌회전"), "left");
+  eq("우회전", k("북의왕IC 방면으로 우회전"), "right");
+  eq("좌회전은 왼쪽으로 움직인다", m("좌회전"), "left");
+  eq("우회전은 오른쪽으로 움직인다", m("우회전"), "right");
+  eq("유턴", k("선바위역 서울 방면으로 유턴"), "uturn");
+  eq("왼쪽 직진", k("의왕 방면으로 왼쪽 직진"), "slight-left");
+  eq("오른쪽 직진", k("과천 안양 방면으로 오른쪽 직진"), "slight-right");
+  eq("톨게이트", k("톨게이트 진입"), "toll");
+  eq("목적지", k("목적지"), "goal");
+  // 🔴 turnGlyph 와 같은 원칙 — 모르면 안 그린다
+  eq("빈 문구", turnIconKind(""), null);
+  eq("null 입력", turnIconKind(null), null);
+  eq("방향을 못 정하는 안내", turnIconKind("정보 없음"), null);
+  // 🔴 지하/고가 판정이 "방면" 같은 회전 단어보다 앞서야 한다(문구에 둘 다 섞여 있다)
+  eq("'방면으로 지하차도 진입' 이 좌우 회전으로 새지 않는다",
+    k("서울 오른쪽 방면으로 지하차도 진입"), "underpass-enter");
+  // 배너 글리프와 종류가 같은 문구에서 나온다 = 둘이 어긋날 수 없다
+  ok("글리프가 있는 안내는 종류도 있다",
+    ["좌회전", "우회전", "유턴", "지하차도 진입", "고가도로 옆길", "톨게이트 진입", "목적지"]
+      .every((g) => !!turnGlyph(g) === !!turnIconKind(g)));
 }
 
 console.log("\n[3-c] 속도·교통 표시");
@@ -156,10 +214,31 @@ console.log("\n[8] 회귀 가드 — 소스 단언");
   // 판정은 원본이어야 "몇 m 앞 회전"이 늦지 않는다
   ok("회전 안내 판정은 원본 좌표로", /nextNaviGuide\(\{ guides: navi\.guides, path, pos \}\)/.test(drv));
 
-  // 2026-08-06 속도 표시 — 지도 위쪽(배너 자리)에 두면 다시 글씨를 가린다
+  // 2026-08-06 속도 표시 — 처음엔 지도 위 왼쪽 아래 칩이었으나 시점 버튼줄·카카오 로고·
+  // 아래 운행/종료 메뉴와 한 띠에서 겹쳤다(way "잘 보이도록 하되 어떤 메뉴도 가리지 않도록").
+  // 🔴 새 불변식 = 속도는 **지도 오버레이가 아니라 지도 밖 고정 줄**에 있다.
   ok("속도 칩이 배선돼 있다", /const myKmh = speedKmh\(mySpeed\)/.test(drv) && /roadTraffic/.test(drv));
-  ok("속도 칩은 지도 왼쪽 아래(배너 자리 침범 금지)", /속도 — 왼쪽 아래[\s\S]{0,400}left: 10, bottom: 40/.test(drv));
+  ok("속도가 지도 아래 고정 줄에 있다", /지도 아래 한 줄 — 속도[\s\S]{0,900}\{myKmh !== null && \(/.test(drv));
+  ok("속도를 지도 위 떠 있는 칩으로 되돌리지 않았다", !/position: "absolute"[^}]*bottom: 40/.test(drv));
   ok("모르는 속도를 0 으로 지어내지 않는다", /myKmh !== null/.test(drv));
+
+  // 2026-08-06 대형 회전 픽토그램 — way "지도 위에 엄청 크게 잘 보이게 · 애니메이션으로"
+  ok("대형 픽토그램이 배선돼 있다", /turnIconKind\(turn\.guide\.guidance\)/.test(drv) && /<NavTurnIcon/.test(drv));
+  // 🔴 배너와 같은 문구에서 종류를 뽑아야 그림과 글자가 어긋나지 않는다(2026-08-05 가드의 확장)
+  ok("픽토그램 종류를 문구에서 뽑는다(리터럴 하드코딩 아님)",
+    /const turnIcon = turn \? turnIconKind\(turn\.guide\.guidance\) : null/.test(drv));
+  ok("가까워지면 진하게 — 거리 필드는 aheadMeters", /turn\.aheadMeters <= NAV_TURN_NEAR_M/.test(drv));
+  // 🔴 키프레임이 transform 을 애니메이션하므로 그 요소에 인라인 transform 을 쓰면 조용히 사라진다
+  ok("대형 픽토그램 래퍼에 인라인 transform 없음",
+    !/animation: `navturn-[\s\S]{0,200}transform:/.test(drv));
+  ok("애니메이션 키프레임 5종이 tokens.css 에 있다", (() => {
+    const css = fs.readFileSync(path.join(__dirname, "..", "src", "styles", "tokens.css"), "utf8");
+    return ["left", "right", "up", "down", "spin"].every((m) => css.includes(`@keyframes navturn-${m}`));
+  })());
+  ok("픽토그램은 SVG 로 그린다(큰 글리프는 폰트에 없으면 두부)", (() => {
+    const ico = fs.readFileSync(path.join(__dirname, "..", "src", "components", "NavTurnIcon.js"), "utf8");
+    return /<svg/.test(ico) && /glyph/.test(ico); // 모르는 종류는 글리프 폴백
+  })());
   const fn = fs.readFileSync(path.join(__dirname, "..", "functions", "index.js"), "utf8");
   ok("CF 가 path 와 같은 길이로 speeds/states 를 채운다", /speeds\.push\(/.test(fn) && /states\.push\(/.test(fn));
   ok("CF 응답에 speeds/states 가 실려 나간다", /speeds: cand\.speeds \|\| \[\]/.test(fn));

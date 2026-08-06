@@ -156,6 +156,33 @@ html, body { font-family: var(--font-base); color: var(--color-label); -webkit-f
   50%      { transform: translateY(-4px); }
 }
 
+/* 길안내 대형 회전 픽토그램(DriverApp 길안내 탭, 2026-08-06 way "지도 위에 엄청 크게 · 애니메이션").
+   🔴 방향마다 다른 키프레임을 쓰는 이유 — 운전 중엔 그림이 "어느 쪽으로 움직이는가"가
+      글자보다 먼저 읽힌다. 좌회전 안내가 오른쪽으로 흔들리면 그 자체가 틀린 신호다.
+   🔴 이 요소에는 인라인 transform 을 쓰지 말 것 — 키프레임이 transform 을 건드리면
+      정적 선언이 에러 없이 사라진다(2026-08-04 진척바 결함과 같은 클래스). 위치 보정은
+      바깥 래퍼나 left/top 으로. */
+@keyframes navturn-left {
+  0%, 100% { transform: translateX(0);     opacity: .95; }
+  50%      { transform: translateX(-10px); opacity: 1;   }
+}
+@keyframes navturn-right {
+  0%, 100% { transform: translateX(0);    opacity: .95; }
+  50%      { transform: translateX(10px); opacity: 1;   }
+}
+@keyframes navturn-up {
+  0%, 100% { transform: translateY(0);     opacity: .95; }
+  50%      { transform: translateY(-10px); opacity: 1;   }
+}
+@keyframes navturn-down {
+  0%, 100% { transform: translateY(0);    opacity: .95; }
+  50%      { transform: translateY(10px); opacity: 1;   }
+}
+@keyframes navturn-spin {
+  0%, 100% { transform: rotate(0deg);  opacity: .95; }
+  50%      { transform: rotate(-12deg); opacity: 1;  }
+}
+
 /* Type utility */
 .t-display-1 { font: var(--type-display-1-weight) var(--type-display-1-size)/var(--type-display-1-line) var(--font-base); letter-spacing: var(--type-display-1-track); }
 .t-display-2 { font: var(--type-display-2-weight) var(--type-display-2-size)/var(--type-display-2-line) var(--font-base); letter-spacing: var(--type-display-2-track); }

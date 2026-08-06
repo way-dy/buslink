@@ -336,8 +336,24 @@ export function kakaoMapDirectionsUrl(stop) {
  * 🔴 그래도 판정은 문구 우선이다. 예전 코드에 `type === 4` 를 유턴으로 둔 자리가 있었는데
  *    **카카오 유턴은 3 이다** — 숫자표를 짐작으로 박으면 이렇게 조용히 틀린다.
  *    (문구가 항상 "유턴"을 담고 있어 화면에는 안 드러났다.) */
-export function turnGlyph(guidance) {
+/**
+ * 안내 문구에서 **동작 부분만** 떼어낸다 — 2026-08-06 실측으로 드러난 결함.
+ *
+ * 카카오 문구는 `<지명들> 방면으로 <동작>` 꼴인데, 앞의 **지명에 도로 종류가 섞여 있다**:
+ *   `매헌지하차도 수서IC 방면으로 왼쪽에 도시고속도로 출구`
+ * 문자열 전체에서 `지하차도` 를 찾으면 이 안내가 **지하차도 진입**으로 둔갑한다
+ * (실제 동작은 "왼쪽 출구"). prod 실호출에서 실제로 그렇게 나왔다.
+ *
+ * 🔴 판정은 반드시 이 함수를 거친 뒤에 한다. 지명은 우리가 통제할 수 없는 자유 문자열이다.
+ */
+export function guidanceAction(guidance) {
   const t = String(guidance || "").trim();
+  const i = t.lastIndexOf("방면으로");
+  return i >= 0 ? t.slice(i + "방면으로".length).trim() : t;
+}
+
+export function turnGlyph(guidance) {
+  const t = guidanceAction(guidance);
   if (/유턴|U턴/i.test(t)) return "⤶";
   if (/지하차도/.test(t)) return "⤓";           // 진입·옆길 모두 — 좌우는 카카오가 안 준다
   if (/고가도로/.test(t)) return "⤒";
@@ -349,6 +365,44 @@ export function turnGlyph(guidance) {
   if (/직진|(^|\s)12시\s*방향/.test(t)) return "↑";
   if (/목적지|도착/.test(t)) return "⚑";
   return null;                                  // 방향이 안 정해지는 안내 — 틀린 화살표보다 없는 게 낫다
+}
+
+/**
+ * 회전 안내 **픽토그램 종류** — 2026-08-06 way "지도 위에 엄청 크게 · 애니메이션으로",
+ * "지하차도 옆길/진입은 아이콘 모양과 화살표 조합으로 가능?".
+ *
+ * `turnGlyph` 와 **같은 문구(guidance)에서** 뽑는다 — 둘이 어긋나는 일 자체를 막는
+ * 2026-08-05 가드를 그대로 유지한다. 글리프는 폰트에 없으면 두부(□)가 되고 크게 키울수록
+ * 티가 나므로, 큰 표시는 문자 대신 **직접 그린 SVG**를 쓴다(`components/NavTurnIcon.js`).
+ *
+ * 🔴 **진입과 옆길은 문구로 갈린다**("지하차도 진입" vs "지하차도 옆길") — 이 둘은 운전자가
+ *    해야 할 행동이 정반대(본선으로 들어간다 / 본선을 비껴 옆으로 빠진다)라 반드시 구분한다.
+ * 🔴 다만 **옆길의 좌우는 카카오가 주지 않는다**(2026-08-06 응답 전 키 확인). 그러니 옆길
+ *    아이콘은 "본선을 비껴간다"까지만 그리고 좌우를 지어내지 않는다.
+ *
+ * @returns {{kind:string, motion:string}|null} kind=픽토그램 종류, motion=애니메이션 방향.
+ *          모르는 안내는 null(틀린 그림보다 없는 게 낫다 — turnGlyph 와 같은 원칙).
+ */
+export function turnIconKind(guidance) {
+  // 🔴 `turnGlyph` 와 **같은 전처리**를 태운다 — 한쪽만 지명을 걷어내면 배너 화살표와
+  //    큰 그림이 서로 다른 것을 가리킨다(2026-08-05 가드가 막으려던 바로 그 상태).
+  const t = guidanceAction(guidance);
+  if (!t) return null;
+  if (/유턴|U턴/i.test(t)) return { kind: "uturn", motion: "spin" };
+  // 지하·고가는 회전 문구보다 먼저 본다("… 방면으로 지하차도 진입" 안에 방면 단어가 섞인다)
+  // 🔴 지하·고가는 전부 **전진(up)** 으로 움직인다 — 그림이 이미 "막대 아래로 지나는가/위로
+  //    지나는가"로 종류를 말하고 있고, 여기서 좌우로 흔들면 옆길을 **우회전으로 오해**하게 만든다.
+  //    (카카오는 옆길의 좌우를 주지 않는다 — 모르는 방향을 애니메이션으로 지어내지 않는다.)
+  if (/지하차도/.test(t)) return { kind: /옆길/.test(t) ? "underpass-side" : "underpass-enter", motion: "up" };
+  if (/고가도로/.test(t)) return { kind: /옆길/.test(t) ? "overpass-side" : "overpass-enter", motion: "up" };
+  if (/톨게이트|하이패스/.test(t)) return { kind: "toll", motion: "up" };
+  if (/좌회전/.test(t)) return { kind: "left", motion: "left" };
+  if (/우회전/.test(t)) return { kind: "right", motion: "right" };
+  if (/왼쪽|좌측/.test(t)) return { kind: "slight-left", motion: "left" };
+  if (/오른쪽|우측/.test(t)) return { kind: "slight-right", motion: "right" };
+  if (/직진|(^|\s)12시\s*방향/.test(t)) return { kind: "straight", motion: "up" };
+  if (/목적지|도착/.test(t)) return { kind: "goal", motion: "up" };
+  return null;
 }
 
 /** 교통 상태 코드 → 짧은 라벨·색. 카카오 `traffic_state`(도로 단위).
