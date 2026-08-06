@@ -29,7 +29,9 @@ import { applyAppManifest } from "../lib/pwaManifest";
 import PermissionGate from "../components/PermissionGate";
 import { resolveCompanyIdForAnon } from "../lib/companyResolver";
 // 거래처 브랜딩(2026-07-16 회의 #5) — 메인 컬러 CSS 변수 + 헤더 로고. 미설정=기본 테마.
-import { applyPartnerBranding, clearPartnerBranding, fetchPartnerBranding, logoHeightOf } from "../lib/partnerBranding";
+import { applyPartnerBranding, clearPartnerBranding, fetchPartnerCodeData, logoHeightOf } from "../lib/partnerBranding";
+// 문의 게시판(2026-08-06 미팅) — dycs CS 위젯 연동. 거래처별 opt-in.
+import { resolveInquiryConfig, buildInquiryUrl } from "../lib/inquiry";
 import { useExitConfirm } from "../lib/useExitConfirm";
 
 // ── 경로 진행 판정 임계값 (작업2, 2026-05-18) ──
@@ -238,6 +240,17 @@ const TABS = [
   { id: "settings", icon: "settings", label: "설정" },
 ];
 
+// 문의 탭(2026-08-06 오전 미팅) — **거래처별 opt-in**이라 기본 탭 목록에 넣지 않는다.
+// 설정 앞에 끼워 넣는다(설정은 늘 맨 끝이 관례).
+const INQUIRY_TAB = { id: "inquiry", icon: "chat", label: "문의" };
+
+function visibleTabsFor(inquiryOn) {
+  if (!inquiryOn) return TABS;
+  const at = TABS.findIndex(t => t.id === "settings");
+  const i = at < 0 ? TABS.length : at;
+  return [...TABS.slice(0, i), INQUIRY_TAB, ...TABS.slice(i)];
+}
+
 // ════════════════════════════════════════════════════════
 export default function EmployeeApp() {
   // Phase 1.1 (2026-05-28): URL param > hostname 매핑 > dy001.
@@ -368,19 +381,32 @@ export default function EmployeeApp() {
     return () => unsubFn();
   }, [session?.empNo, session?.companyId, session?.partnerCode]);
 
-  // ── 거래처 브랜딩(2026-07-16 회의 #5) — 로그인 직원의 partnerCode 로 컬러·로고 적용 ──
+  // ── 거래처 표시 옵션 — 로그인 승객의 partnerCode 문서 1회 조회 ──
+  //   브랜딩(2026-07-16 회의 #5) + 문의 게시판(2026-08-06 미팅)이 같은 문서에서 나오므로
+  //   읽기는 한 번(`fetchPartnerCodeData`)만 하고 각 헬퍼가 필요한 필드만 뽑는다.
   const [branding, setBranding] = useState(null);
+  const [inquiry, setInquiry] = useState(null); // {enabled,tenantId,token} | null(=미조회/거래처 없음)
   useEffect(() => {
     let cancelled = false;
     const pc = session?.partnerCode;
-    if (!pc) { clearPartnerBranding(); setBranding(null); return; }
-    fetchPartnerBranding(pc).then(b => {
+    if (!pc) { clearPartnerBranding(); setBranding(null); setInquiry(null); return; }
+    fetchPartnerCodeData(pc).then(d => {
       if (cancelled) return;
+      const b = d ? (d.branding || null) : null;
       setBranding(b);
       applyPartnerBranding(b);
+      setInquiry(resolveInquiryConfig(d)); // 부재·모르는 값 = 꺼짐(회귀 0)
     });
     return () => { cancelled = true; clearPartnerBranding(); };
   }, [session?.partnerCode]);
+
+  // 문의 탭은 켠 거래처에만 보인다. 켜 둔 상태에서 관리자가 끄면(재접속 시) 홈으로 되돌린다
+  // — 안 그러면 빈 탭에 갇힌다(탭 목록에서는 이미 사라진 뒤라 돌아올 버튼이 없다).
+  const inquiryOn = !!(inquiry && inquiry.enabled);
+  const visibleTabs = useMemo(() => visibleTabsFor(inquiryOn), [inquiryOn]);
+  useEffect(() => {
+    if (tab === "inquiry" && !inquiryOn) setTab("home");
+  }, [tab, inquiryOn]);
 
   if (!ready) return (
     <div style={S.fullCenter}>
@@ -449,11 +475,12 @@ export default function EmployeeApp() {
         {tab === "routes"   && <RoutesTab companyId={companyId} session={session} onSessionUpdate={(s) => { saveSession({...session,...s}); setSession(p=>({...p,...s})); }} />}
         {tab === "notices"  && <NoticesTab notices={notices} unreadCount={unreadCount} />}
         {tab === "scan"     && <ScanTab companyId={companyId} session={session} />}
+        {tab === "inquiry"  && <InquiryTab config={inquiry} partnerName={session?.partnerName || null} />}
         {tab === "settings" && <SettingsTab companyId={companyId} session={session} onLogout={handleLogout} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />}
       </div>
 
       <div style={S.tabBar}>
-        {TABS.map(t => (
+        {visibleTabs.map(t => (
           <button key={t.id}
             onClick={() => { setTab(t.id); if (t.id === "notices") markNoticesRead(); }}
             style={{ ...S.tabBtn, color: tab === t.id ? "var(--color-primary)" : "var(--color-label-mute)" }}>
@@ -2847,6 +2874,86 @@ function ScanTabDriverQR({ companyId, session }) {
           </>
         )}
 
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
+// 문의 탭 — dycs CS 위젯 임베드 (2026-08-06 오전 미팅)
+// ════════════════════════════════════════════════════════
+// 🔴 **앱 안 임베드**(iframe)가 정본 — 새 창으로 넘기면 설치형 PWA 가 시스템 브라우저로
+//    빠져나가 돌아오기가 번거롭고, 그 순간 앱은 기사 GPS·공지 수신 상태를 잃는다.
+//    dycs 위젯은 X-Frame-Options/CSP frame-ancestors 를 안 보낸다(2026-08-06 실측).
+// 🔴 그래도 **탈출구는 항상 둔다** — 임베드가 막히거나(회사 보안 프록시) 느릴 때
+//    "새 창에서 열기"가 없으면 승객은 빈 화면만 보고 문의를 포기한다.
+function InquiryTab({ config, partnerName }) {
+  const url = useMemo(() => buildInquiryUrl(config), [config]);
+  const [loaded, setLoaded] = useState(false);
+  const [slow, setSlow] = useState(false);
+
+  // 6초 안에 안 뜨면 탈출구를 눈에 띄게 승격(진입 게이트엔 상한과 탈출구).
+  useEffect(() => {
+    if (loaded) return;
+    const t = setTimeout(() => setSlow(true), 6000);
+    return () => clearTimeout(t);
+  }, [loaded]);
+
+  // 설정이 없는데 탭이 보이는 경우는 없지만(부모가 enabled 로 게이팅), 방어적으로 안내.
+  if (!url) return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: 24 }}>
+      <Icon name="chat" size={34} />
+      <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-label)" }}>문의 접수가 준비 중입니다</div>
+      <div style={{ fontSize: 12, color: "var(--color-label-mute)", textAlign: "center", lineHeight: 1.6 }}>
+        담당자에게 문의하세요
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 8, flexShrink: 0,
+        padding: "8px 12px", borderBottom: "1px solid var(--color-line)", background: "var(--color-bg)",
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "var(--color-label)" }}>문의 · 분실물 접수</div>
+          {partnerName && (
+            <div style={{ fontSize: 11, color: "var(--color-label-mute)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {partnerName}
+            </div>
+          )}
+        </div>
+        <a href={url} target="_blank" rel="noopener noreferrer"
+          style={{
+            flexShrink: 0, fontSize: 11, fontWeight: 700, textDecoration: "none",
+            padding: "6px 11px", borderRadius: 999,
+            border: `1px solid ${slow && !loaded ? "var(--color-primary)" : "var(--color-line)"}`,
+            background: slow && !loaded ? "var(--color-primary-soft)" : "transparent",
+            color: slow && !loaded ? "var(--color-primary-deep)" : "var(--color-label-mute)",
+          }}>
+          새 창에서 열기
+        </a>
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, position: "relative", background: "var(--color-bg-alt)" }}>
+        {!loaded && (
+          <div style={{
+            position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center", gap: 12,
+          }}>
+            <div style={S.spinner} />
+            <div style={{ fontSize: 12, color: "var(--color-label-mute)" }}>
+              {slow ? "연결이 느립니다 — 위 '새 창에서 열기'를 눌러보세요" : "문의 화면을 불러오는 중..."}
+            </div>
+          </div>
+        )}
+        <iframe
+          src={url}
+          title="문의 접수"
+          onLoad={() => setLoaded(true)}
+          style={{ width: "100%", height: "100%", border: "none", display: "block", background: "transparent" }}
+        />
       </div>
     </div>
   );

@@ -42,13 +42,21 @@ export function clearPartnerBranding() {
   BRAND_VARS.forEach((v) => root.style.removeProperty(v));
 }
 
-// partnerCodes/{code}.branding 조회(read 규칙 공개) — 실패/부재는 null(기본 테마).
-export async function fetchPartnerBranding(partnerCode) {
+// partnerCodes/{code} 원문 조회(read 규칙 공개) — 실패/부재는 null.
+// 브랜딩·문의 등 승객앱 표시 옵션이 **한 문서**에서 나오므로 읽기는 여기 한 번만 하고
+// 각 헬퍼가 필요한 필드만 뽑아 쓴다(옵션 하나 늘 때마다 getDoc 이 늘지 않게).
+export async function fetchPartnerCodeData(partnerCode) {
   if (!partnerCode) return null;
   try {
     const snap = await getDoc(doc(db, "partnerCodes", partnerCode));
-    return snap.exists() ? (snap.data().branding || null) : null;
+    return snap.exists() ? (snap.data() || null) : null;
   } catch (_) {
     return null;
   }
+}
+
+// partnerCodes/{code}.branding 조회 — 실패/부재는 null(기본 테마).
+export async function fetchPartnerBranding(partnerCode) {
+  const data = await fetchPartnerCodeData(partnerCode);
+  return data ? (data.branding || null) : null;
 }

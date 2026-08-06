@@ -39,6 +39,8 @@ import { PartnerFilter } from "../components/PartnerFilter";
 import { resolveAllowed, isAllAccess, partnerCodeAllowed, SEAT_MODES, SEAT_MODE_LABELS, seatReservationMode, canEnableSeatReservation } from "../lib/partnerAccess";
 // 포탈 설정 모달(협력사 브랜딩 검증·미리보기) — 2026-07-16 회의 #3·#5
 import { isValidHexColor, mixHex } from "../lib/partnerBranding";
+// 문의 게시판(2026-08-06 미팅) — 거래처별 dycs CS 위젯 매핑.
+import { resolveInquiryConfig, isValidTenantId, buildInquiryPreviewUrl } from "../lib/inquiry";
 import { normalizeWindowOpts, WINDOW_PRE_MIN_DEFAULT, WINDOW_POST_MIN_DEFAULT } from "../lib/routeWindow";
 // 탭 단위 에러 경계 — 자식 throw 시 흰 화면 방지 + 에러 메시지 가시화
 import { ErrorBoundary } from "../components/ErrorBoundary";
@@ -4520,6 +4522,10 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
   const [portalEditTarget, setPortalEditTarget] = useState(null); // partnerCodes doc | null
   const [pOps, setPOps] = useState(true);
   const [pSeat, setPSeat] = useState(SEAT_MODES.OFF);   // 좌석예약 모드(2026-07-30)
+  // 문의 게시판(2026-08-06 미팅) — 승객앱 하단 '문의' 탭 + dycs 거래처 매핑.
+  const [pInqOn, setPInqOn] = useState(false);
+  const [pInqTenant, setPInqTenant] = useState("");
+  const [pInqToken, setPInqToken] = useState("");
   const [pColor, setPColor] = useState("");        // "" = 기본 테마
   const [pLogo, setPLogo] = useState(null);         // data URI | null
   const [pLogoHeight, setPLogoHeight] = useState(28);
@@ -4596,6 +4602,12 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
     setPColor(isValidHexColor(b.primaryColor) ? b.primaryColor : "");
     setPLogo(b.logo || null);
     setPLogoHeight(Number(b.logoHeight) >= 20 && Number(b.logoHeight) <= 56 ? Number(b.logoHeight) : 28);
+    // 문의 설정은 **원문 그대로** 폼에 싣는다(정규화한 값만 보여주면 잘못 입력된 tenantId 를
+    // 관리자가 볼 수 없어 고칠 수가 없다). 유효성은 저장 시 판정.
+    const inq = (code.inquiry && typeof code.inquiry === "object") ? code.inquiry : {};
+    setPInqOn(inq.enabled === true);
+    setPInqTenant(typeof inq.tenantId === "string" ? inq.tenantId : "");
+    setPInqToken(typeof inq.token === "string" ? inq.token : "");
   };
 
   // 로고 파일 — 투명 PNG 보존 위해 재압축 없이 data URI 로 그대로 저장(200KB 제한·Firestore 1MB doc 여유).
@@ -4622,11 +4634,21 @@ ${chk.missing.slice(0,8).join(", ")}
 
 노선 관리에서 좌석수를 입력한 뒤 다시 시도하세요.`);
     }
+    // 🔴 거래처 ID 없이 문의를 켜면 승객에게 빈 위젯이 열린다 — 저장 단계에서 막는다.
+    const inqTenant = pInqTenant.trim();
+    if (pInqOn && !isValidTenantId(inqTenant)) {
+      return alert("문의 게시판을 켜려면 dycs 거래처 ID를 입력해야 합니다.\n\n영문·숫자·- _ 만 사용합니다 (예: snu, hanwha).\ndycs 상담원 콘솔 → 설정 → 거래처 관리에서 확인하세요.");
+    }
     setPLoading(true);
     try {
       await updateDoc(doc(db, "partnerCodes", portalEditTarget.id), {
         opsControlEnabled: pOps,
         seatReservation: pSeat,
+        inquiry: {
+          enabled: pInqOn,
+          tenantId: inqTenant || null,
+          token: pInqToken.trim() || null,
+        },
         branding: {
           primaryColor: pColor || null,
           logo: pLogo || null,
@@ -4734,6 +4756,12 @@ ${chk.missing.slice(0,8).join(", ")}
                       {c.boardingMode === "passenger-qr" && (
                         <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#FFF1E0", color: "#B95300", border: "1px solid #FFE0C2", fontWeight: 700 }}>
                           승객발행 QR
+                        </span>
+                      )}
+                      {/* 문의 게시판 배지 — 켠 거래처만(부재=꺼짐=기본이라 노이즈 회피). 2026-08-06 */}
+                      {resolveInquiryConfig(c).enabled && (
+                        <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#E9F0FF", color: "#1B4FD6", border: "1px solid #C9DAFF", fontWeight: 700 }}>
+                          💬 문의 {resolveInquiryConfig(c).tenantId}
                         </span>
                       )}
                     </div>
@@ -4919,6 +4947,31 @@ ${chk.missing.slice(0,8).join(", ")}
               </div>
             );
           })()}
+
+          {/* ── 문의 게시판 (2026-08-06 미팅) — 승객앱 하단 '문의' 탭 ── */}
+          <label style={{ ...S.label, marginTop: 12 }}>문의 게시판 (고객문의·분실물)</label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-label)", cursor: "pointer", marginBottom: 6 }}>
+            <input type="checkbox" checked={pInqOn} onChange={e => setPInqOn(e.target.checked)} />
+            승객 앱 하단에 '문의' 탭 표시
+          </label>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <input style={{ ...S.input, flex: "1 1 180px", marginBottom: 0 }} placeholder="dycs 거래처 ID (예: snu)"
+              value={pInqTenant} onChange={e => setPInqTenant(e.target.value.trim())} />
+            <input style={{ ...S.input, flex: "1 1 180px", marginBottom: 0 }} placeholder="임베드 토큰 (선택 — 미설정 거래처는 비움)"
+              value={pInqToken} onChange={e => setPInqToken(e.target.value.trim())} />
+            {/* 저장 전에 실제 위젯을 열어 거래처 ID 가 맞는지 눈으로 확인하는 통로.
+                (이름 자동 매칭을 안 하는 대신, 잘못 넣으면 바로 드러나게 한다.) */}
+            <button style={{ ...S.editBtn, padding: "8px 12px", fontSize: 11, opacity: isValidTenantId(pInqTenant) ? 1 : 0.45 }}
+              disabled={!isValidTenantId(pInqTenant)}
+              onClick={() => { const u = buildInquiryPreviewUrl(pInqTenant, pInqToken); if (u) window.open(u, "_blank", "noopener"); }}>
+              열어보기
+            </button>
+          </div>
+          <div style={{ marginTop: 6, background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#003A99", lineHeight: 1.6 }}>
+            ⓘ 켜면 승객 앱(설정 왼쪽)에 '문의' 탭이 생기고, 눌렀을 때 고객문의·분실물 접수 화면이 앱 안에서 열립니다.<br />
+            거래처 ID 는 <b>고객CS시스템(dycs)의 거래처 ID</b> 입니다 — 버스링크 업체코드와 다르며, 자동으로 이어지지 않습니다.
+            잘못 넣으면 다른 거래처로 문의가 접수되니 <b>열어보기</b>로 확인한 뒤 저장하세요.
+          </div>
 
           <label style={{ ...S.label, marginTop: 12 }}>메인 컬러 (선택 — 비우면 기본 테마)</label>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
