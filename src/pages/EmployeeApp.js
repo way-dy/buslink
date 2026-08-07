@@ -1165,7 +1165,9 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
         </div>
         {/* 현재 노선 + 노선 변경 진입점 (기준 노선 갱신) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-          <div style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 700, color: 'var(--color-label)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {/* 홈 상단이라 무제한으로 늘리면 지도가 밀린다 → **2줄까지** 보여주고 그 이상만 말줄임.
+              (실측 최대 44자는 2줄에 들어간다. 노선 탭·노선 변경 모달은 제한 없이 전부 표시.) */}
+          <div style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 700, color: 'var(--color-label)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'keep-all', lineHeight: 1.35 }}>
             {activeRoute ? activeRoute.name : '노선을 선택하세요'}
           </div>
           {/* #2 — 노선 새로고침: GPS 껐다 켜진 뒤 위치 미반영 시 수동 재구독·재연결 */}
@@ -1691,7 +1693,8 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
                           color: r.type === '출근' ? 'var(--color-primary-deep)' : '#B95300' }}>
                           {r.type || '노선'}
                         </span>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-label)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name || r.id}</span>
+                        {/* 노선을 고르는 화면이라 이름이 잘리면 안 된다(2026-08-07) */}
+                        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-label)', whiteSpace: 'normal', wordBreak: 'keep-all', lineHeight: 1.35 }}>{r.name || r.id}</span>
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--color-label-mute)', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         {r.departTime && <span>🕒 {r.departTime}</span>}
@@ -1968,8 +1971,10 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "9px 12px", borderRadius: "var(--radius-8)", background: "var(--color-primary-soft)", border: "1px solid var(--color-primary)" }}>
             <span style={{ fontSize: 15 }}>🏢</span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--color-primary-deep)" }}>선택된 거래처: {session.partnerName || myPartner}</div>
-              <div style={{ fontSize: 10, color: "var(--color-primary-deep)", opacity: 0.75 }}>해당 거래처 노선만 표시됩니다</div>
+              {/* 2026-08-07 배시현 개선요청 — 학교 고객에게 "거래처"가 어색하다.
+                  관리자·협력사 포탈은 이미 "협력사"라 표기가 오히려 맞춰진다. */}
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--color-primary-deep)" }}>선택된 협력사: {session.partnerName || myPartner}</div>
+              <div style={{ fontSize: 10, color: "var(--color-primary-deep)", opacity: 0.75 }}>해당 협력사 노선만 표시됩니다</div>
             </div>
           </div>
         )}
@@ -2014,7 +2019,11 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
                     </span>
                   )}
                 </div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-label)", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {/* 노선명 전체 표시(2026-08-07 배시현 개선요청) — 외국인 학부모용 영문 병기로
+                    이름이 길어져 한 줄 말줄임에 잘렸다. **글자 크기는 그대로 두고 줄바꿈**으로 푼다
+                    (prod 실측 최대 44자 → 2줄에 들어간다. 더보기 탭이 없어도 다 보인다).
+                    🔴 `wordBreak: keep-all` — 한국어를 낱말 중간에서 끊지 않는다. */}
+                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-label)", marginBottom: 4, whiteSpace: "normal", wordBreak: "keep-all", lineHeight: 1.35 }}>
                   {r.name}
                 </div>
                 <div style={{ fontSize: 12, color: "var(--color-label-mute)" }}>
@@ -2075,7 +2084,7 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize:15, fontWeight:800, color:"var(--color-label)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{stopModal.name}</div>
+                  <div style={{ fontSize:15, fontWeight:800, color:"var(--color-label)", whiteSpace:"normal", wordBreak:"keep-all", lineHeight:1.3 }}>{stopModal.name}</div>
                   <div style={{ fontSize:11, color:"var(--color-label-mute)" }}>출발 {stopModal.departTime}</div>
                 </div>
                 <button onClick={() => setStopModal(null)}

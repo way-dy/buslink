@@ -321,7 +321,7 @@ export default function PassengerApp() {
       {routeList.length > 6 && (
         <input
           style={S.routeSearch}
-          placeholder="노선명·거래처·구분 검색"
+          placeholder="노선명·협력사·구분 검색"
           value={routeQuery}
           onChange={e => setRouteQuery(e.target.value)}
         />
