@@ -261,6 +261,9 @@ export default function EmployeeApp() {
   const [session, setSession] = useState(null);   // { empNo, name, dept, routeId, pinHash }
   const [tab, setTab] = useState("home");
   const [activeNotice, setActiveNotice] = useState(null); // 공지 배너
+  // 공지 배너가 차지하는 실제 높이(px) — 아래 본문을 그만큼 내려 가려지지 않게 한다.
+  const noticeBarRef = useRef(null);
+  const [noticeBarH, setNoticeBarH] = useState(60);
   const [notices, setNotices] = useState([]);             // 공지함 목록(필터 후, 최신순)
   const [noticeReadAt, setNoticeReadAt] = useState(0);    // 마지막 공지함 진입 시각(ms)
 
@@ -400,6 +403,27 @@ export default function EmployeeApp() {
     return () => { cancelled = true; clearPartnerBranding(); };
   }, [session?.partnerCode]);
 
+  // 배너 높이 실측 — 공지가 바뀌거나(문구 길이 변동) 화면이 회전해도 따라간다.
+  useEffect(() => {
+    if (!activeNotice) return undefined;
+    const el = noticeBarRef.current;
+    if (!el) return undefined;
+    const measure = () => {
+      const h = Math.round(el.getBoundingClientRect().height);
+      if (h > 0) setNoticeBarH(h);
+    };
+    measure();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    if (ro) ro.observe(el);
+    window.addEventListener("resize", measure);
+    window.addEventListener("orientationchange", measure);
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("orientationchange", measure);
+    };
+  }, [activeNotice]);
+
   // 문의 탭은 켠 거래처에만 보인다. 켜 둔 상태에서 관리자가 끄면(재접속 시) 홈으로 되돌린다
   // — 안 그러면 빈 탭에 갇힌다(탭 목록에서는 이미 사라진 뒤라 돌아올 버튼이 없다).
   const inquiryOn = !!(inquiry && inquiry.enabled);
@@ -438,7 +462,7 @@ export default function EmployeeApp() {
       {forceNotice && <NoticeForceModal notice={forceNotice} onClose={markNoticesRead} />}
       {/* ── 공지 배너 — 본문 영역 탭 시 공지함으로 이동(읽음 처리) ── */}
       {activeNotice && (
-        <div style={{
+        <div ref={noticeBarRef} style={{
           position: "fixed", top: 0, left: 0, right: 0, zIndex: 999,
           background: activeNotice.type === "emergency" ? "var(--color-destructive)" : "var(--color-primary)",
           padding: "10px 14px",
@@ -447,10 +471,15 @@ export default function EmployeeApp() {
         }}>
           <div onClick={() => { setTab("notices"); markNoticesRead(); }}
             style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
-            <div style={{ fontSize: 12, fontWeight: 800, color: "#fff", marginBottom: 2 }}>
+            {/* 제목도 2줄까지만 — 영문 병기 공지는 제목만으로도 화면을 밀어낸다 */}
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#fff", marginBottom: 2,
+              display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "keep-all" }}>
               {activeNotice.type === "emergency" ? "🚨 긴급 공지" : "📢 공지"} · {activeNotice.title}
             </div>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,.88)", lineHeight: 1.4 }}>
+            {/* 본문 2줄 미리보기(2026-08-07 배시현 개선요청) — 전문은 탭해서 공지함에서 본다.
+                🔴 배너는 `position:fixed` 라 길어지면 아래 화면을 그대로 덮는다. */}
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,.88)", lineHeight: 1.4,
+              display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "keep-all" }}>
               {activeNotice.body}
             </div>
             <div style={{ fontSize: 10, color: "rgba(255,255,255,.7)", marginTop: 3, fontWeight: 600 }}>
@@ -465,7 +494,11 @@ export default function EmployeeApp() {
           </button>
         </div>
       )}
-      <div style={{ ...S.content, marginTop: activeNotice ? 60 : 0 }}>
+      {/* 🔴 배너 자리는 **실측**한다 — 예전엔 `60px` 고정이었는데 배너는 `position:fixed` 라
+          제목·본문이 길어지면 60px 을 넘겨 **아래 화면을 그대로 덮었다**(요청자가 신고한 그 증상).
+          줄 수를 2줄로 묶어도 글꼴·기기·언어에 따라 높이는 달라지므로 고정 px 로 되돌리지 말 것.
+          되먹임 없음 — 배너는 fixed 라 이 margin 이 배너 높이에 영향을 주지 않는다. */}
+      <div style={{ ...S.content, marginTop: activeNotice ? noticeBarH : 0 }}>
         {tab === "home"     && (
           <>
             <PermissionGate containerStyle={{ flexShrink: 0, padding: "8px 12px 0" }} />
