@@ -20,6 +20,33 @@ export function mixHex(hex, target, ratio) {
   return `#${c(r1, r2)}${c(g1, g2)}${c(b1, b2)}`;
 }
 
+// ── 브랜드 밴드 대비 계산 (2026-08-10) ─────────────────────────────
+// 홈 상단을 거래처 색으로 채우면 글자를 흰색으로 두는 게 보통이지만,
+// 🔴 **밝은 브랜드색(노랑·라임 등)에서는 흰 글씨가 안 읽힌다.** 거래처가 색을 자유
+// 입력하므로 흰색을 하드코딩하면 어느 고객사에서 반드시 깨진다 → 휘도로 정한다.
+// 순수 함수(DOM·Firebase 접근 0) — 렌더 중 안전하게 호출 가능.
+export function relativeLuminance(hex) {
+  if (!isValidHexColor(hex)) return 0;
+  const ch = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map((c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+}
+
+/** 홈 브랜드 밴드에 쓸 배경·전경색. branding 없으면 기본 테마(#003DCC). */
+export function brandBand(branding) {
+  const raw = branding && branding.primaryColor;
+  const base = isValidHexColor(raw) ? mixHex(raw.trim(), "#000000", 0.25) : "#003DCC";
+  // 0.45 = 흰 글씨가 편안한 경계(순수 노랑 #FFD400 의 deep 도 여기서 어두운 글씨로 떨어진다)
+  const dark = relativeLuminance(base) > 0.45;
+  return {
+    bg: base,
+    fg: dark ? "#0B1020" : "#ffffff",
+    fgMute: dark ? "rgba(11,16,32,.66)" : "rgba(255,255,255,.78)",
+    chipBg: dark ? "rgba(11,16,32,.10)" : "rgba(255,255,255,.16)",
+    chipLine: dark ? "rgba(11,16,32,.22)" : "rgba(255,255,255,.34)",
+  };
+}
+
 export function logoHeightOf(branding) {
   const h = Number(branding?.logoHeight);
   return isFinite(h) && h >= 20 && h <= 56 ? h : 28;

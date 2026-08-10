@@ -30,7 +30,7 @@ import PermissionGate from "../components/PermissionGate";
 import HelpSheet from "../components/HelpSheet";
 import { resolveCompanyIdForAnon } from "../lib/companyResolver";
 // 거래처 브랜딩(2026-07-16 회의 #5) — 메인 컬러 CSS 변수 + 헤더 로고. 미설정=기본 테마.
-import { applyPartnerBranding, clearPartnerBranding, fetchPartnerCodeData, logoHeightOf } from "../lib/partnerBranding";
+import { applyPartnerBranding, clearPartnerBranding, fetchPartnerCodeData, logoHeightOf, brandBand } from "../lib/partnerBranding";
 // 문의 게시판(2026-08-06 미팅) — dycs CS 위젯 연동. 거래처별 opt-in.
 import { resolveInquiryConfig, buildInquiryUrl } from "../lib/inquiry";
 import { useExitConfirm } from "../lib/useExitConfirm";
@@ -728,6 +728,8 @@ function FirstPinSetup({ companyId, session, onDone, onLogout }) {
 // 홈 탭 — 내 노선 버스 위치 + ETA
 // ════════════════════════════════════════════════════════
 function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
+  // 상단 브랜드 밴드 색 — 거래처 색에서 파생하고 글자색은 휘도로 정한다(순수 함수).
+  const band = brandBand(branding);
   const [routes, setRoutes]         = useState([]);
   const [activeRouteId, setActiveRouteId] = useState(session.routeId || null);
   const [stops, setStops]           = useState([]);
@@ -1199,52 +1201,66 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--color-bg-alt)' }}>
 
-      {/* ── 상단 헤더 ── */}
-      <div style={{ background: 'var(--color-bg)', padding: '10px 14px', flexShrink: 0, borderBottom: '1px solid var(--color-line)' }}>
-        {/* 거래처 로고(브랜딩·2026-07-16 회의 #5) — 관리자가 협력사 관리 > 포탈 설정에서 등록 */}
-        {branding?.logo && (
-          <img src={branding.logo} alt="" style={{ height: logoHeightOf(branding), maxWidth: 140, objectFit: 'contain', display: 'block', marginBottom: 6 }} />
-        )}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-label)' }}>
-            {session.name}
-            <span style={{ fontSize: 12, color: 'var(--color-label-mute)', fontWeight: 500, marginLeft: 6 }}>{session.dept}</span>
-          </div>
-          <div style={{ fontSize: 10, color: 'var(--color-label-alt)', textAlign: 'right' }}>
-            {lastUpdate && <>{timeSince(lastUpdate)} 갱신<br/></>}
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 2, color: buses.length > 0 ? 'var(--color-positive)' : 'var(--color-label-mute)', fontWeight: 600 }}>
-              <StatusDot tone={buses.length > 0 ? 'positive' : 'neutral'} size={7} pulse={buses.length > 0} />
-              {buses.length > 0 ? `${buses.length}대 운행중` : '운행 없음'}
-            </span>
-          </div>
+      {/* ── 상단 브랜드 밴드 (2026-08-10 리스킨) ──────────────────────────
+          예전엔 흰 배경에 로고·이름·노선명·상태·버튼이 **비슷한 크기로 흩어져** 있어
+          무엇을 먼저 볼지 안 읽혔다(way 고객 피드백 "조잡해 보인다").
+          거래처 색으로 밴드를 깔고 그 안에 **노선명 하나만 크게** 둔다.
+          🔴 로고는 흰 알약 안에 넣는다 — 거래처 로고 색을 우리가 통제할 수 없어
+             (채드윅=남색 글자) 밴드 위에 그냥 얹으면 어느 고객사에선 사라진다.
+          🔴 글자색은 하드코딩하지 않고 밴드 휘도로 정한다(`brandBand`) — 밝은 브랜드색
+             거래처에서 흰 글씨가 안 읽히는 사고 방지. */}
+      <div style={{ background: band.bg, padding: '12px 14px 13px', flexShrink: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, minHeight: 26 }}>
+          {branding?.logo ? (
+            <div style={{ background: '#fff', borderRadius: 'var(--radius-8)', padding: '4px 8px', display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
+              <img src={branding.logo} alt="" style={{ height: Math.min(logoHeightOf(branding), 24), maxWidth: 120, objectFit: 'contain', display: 'block' }} />
+            </div>
+          ) : (
+            <div style={{ fontSize: 13, fontWeight: 800, color: band.fg, letterSpacing: '-0.01em' }}>BusLink</div>
+          )}
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, padding: '4px 10px', borderRadius: 'var(--radius-pill)', background: band.chipBg, border: `1px solid ${band.chipLine}`, fontSize: 11, fontWeight: 700, color: band.fg }}>
+            <StatusDot tone={buses.length > 0 ? 'positive' : 'neutral'} size={7} pulse={buses.length > 0} />
+            {buses.length > 0 ? `${buses.length}대 운행중` : '운행 없음'}
+          </span>
         </div>
-        {/* 현재 노선 + 노선 변경 진입점 (기준 노선 갱신) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-          {/* 홈 상단이라 무제한으로 늘리면 지도가 밀린다 → **2줄까지** 보여주고 그 이상만 말줄임.
-              (실측 최대 44자는 2줄에 들어간다. 노선 탭·노선 변경 모달은 제한 없이 전부 표시.) */}
-          <div style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 700, color: 'var(--color-label)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'keep-all', lineHeight: 1.35 }}>
-            {activeRoute ? activeRoute.name : '노선을 선택하세요'}
-          </div>
+
+        {/* 이름 — 보조 정보라 작게 */}
+        <div style={{ fontSize: 12, fontWeight: 600, color: band.fgMute, marginTop: 11 }}>
+          {session.name}{session.dept ? ` · ${session.dept}` : ''}
+        </div>
+        {/* 현재 노선 — 이 화면의 주인공. 2줄까지(실측 최대 44자는 2줄에 들어간다). */}
+        <div style={{ fontSize: 17, fontWeight: 800, color: band.fg, marginTop: 2, letterSpacing: '-0.02em', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'keep-all', lineHeight: 1.3 }}>
+          {activeRoute ? activeRoute.name : '노선을 선택하세요'}
+        </div>
+
+        {/* 액션 — 같은 높이·같은 모서리·같은 톤으로 통일(예전엔 넷이 제각각이었다) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 11 }}>
+          <button onClick={() => { setRouteQuery(''); setRoutePicker(true); }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 32, padding: '0 13px', borderRadius: 'var(--radius-pill)', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700, background: '#fff', color: band.bg }}>
+            <Icon name="repeat" size={13} stroke={2.1} /> 노선 변경
+          </button>
           {/* #2 — 노선 새로고침: GPS 껐다 켜진 뒤 위치 미반영 시 수동 재구독·재연결 */}
           <button onClick={handleRefresh} disabled={refreshing}
-            style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 11px', borderRadius: 'var(--radius-pill)', border: '1px solid var(--color-line)', cursor: refreshing ? 'default' : 'pointer', fontFamily: 'inherit', fontSize: 11, fontWeight: 700, background: 'var(--color-bg-soft)', color: 'var(--color-label-mute)', opacity: refreshing ? 0.6 : 1 }}>
-            <span style={{ display: 'inline-block', animation: refreshing ? 'blspin 0.8s linear infinite' : 'none' }}>↻</span>
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 32, padding: '0 13px', borderRadius: 'var(--radius-pill)', border: `1px solid ${band.chipLine}`, cursor: refreshing ? 'default' : 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700, background: band.chipBg, color: band.fg, opacity: refreshing ? 0.6 : 1 }}>
+            <span style={{ display: 'inline-flex', animation: refreshing ? 'blspin 0.8s linear infinite' : 'none' }}><Icon name="refresh" size={13} stroke={2.1} /></span>
             {refreshing ? '새로고침 중' : '새로고침'}
           </button>
-          <button onClick={() => { setRouteQuery(''); setRoutePicker(true); }}
-            style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 13px', borderRadius: 'var(--radius-pill)', border: '1px solid var(--color-primary)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, fontWeight: 700, background: 'var(--color-primary-soft)', color: 'var(--color-primary-deep)' }}>
-            🔄 노선 변경
-          </button>
+          {lastUpdate && (
+            <span style={{ marginLeft: 'auto', fontSize: 10.5, color: band.fgMute, flexShrink: 0 }}>{timeSince(lastUpdate)} 갱신</span>
+          )}
         </div>
         {/* 노선 칩 (배정+즐겨찾기 복수일 때 — 빠른 전환, 영속 아님) */}
         {routes.length > 1 && (
           <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginTop: 8, paddingBottom: 2 }}>
             {routes.map(r => (
+              // 밴드 위에 얹히므로 토큰 색이 아니라 밴드 대비색을 쓴다(흰 배경 전제였던 값을
+              // 그대로 두면 컬러 밴드 위에서 대비가 무너진다).
               <button key={r.id} onClick={() => { setActiveRouteId(r.id); setMyStopIdx(null); }}
-                style={{ flexShrink: 0, padding: '4px 12px', borderRadius: 'var(--radius-pill)', border: `1px solid ${activeRouteId === r.id ? 'var(--color-primary)' : 'var(--color-line)'}`, cursor: 'pointer',
-                  fontFamily: 'inherit', fontSize: 11, fontWeight: 600,
-                  background: activeRouteId === r.id ? 'var(--color-primary)' : 'var(--color-bg-soft)',
-                  color: activeRouteId === r.id ? '#fff' : 'var(--color-label-mute)' }}>
+                style={{ flexShrink: 0, padding: '5px 12px', borderRadius: 'var(--radius-pill)', cursor: 'pointer',
+                  fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
+                  border: `1px solid ${activeRouteId === r.id ? 'transparent' : band.chipLine}`,
+                  background: activeRouteId === r.id ? '#fff' : band.chipBg,
+                  color: activeRouteId === r.id ? band.bg : band.fg }}>
                 {r.name.length > 14 ? r.name.substring(0,14)+'…' : r.name}
               </button>
             ))}
@@ -1423,7 +1439,7 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
             fontSize: 11, color: 'var(--color-primary)', fontWeight: 700, zIndex: 5, whiteSpace: 'nowrap',
             boxShadow: 'var(--shadow-float)'
           }}>
-            📍 아래 노선도에서 내 정류장을 클릭하세요
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon name="pin" size={13} stroke={2} /> 아래 노선도에서 내 정류장을 클릭하세요</span>
           </div>
         )}
       </div>
@@ -1725,7 +1741,7 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
                 </button>
               </div>
               {allRoutes.filter(r => !myPartner || (r.partnerCode || null) === myPartner).length > 6 && (
-                <input style={{ ...S.input, marginTop: 10 }} placeholder="🔍 노선명·구분·코드 검색"
+                <input style={{ ...S.input, marginTop: 10 }} placeholder="노선명·구분·코드 검색"
                   value={routeQuery} onChange={e => setRouteQuery(e.target.value)} />
               )}
             </div>
@@ -2060,7 +2076,7 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
         {/* 선택된 거래처 안내(#1 데이터 격리) — 자기 거래처 노선만 노출됨을 명시. 미설정 직원은 미표시(전체). */}
         {myPartner && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "9px 12px", borderRadius: "var(--radius-8)", background: "var(--color-primary-soft)", border: "1px solid var(--color-primary)" }}>
-            <span style={{ fontSize: 15 }}>🏢</span>
+            <span style={{ display: 'inline-flex', color: 'var(--color-primary-deep)' }}><Icon name="building" size={16} /></span>
             <div style={{ flex: 1, minWidth: 0 }}>
               {/* 2026-08-07 배시현 개선요청 — 학교 고객에게 "거래처"가 어색하다.
                   관리자·협력사 포탈은 이미 "협력사"라 표기가 오히려 맞춰진다. */}
@@ -2069,15 +2085,17 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
             </div>
           </div>
         )}
-        <input style={{ ...S.input, marginBottom: 10 }} placeholder="🔍 노선명·코드 검색"
+        <input style={{ ...S.input, marginBottom: 10 }} placeholder="노선명·코드 검색"
           value={search} onChange={e => setSearch(e.target.value)} />
         <div style={{ display: "flex", gap: 6, overflowX: "auto" }}>
           {FILTER_CHIPS.map(f => (
             <button key={f} onClick={() => setFilter(f)}
-              style={{ flexShrink: 0, padding: "5px 13px", borderRadius: "var(--radius-pill)", border: `1px solid ${filter === f ? "var(--color-primary)" : "var(--color-line)"}`, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
+              style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 5, height: 30, padding: "0 13px", borderRadius: "var(--radius-pill)", border: `1px solid ${filter === f ? "var(--color-primary)" : "var(--color-line)"}`, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
                 background: filter === f ? "var(--color-primary)" : "var(--color-bg-soft)",
                 color: filter === f ? "#fff" : "var(--color-label-mute)" }}>
-              {f === "즐겨찾기" ? `⭐ ${f}` : f === "운행중" ? `🟢 ${f}` : f}
+              {f === "즐겨찾기" && <Icon name="star" size={12} solid={filter === f} stroke={2} />}
+              {f === "운행중" && <StatusDot tone="positive" size={7} />}
+              {f}
               {f === "즐겨찾기" && favorites.length > 0 ? ` ${favorites.length}` : ""}
             </button>
           ))}
@@ -2085,12 +2103,12 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
 
         {/* 카드 ↔ 시간표 전환 (2026-08-10) */}
         <div style={{ display: "flex", gap: 6, marginTop: 10, background: "var(--color-bg-soft)", borderRadius: "var(--radius-8)", padding: 3 }}>
-          {[["cards", "🗂 카드"], ["time", "🕒 시간표"]].map(([v, label]) => (
+          {[["cards", "카드", "grid"], ["time", "시간표", "clock"]].map(([v, label, icon]) => (
             <button key={v} onClick={() => setListMode(v)}
-              style={{ flex: 1, padding: "7px 4px", border: "none", borderRadius: "var(--radius-6)", cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap",
+              style={{ flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "7px 4px", border: "none", borderRadius: "var(--radius-6)", cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap",
                 background: listMode === v ? "var(--color-primary)" : "transparent",
                 color: listMode === v ? "#fff" : "var(--color-label-mute)" }}>
-              {label}
+              <Icon name={icon} size={13} stroke={2} />{label}
             </button>
           ))}
         </div>
@@ -2146,20 +2164,18 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
           <div key={r.id} style={{ background: "var(--color-bg)", border: `1px solid ${favorites.includes(r.id) ? "var(--color-cautionary)" : "var(--color-line)"}`, borderRadius: "var(--radius-16)", padding: "14px 16px", marginBottom: 10, boxShadow: "var(--shadow-emphasize)" }}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
-                  {r.partnerName && (
-                    <span style={{ fontSize: 10, padding: "3px 9px", borderRadius: "var(--radius-pill)", background: "var(--color-bg-soft)", color: "var(--color-primary-deep)", fontWeight: 700, border: "1px solid var(--color-primary)" }}>
-                      {r.partnerName}
-                    </span>
-                  )}
-                  <span style={{ fontSize: 10, padding: "3px 9px", borderRadius: "var(--radius-pill)", background: r.type === "출근" ? "var(--color-primary-soft)" : "var(--color-atomic-orange-90)", color: r.type === "출근" ? "var(--color-primary-deep)" : "#B95300", fontWeight: 600 }}>
+                {/* 🔴 거래처 이름 칩을 뺐다(2026-08-10) — 이 화면은 이미 상단 배너에
+                    "선택된 협력사: OOO" 를 띄우고 그 거래처 노선만 보여준다. 카드마다
+                    같은 이름을 또 다는 건 중복이고, 칩이 늘어날수록 화면이 어수선해진다. */}
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 10.5, padding: "3px 9px", borderRadius: "var(--radius-pill)", background: r.type === "출근" ? "var(--color-primary-soft)" : "var(--color-atomic-orange-90)", color: r.type === "출근" ? "var(--color-primary-deep)" : "#B95300", fontWeight: 700 }}>
                     {r.type}
                   </span>
-                  {r.shift && <span style={{ fontSize: 10, color: "var(--color-label-mute)" }}>{r.shift}</span>}
-                  {r.code && <span style={{ fontSize: 10, color: "var(--color-label-mute)", fontFamily: "var(--font-mono)" }}>{r.code}</span>}
+                  {r.shift && <span style={{ fontSize: 10.5, color: "var(--color-label-mute)" }}>{r.shift}</span>}
+                  {r.code && <span style={{ fontSize: 10.5, color: "var(--color-label-alt)", fontFamily: "var(--font-mono)" }}>{r.code}</span>}
                   {gpsData[r.id] && (
-                    <span style={{ fontSize: 10, padding: "3px 9px", borderRadius: "var(--radius-pill)", background: "#E6F7EB", color: "#007A29", fontWeight: 600 }}>
-                      🟢 {gpsData[r.id]}대 운행중
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, padding: "3px 9px", borderRadius: "var(--radius-pill)", background: "#E6F7EB", color: "#007A29", fontWeight: 700 }}>
+                      <StatusDot tone="positive" size={6} pulse /> {gpsData[r.id]}대 운행중
                     </span>
                   )}
                 </div>
@@ -2175,9 +2191,10 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
                 </div>
               </div>
               {/* 즐겨찾기 버튼 */}
-              <button onClick={() => toggleFavorite(r.id)}
-                style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 22, padding: 4, flexShrink: 0 }}>
-                {favorites.includes(r.id) ? "⭐" : "☆"}
+              <button onClick={() => toggleFavorite(r.id)} aria-label="즐겨찾기"
+                style={{ background: "transparent", border: "none", cursor: "pointer", padding: 4, flexShrink: 0, display: "inline-flex",
+                  color: favorites.includes(r.id) ? "var(--color-cautionary)" : "var(--color-line-strong, #C7CDD8)" }}>
+                <Icon name="star" size={21} solid={favorites.includes(r.id)} stroke={1.9} />
               </button>
             </div>
             {/* 배정 노선 배지 + 정류장 보기 */}
@@ -2188,15 +2205,16 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
                 </div>
               ) : <div />}
               <div style={{ display:"flex", gap:4 }}>
+                {/* 두 버튼은 같은 높이·같은 모서리 — 예전엔 이모지 크기 때문에 서로 달라 보였다 */}
                 <button onClick={(e) => { e.stopPropagation(); setStopModal(r); setModalView("list"); }}
-                  style={{ fontSize: 11, color: "var(--color-label-mute)", background: "var(--color-bg-soft)", border: "1px solid var(--color-line)", borderRadius: "var(--radius-6)", padding: "4px 10px", cursor: "pointer", fontFamily: "inherit" }}>
-                  📍 정류장
+                  style={{ display: "inline-flex", alignItems: "center", gap: 4, height: 28, fontSize: 11.5, fontWeight: 600, color: "var(--color-label-mute)", background: "var(--color-bg-soft)", border: "1px solid var(--color-line)", borderRadius: "var(--radius-8)", padding: "0 11px", cursor: "pointer", fontFamily: "inherit" }}>
+                  <Icon name="pin" size={13} stroke={1.9} /> 정류장
                 </button>
                 <button onClick={(e) => { e.stopPropagation(); setStopModal(r); setModalView("map");
                     if (modalStops.length > 0) setModalCenter({ lat: modalStops[0].lat, lng: modalStops[0].lng });
                   }}
-                  style={{ fontSize: 11, color: gpsData[r.id] ? "#007A29" : "var(--color-label-mute)", background: gpsData[r.id] ? "#E6F7EB" : "var(--color-bg-soft)", border: gpsData[r.id] ? "1px solid rgba(0,191,64,.3)" : "1px solid var(--color-line)", borderRadius: "var(--radius-6)", padding: "4px 10px", cursor: "pointer", fontFamily: "inherit" }}>
-                  🗺 {gpsData[r.id] ? `${gpsData[r.id]}대 운행중` : "지도"}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 4, height: 28, fontSize: 11.5, fontWeight: 600, color: gpsData[r.id] ? "#007A29" : "var(--color-label-mute)", background: gpsData[r.id] ? "#E6F7EB" : "var(--color-bg-soft)", border: gpsData[r.id] ? "1px solid rgba(0,191,64,.3)" : "1px solid var(--color-line)", borderRadius: "var(--radius-8)", padding: "0 11px", cursor: "pointer", fontFamily: "inherit" }}>
+                  <Icon name="globe" size={13} stroke={1.9} /> {gpsData[r.id] ? `${gpsData[r.id]}대 운행중` : "지도"}
                 </button>
               </div>
             </div>
@@ -2936,7 +2954,9 @@ function ScanTabDriverQR({ companyId, session }) {
         {/* ── 준비 화면 ── */}
         {step === "ready" && (
           <>
-            <div style={{ width:90, height:90, borderRadius:"50%", background:"var(--color-primary-soft)", border:"2px solid var(--color-primary)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:40 }}>📷</div>
+            <div style={{ width:90, height:90, borderRadius:"50%", background:"var(--color-primary-soft)", display:"flex", alignItems:"center", justifyContent:"center", color:"var(--color-primary)" }}>
+              <Icon name="camera" size={40} stroke={1.6} />
+            </div>
             <div style={{ textAlign:"center" }}>
               <div style={{ fontSize:17, fontWeight:800, color:"var(--color-label)", marginBottom:6 }}>탑승 QR 스캔</div>
               <div style={{ fontSize:13, color:"var(--color-label-mute)", lineHeight:1.6 }}>
@@ -2944,7 +2964,7 @@ function ScanTabDriverQR({ companyId, session }) {
               </div>
             </div>
             <button style={{ ...S.btn, maxWidth:280 }} onClick={startScan}>
-              📷 카메라 열기
+              <span style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", gap:7 }}><Icon name="camera" size={17} stroke={2} /> 카메라 열기</span>
             </button>
           </>
         )}
