@@ -329,7 +329,7 @@ export default function PassengerApp() {
       <div style={S.routeListBox}>
         {filteredRoutes.length === 0 ? (
           <div style={S.emptyMsg}>
-            <div style={{ fontSize: 30, marginBottom: 6 }}>🚏</div>
+            <div style={{ marginBottom: 8, color: 'var(--color-line-strong, #C7CDD8)', display: 'flex', justifyContent: 'center' }}><Icon name="pin" size={30} stroke={1.5} /></div>
             <div style={{ fontWeight: 700, color: "var(--color-label)" }}>
               {routeList.length === 0 ? "등록된 노선이 없습니다" : "검색 결과가 없습니다"}
             </div>
@@ -353,7 +353,7 @@ export default function PassengerApp() {
                 <span style={S.routeItemName}>{r.name || r.id}</span>
               </div>
               <div style={S.routeItemMeta}>
-                {r.departTime && <span>🕒 {r.departTime}</span>}
+                {r.departTime && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon name="clock" size={11} stroke={2} />{r.departTime}</span>}
                 {r.partnerName && <span>· {r.partnerName}</span>}
                 {r.shift && <span>· {r.shift}</span>}
               </div>
@@ -535,7 +535,7 @@ export default function PassengerApp() {
                     display: "flex", alignItems: "center", gap: 8,
                     boxShadow: "0 6px 20px rgba(0,102,255,0.45)",
                   }}>
-                  <span style={{ fontSize: 22 }}>🚌</span>
+                  <span style={{ display: 'inline-flex', color: 'var(--color-primary)' }}><Icon name="bus" size={20} stroke={2} /></span>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 800, color: selected?.id === b.id ? "#fff" : "var(--color-label)" }}>{b.vehicleNo || b.id}</div>
                     <div style={{ fontSize: 11, fontWeight: 600, color: selected?.id === b.id ? "rgba(255,255,255,0.85)" : "var(--color-label-mute)" }}>{b.speed ?? 0} km/h</div>
@@ -659,7 +659,7 @@ export default function PassengerApp() {
             isDestStop ? (
               <div style={{ ...S.etaBig, alignItems: "center", flexDirection: "column", gap: 4 }}>
                 <span style={{ fontSize: 22, fontWeight: 800, color: myPassengerLabel.bucket === 'soon' || (smoothedMyEtaSec != null && smoothedMyEtaSec <= 300) ? "var(--color-destructive)" : "var(--color-primary)" }}>
-                  {myPassengerLabel.bucket === 'soon' ? '🏁 목적지 도착' : `목적지까지 ${myPassengerLabel.primary}`}
+                  {myPassengerLabel.bucket === 'soon' ? '목적지 도착' : `목적지까지 ${myPassengerLabel.primary}`}
                 </span>
                 <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-label-mute)" }}>
                   {myPassengerLabel.bucket === 'soon' ? "하차해 주세요" : "목적지로 이동 중"}
@@ -807,7 +807,7 @@ export default function PassengerApp() {
             </div>
             {buses.length === 0 ? (
               <div style={S.emptyMsg}>
-                <div style={{ fontSize: 34, marginBottom: 8 }}>🚌</div>
+                <div style={{ marginBottom: 10, color: 'var(--color-line-strong, #C7CDD8)', display: 'flex', justifyContent: 'center' }}><Icon name="bus" size={34} stroke={1.5} /></div>
                 <div style={{ fontWeight: 700, color: "var(--color-label)" }}>현재 운행 중인 버스가 없습니다</div>
                 <div style={{ fontSize: 12, color: "var(--color-label-mute)", marginTop: 4 }}>운행이 시작되면 자동으로 표시됩니다</div>
               </div>
@@ -818,7 +818,7 @@ export default function PassengerApp() {
                     style={{ ...S.busCard, border: selected?.id === b.id ? "1px solid var(--color-primary)" : "1px solid var(--color-line)" }}
                     onClick={() => { setSelected(b === selected ? null : b); if (b.lat && b.lng) setCenter({ lat: b.lat, lng: b.lng }); }}>
                     <div style={S.busCardTop}>
-                      <div style={S.busIcon}>🚌</div>
+                      <div style={{ ...S.busIcon, color: 'var(--color-primary)' }}><Icon name="bus" size={19} stroke={2} /></div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={S.busName}>{b.vehicleNo || b.id}</div>
                         <div style={S.busRoute}>{b.routeName || b.routeId || "노선 미지정"}</div>
@@ -855,7 +855,7 @@ export default function PassengerApp() {
               padding: "32px 24px 24px", width: "100%", maxWidth: 360,
               boxShadow: "var(--shadow-heavy)", textAlign: "center",
             }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>🚌</div>
+            <div style={{ marginBottom: 12, color: 'var(--color-line-strong, #C7CDD8)', display: 'flex', justifyContent: 'center' }}><Icon name="bus" size={46} stroke={1.4} /></div>
             <div style={{ fontSize: 22, fontWeight: 900, color: "var(--color-primary)", marginBottom: 8 }}>
               곧 도착합니다
             </div>

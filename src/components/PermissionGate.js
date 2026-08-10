@@ -120,7 +120,7 @@ export default function PermissionGate({ containerStyle }) {
               maxHeight: "85vh", overflowY: "auto", boxShadow: "var(--shadow-heavy)",
             }}>
             <h3 style={{ margin: "0 0 6px", fontSize: 16, fontWeight: 800, color: "var(--color-label)" }}>
-              🔒 권한 허용 방법
+              권한 허용 방법
             </h3>
             <p style={{ margin: "0 0 14px", fontSize: 12, color: "var(--color-label-mute)", lineHeight: 1.5 }}>
               이전에 권한을 차단하셨거나, 브라우저가 자동으로 차단했습니다.<br />
@@ -128,17 +128,17 @@ export default function PermissionGate({ containerStyle }) {
             </p>
 
             <h4 style={{ margin: "0 0 6px", fontSize: 13, fontWeight: 700, color: "var(--color-primary-deep)" }}>
-              🤖 안드로이드 (Chrome / 삼성 인터넷)
+              안드로이드 (Chrome / 삼성 인터넷)
             </h4>
             <ol style={{ margin: "0 0 14px", paddingLeft: 18, fontSize: 12, color: "var(--color-label)", lineHeight: 1.7 }}>
-              <li>주소창 좌측 <b>🔒 자물쇠</b> 또는 <b>ⓘ</b> 아이콘 탭</li>
+              <li>주소창 좌측 <b>자물쇠</b> 또는 <b>ⓘ</b> 아이콘 탭</li>
               <li><b>권한</b> → <b>알림 / 위치</b> 항목을 <b>허용</b>으로 변경</li>
               <li>또는 <b>설정 → 앱 → Chrome → 권한</b>에서 변경</li>
               <li>변경 후 이 화면 새로고침</li>
             </ol>
 
             <h4 style={{ margin: "0 0 6px", fontSize: 13, fontWeight: 700, color: "var(--color-primary-deep)" }}>
-              🍎 아이폰 (Safari)
+              아이폰 (Safari)
             </h4>
             <ol style={{ margin: "0 0 16px", paddingLeft: 18, fontSize: 12, color: "var(--color-label)", lineHeight: 1.7 }}>
               <li><b>설정 앱</b> → <b>Safari</b> 진입</li>

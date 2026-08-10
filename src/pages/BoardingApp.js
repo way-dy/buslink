@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { validateAndBoard, validateAndBoardStatic } from "../lib/boarding";
 import { auth } from "../firebase";
 import { signInAnonymously } from "firebase/auth";
+import { Icon } from "../components/ui";
 
 function getParam(key) {
   return new URLSearchParams(window.location.search).get(key);
@@ -82,7 +83,7 @@ export default function BoardingApp() {
         {step === STEPS.INPUT && (
           <>
             <div style={S.iconWrap}>
-              <div style={S.busIcon}>🚌</div>
+              <div style={{ ...S.busIcon, color: "var(--color-primary)", display: "flex" }}><Icon name="bus" size={46} stroke={1.5} /></div>
             </div>
             <div style={S.title}>탑승 확인</div>
             <div style={S.desc}>

@@ -202,13 +202,14 @@ function loadDb() {
   await tabBtn("설정").click({ timeout: 15000 });
   await page.waitForTimeout(2500);
   const setTxt = await page.evaluate(() => document.body.innerText);
-  ok("알림 설정 카드가 있다", setTxt.includes("🔔 알림 설정"));
+  // 2026-08-11 이모지 정리로 제목에서 🔔 를 뺐다(아이콘으로 대체) → 문자열도 같이 갱신.
+  ok("알림 설정 카드가 있다", setTxt.includes("알림 설정"));
   ok("켜짐/꺼짐 상태를 말해 준다", /도착 임박 알림 (켜짐|꺼짐)/.test(setTxt),
     (setTxt.match(/도착 임박 알림 \S+/) || [])[0]);
   const off = setTxt.includes("도착 임박 알림 꺼짐");
   ok(off ? "꺼짐이면 '지정하러 가기' 버튼이 있다" : "켜짐이면 '해제' 버튼이 있다",
     off ? setTxt.includes("지정하러 가기") : setTxt.includes("해제"));
-  ok("기존 알림 진단 카드가 그대로 있다(회귀 0)", setTxt.includes("🔔 알림 진단"));
+  ok("기존 알림 진단 카드가 그대로 있다(회귀 0)", setTxt.includes("알림 진단"));
   await page.screenshot({ path: path.join(userDataDir, "settings.png") });
 
   if (off) {

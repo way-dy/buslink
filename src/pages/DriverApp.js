@@ -955,7 +955,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
                       onClick={() => { setDispatchQuery(""); setPickerOpen(true); }}
                       style={S.dispatchChangeBtn}
                     >
-                      🔄 배차 변경 ({dispatches.length}건)
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><Icon name="repeat" size={13} stroke={2} /> 배차 변경 ({dispatches.length}건)</span>
                     </button>
                   )}
                 </div>
@@ -1031,7 +1031,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
             background: "var(--color-primary-soft)", color: "var(--color-primary-deep)",
             borderRadius: 10, padding: "12px 14px", fontSize: 13, fontWeight: 600,
           }}>
-            🛰️ 이 차량은 GPS 단말로 자동 추적됩니다 — 앱 위치 전송 안 함
+            이 차량은 GPS 단말로 자동 추적됩니다 — 앱 위치 전송 안 함
           </div>
         )}
 
@@ -1077,7 +1077,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
           {["운행", "길안내", "탑승 QR", "NFC"].map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
               style={{ ...S.tabBtn, ...(activeTab === tab ? S.tabBtnActive : S.tabBtnIdle) }}>
-              {tab === "탑승 QR" && <Icon name="qr" size={16} />} {tab === "NFC" && "📇 "}{tab === "길안내" && "🧭 "}
+              {tab === "탑승 QR" && <Icon name="qr" size={16} />}{tab === "NFC" && <Icon name="phone" size={16} />}{tab === "길안내" && <Icon name="route" size={16} />}{" "}
               {tab === "탑승 QR" && boardingMode === "passenger-qr" ? "QR 스캔" : tab}
             </button>
           ))}
@@ -1249,7 +1249,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
                     background: "transparent", color: "var(--color-label-mute)",
                     cursor: "pointer", fontFamily: "inherit",
                   }}>
-                  🔍 진단 {diagOpen ? "▲" : "▼"}
+                  진단 {diagOpen ? "▲" : "▼"}
                 </button>
                 {diagOpen && (
                   <div style={{
@@ -1350,7 +1350,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
             서버가 "오늘 이 차량 배차"로 노선을 해석하므로 배차·운행 상태가 전제. */}
         {activeTab === "NFC" && !driving && (
           <div style={S.qrNotice}>
-            <span style={{ fontSize: 26 }}>📇</span>
+            <span style={{ display: "inline-flex", color: "var(--color-primary)" }}><Icon name="phone" size={24} stroke={1.8} /></span>
             <div>
               <div style={S.qrNoticeTitle}>운행 시작 후 태깅이 활성화됩니다</div>
               <div style={S.qrNoticeSub}>운행 시작 버튼을 누른 뒤 사원증을 태그해주세요</div>
@@ -1384,7 +1384,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
               {dispatches.length > 6 && (
                 <input
                   style={{ ...S.pickerSearch, marginTop: 10 }}
-                  placeholder="🔍 노선·차량·시간·거래처 검색"
+                  placeholder="노선·차량·시간·거래처 검색"
                   value={dispatchQuery}
                   onChange={e => setDispatchQuery(e.target.value)}
                   autoFocus
@@ -1411,7 +1411,7 @@ export default function DriverApp({ companyId: propCompanyId }) {
                     </div>
                     <div style={S.pickerRoute}>{d.routeName || "노선?"}</div>
                     <div style={S.pickerMeta}>
-                      {d.vehicleNo && <span>🚌 {d.vehicleNo}</span>}
+                      {d.vehicleNo && <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Icon name="bus" size={12} stroke={2} />{d.vehicleNo}</span>}
                       {d.partnerName && <span> · {d.partnerName}</span>}
                     </div>
                   </div>
@@ -1785,7 +1785,7 @@ function DriverPassengerScan({ companyId, driver, dispatch, currentStop }) {
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, width: "100%" }}>
       {step === "ready" && (
         <>
-          <div style={{ width: 90, height: 90, borderRadius: "50%", background: "var(--color-primary-soft)", border: "2px solid var(--color-primary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40 }}>📷</div>
+          <div style={{ width: 90, height: 90, borderRadius: "50%", background: "var(--color-primary-soft)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-primary)" }}><Icon name="camera" size={40} stroke={1.6} /></div>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 16, fontWeight: 800, color: "var(--color-label)", marginBottom: 4 }}>탑승 QR 스캔</div>
             <div style={{ fontSize: 12, color: "var(--color-label-mute)", lineHeight: 1.5 }}>
@@ -2461,8 +2461,8 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
           {pos && !seg.onRoute ? "노선에서 떨어져 있어 회전 안내는 표시하지 않습니다 · 노선에 올라서면 시작됩니다"
             : naviState === "loading" ? "도로 경로를 불러오는 중…"
             : naviState === "ok" ? (navi && navi.matchedToDrawn
-              ? "🛣 등록된 노선을 따라가는 도로 경로 · 회전 안내 사용 중"
-              : "🛣 도로 경로 · 회전 안내 사용 중")
+              ? "등록된 노선을 따라가는 도로 경로 · 회전 안내 사용 중"
+              : "도로 경로 · 회전 안내 사용 중")
             : naviState === "fail" ? "등록된 노선 경로로 안내 중(도로 경로를 못 받았습니다)"
             : ""}
         </div>
@@ -2476,7 +2476,7 @@ function DriverNavGuide({ companyId, routeId, stops, routePath, currentStopIdx, 
           <a href={naviUrl} target="_blank" rel="noreferrer"
             title={deviceGps ? "" : "외부 내비를 켜면 이 앱이 뒤로 가면서 위치 전송이 멈출 수 있습니다"}
             style={{ fontSize: 12, fontWeight: 800, color: "var(--color-primary-deep)", background: "var(--color-primary-soft)", border: "none", borderRadius: 8, padding: "7px 11px", textDecoration: "none", fontFamily: "inherit", whiteSpace: "nowrap" }}>
-            🧭 카카오맵{deviceGps ? "" : " ⚠"}
+            카카오맵{deviceGps ? "" : " ⚠"}
           </a>
         )}
       </div>
@@ -2664,7 +2664,7 @@ function DriverNfcTag({ companyId, driver, dispatch }) {
   if (!supported) {
     return (
       <div style={S.qrNotice}>
-        <span style={{ fontSize: 26 }}>📵</span>
+        <span style={{ display: "inline-flex", color: "var(--color-label-mute)" }}><Icon name="close" size={24} stroke={1.8} /></span>
         <div>
           <div style={S.qrNoticeTitle}>이 기기·브라우저에서는 NFC 태깅을 쓸 수 없습니다</div>
           <div style={S.qrNoticeSub}>
@@ -2828,9 +2828,9 @@ function DriverNfcTag({ companyId, driver, dispatch }) {
           <div style={{
             width: 110, height: 110, borderRadius: "50%",
             background: "var(--color-primary-soft)", border: "2px solid var(--color-primary)",
-            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 46,
+            display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-primary)",
             animation: "blpulse 2.4s ease-out infinite",
-          }}>📇</div>
+          }}><Icon name="phone" size={44} stroke={1.5} /></div>
           <div style={{ fontSize: 16, fontWeight: 800, color: "var(--color-primary-deep)" }}>사원증을 태그해주세요</div>
           <div style={{ fontSize: 11, color: "var(--color-label-alt)", textAlign: "center", lineHeight: 1.6 }}>
             폰 뒷면 NFC 위치에 카드를 대주세요 (기종마다 위치가 다릅니다)

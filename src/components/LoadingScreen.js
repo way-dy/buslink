@@ -2,6 +2,7 @@
 // App.js 초기 로딩 게이트 전역 사용(관제·기사·직원·승객·협력사). 밝은 브랜드 테마 +
 // 버스 스피너 + 따뜻한 문구. 다크 잔존(#0B1A2E "지도 로딩 중...") 교체(2026-06-08).
 import React from "react";
+import { Icon } from "./ui";
 
 export default function LoadingScreen({ message = "잠시만요, 준비하고 있어요", sub }) {
   return (
@@ -41,12 +42,12 @@ export default function LoadingScreen({ message = "잠시만요, 준비하고 �
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: 32,
+            color: "var(--color-primary)",
             animation: "blbob 1.6s ease-in-out infinite",
           }}
           aria-hidden="true"
         >
-          🚌
+          <Icon name="bus" size={30} stroke={1.8} />
         </div>
       </div>
 
