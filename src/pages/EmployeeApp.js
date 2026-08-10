@@ -27,6 +27,7 @@ import { computeRouteWindow, isWithinRouteWindow, normalizeWindowOpts, nowMinute
 import InstallPrompt, { InstallGuide } from "../components/InstallPrompt";
 import { applyAppManifest } from "../lib/pwaManifest";
 import PermissionGate from "../components/PermissionGate";
+import HelpSheet from "../components/HelpSheet";
 import { resolveCompanyIdForAnon } from "../lib/companyResolver";
 // 거래처 브랜딩(2026-07-16 회의 #5) — 메인 컬러 CSS 변수 + 헤더 로고. 미설정=기본 테마.
 import { applyPartnerBranding, clearPartnerBranding, fetchPartnerCodeData, logoHeightOf } from "../lib/partnerBranding";
@@ -260,6 +261,7 @@ export default function EmployeeApp() {
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState(null);   // { empNo, name, dept, routeId, pinHash }
   const [tab, setTab] = useState("home");
+  const [helpOpen, setHelpOpen] = useState(false);   // 도움말 시트(2026-08-10)
   const [activeNotice, setActiveNotice] = useState(null); // 공지 배너
   // 공지 배너가 차지하는 실제 높이(px) — 아래 본문을 그만큼 내려 가려지지 않게 한다.
   const noticeBarRef = useRef(null);
@@ -509,8 +511,28 @@ export default function EmployeeApp() {
         {tab === "notices"  && <NoticesTab notices={notices} unreadCount={unreadCount} />}
         {tab === "scan"     && <ScanTab companyId={companyId} session={session} />}
         {tab === "inquiry"  && <InquiryTab config={inquiry} partnerName={session?.partnerName || null} />}
-        {tab === "settings" && <SettingsTab companyId={companyId} session={session} onLogout={handleLogout} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />}
+        {tab === "settings" && <SettingsTab companyId={companyId} session={session} onLogout={handleLogout} onGoHome={() => setTab("home")} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />}
+
+        {/* ── 도움말 버튼 (2026-08-10) ─────────────────────────────
+            "노선이 안 보여요 / 알림이 안 와요" 는 우리 신고 1·2순위인데, 물어볼 곳이
+            앱 안에 없었다. 화면에 이유를 적는 것(시간창 안내 등)과 짝이 되는 통로.
+            🔴 위쪽에 두지 않는다 — 상단은 공지 배너(fixed) 자리라 서로 가린다. */}
+        <button
+          onClick={() => setHelpOpen(true)}
+          aria-label="도움말"
+          style={{
+            position: "absolute", right: 12, bottom: 12, width: 38, height: 38,
+            borderRadius: "50%", border: "1px solid var(--color-line)",
+            background: "var(--color-bg)", color: "var(--color-primary)",
+            fontSize: 17, fontWeight: 800, cursor: "pointer", fontFamily: "inherit",
+            boxShadow: "var(--shadow-emphasize)", zIndex: 5, lineHeight: 1,
+          }}
+        >
+          ?
+        </button>
       </div>
+
+      {helpOpen && <HelpSheet tab={tab} onClose={() => setHelpOpen(false)} />}
 
       <div style={S.tabBar}>
         {visibleTabs.map(t => (
@@ -1854,6 +1876,10 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
   const [gpsData, setGpsData] = useState({});
   const [filter, setFilter] = useState("전체");
   const [search, setSearch] = useState("");
+  // 목록 보기 방식(2026-08-10) — 카드 ↔ 시간표. 회차가 많은 거래처(판교역 18회차,
+  // 채드윅 구역별 29개)는 카드로 훑으면 "몇 시 차가 있나"가 안 읽힌다.
+  // 데이터는 그대로 쓰고 정렬·밀도만 바꾼다(신규 구독 0).
+  const [listMode, setListMode] = useState("cards");
   const [stopModal, setStopModal] = useState(null);     // 정류장+지도 바텀시트
   const [modalStops, setModalStops] = useState([]);
   const [modalBuses, setModalBuses] = useState([]);      // 해당 노선 실시간 버스
@@ -1995,6 +2021,38 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
     return true;
   }).sort(compareRoutes); // 관리자가 노선 관리에서 정한 표시 순서(2026-07-10)
 
+  // ── 시간표 보기용 그룹(2026-08-10) ────────────────────────────
+  // 같은 `filtered` 를 쓰되 출발시각 순으로만 다시 세운다 — 거래처 격리·검색·칩이
+  // 그대로 반영된다(카드 보기와 보이는 모수가 어긋나면 안 된다).
+  // 출발시각이 없는 노선은 맨 뒤 "시각 미정"으로 — 빼 버리면 카드에는 있는데
+  // 시간표에는 없는 노선이 생긴다.
+  const timeGroups = (() => {
+    if (listMode !== "time") return [];
+    const order = ["출근", "퇴근", "셔틀"];
+    // 🔴 이 파일은 `import { Map } from "react-kakao-maps-sdk"` 로 **내장 Map 이 가려져 있다**.
+    //    `new Map()` 을 쓰면 런타임에 "Map is not a constructor" 로 화면이 통째로 죽는다
+    //    (빌드는 통과하고 헤드리스 실로드에서만 잡혔다). 평범한 객체를 쓴다.
+    const buckets = {};
+    filtered.forEach(r => {
+      const key = order.includes(r.type) ? r.type : (r.type || "기타");
+      (buckets[key] = buckets[key] || []).push(r);
+    });
+    const keys = Object.keys(buckets).sort((a, b) => {
+      const ia = order.indexOf(a), ib = order.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
+    });
+    return keys.map(k => ({
+      type: k,
+      rows: buckets[k].slice().sort((a, b) => {
+        const ta = a.departTime || "", tb = b.departTime || "";
+        if (!ta && !tb) return compareRoutes(a, b);
+        if (!ta) return 1;          // 시각 없는 노선은 맨 뒤
+        if (!tb) return -1;
+        return ta.localeCompare(tb) || compareRoutes(a, b);
+      }),
+    }));
+  })();
+
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", background: "var(--color-bg-alt)" }}>
       <div style={{ background: "var(--color-bg)", padding: "14px 16px", borderBottom: "1px solid var(--color-line)" }}>
@@ -2024,6 +2082,18 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
             </button>
           ))}
         </div>
+
+        {/* 카드 ↔ 시간표 전환 (2026-08-10) */}
+        <div style={{ display: "flex", gap: 6, marginTop: 10, background: "var(--color-bg-soft)", borderRadius: "var(--radius-8)", padding: 3 }}>
+          {[["cards", "🗂 카드"], ["time", "🕒 시간표"]].map(([v, label]) => (
+            <button key={v} onClick={() => setListMode(v)}
+              style={{ flex: 1, padding: "7px 4px", border: "none", borderRadius: "var(--radius-6)", cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap",
+                background: listMode === v ? "var(--color-primary)" : "transparent",
+                color: listMode === v ? "#fff" : "var(--color-label-mute)" }}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
@@ -2031,6 +2101,47 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
           <div style={{ textAlign: "center", padding: 40, color: "var(--color-label-alt)", fontSize: 13, whiteSpace: "pre-line" }}>
             {filter === "즐겨찾기" ? "즐겨찾기한 노선이 없습니다\n노선 옆 ⭐를 눌러 추가하세요" : "해당하는 노선이 없습니다"}
           </div>
+        ) : listMode === "time" ? (
+          /* ── 시간표 보기 (2026-08-10) — 출발 시각 순 한 줄씩 ── */
+          timeGroups.map(g => (
+            <div key={g.type} style={{ marginBottom: 18 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
+                <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: "var(--radius-pill)", fontWeight: 700,
+                  background: g.type === "출근" ? "var(--color-primary-soft)" : "var(--color-atomic-orange-90)",
+                  color: g.type === "출근" ? "var(--color-primary-deep)" : "#B95300" }}>
+                  {g.type}
+                </span>
+                <span style={{ fontSize: 11, color: "var(--color-label-alt)" }}>{g.rows.length}개</span>
+              </div>
+              <div style={{ background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: "var(--radius-12)", overflow: "hidden" }}>
+                {g.rows.map((r, i) => (
+                  <div key={r.id}
+                    onClick={() => { setStopModal(r); setModalView("list"); }}
+                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 13px", cursor: "pointer",
+                      borderTop: i === 0 ? "none" : "1px solid var(--color-line)",
+                      background: r.id === session.routeId ? "var(--color-primary-soft)" : "transparent" }}>
+                    {/* 출발 시각 — 시간표에서 제일 먼저 읽혀야 하는 값이라 크게 */}
+                    <div style={{ flexShrink: 0, width: 52, fontSize: 15, fontWeight: 800, fontVariantNumeric: "tabular-nums",
+                      color: r.departTime ? (g.type === "출근" ? "var(--color-primary-deep)" : "#B95300") : "var(--color-label-alt)" }}>
+                      {r.departTime || "–"}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--color-label)", wordBreak: "keep-all", lineHeight: 1.35 }}>
+                        {r.name}
+                      </div>
+                      {gpsData[r.id] && (
+                        <div style={{ fontSize: 10.5, color: "#007A29", fontWeight: 700, marginTop: 2 }}>
+                          🟢 {gpsData[r.id]}대 운행중
+                        </div>
+                      )}
+                    </div>
+                    {favorites.includes(r.id) && <span style={{ fontSize: 12, flexShrink: 0 }}>⭐</span>}
+                    <span style={{ fontSize: 14, fontWeight: 800, color: "var(--color-label-alt)", flexShrink: 0 }}>›</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
         ) : filtered.map(r => (
           <div key={r.id} style={{ background: "var(--color-bg)", border: `1px solid ${favorites.includes(r.id) ? "var(--color-cautionary)" : "var(--color-line)"}`, borderRadius: "var(--radius-16)", padding: "14px 16px", marginBottom: 10, boxShadow: "var(--shadow-emphasize)" }}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
@@ -3001,7 +3112,7 @@ function InquiryTab({ config, partnerName }) {
   );
 }
 
-function SettingsTab({ companyId, session, onLogout, onSessionUpdate }) {
+function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate }) {
   const [showPinChange, setShowPinChange] = useState(session.pinInitial || false);
   const [oldPin, setOldPin] = useState("");
   const [newPin, setNewPin] = useState("");
@@ -3063,6 +3174,34 @@ function SettingsTab({ companyId, session, onLogout, onSessionUpdate }) {
   }, [companyId, session?.empNo]);
 
   useEffect(() => { loadTokenDoc(); }, [loadTokenDoc]);
+
+  // ── 🔔 도착 임박 알림 상태 (2026-08-10) ──────────────────────────
+  // '내 정류장'을 지정한 사람에게만 도착 임박 푸시가 간다(CF notifyPreArrival 이
+  // fcmTokens 의 routeId+stopId 로 대상을 찾는다). 그런데 그 지정은 홈 지도에서만
+  // 할 수 있어서 **지정한 사람이 극소수**였고, 트리거를 고쳐도 도달 인원이 거기서 묶였다.
+  // → 설정 탭에서 상태를 보여주고 지정 경로를 열어 준다.
+  //
+  // 🔴 읽기를 늘리지 않는다 — 알림 진단이 이미 읽은 `tokenDoc`(fcmTokens 문서)에
+  //    routeId/stopId 가 들어 있다. 정류장 **이름**만 지정돼 있을 때 1회 더 읽는다.
+  const myStopId = tokenDoc?.stopId || null;
+  const myStopRouteId = tokenDoc?.routeId || null;
+  const [myStopName, setMyStopName] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    if (!myStopId || !myStopRouteId || !companyId) { setMyStopName(null); return; }
+    getDoc(doc(db, "companies", companyId, "routes", myStopRouteId, "stops", myStopId))
+      .then(s => { if (alive) setMyStopName(s.exists() ? (s.data().name || null) : null); })
+      .catch(() => { if (alive) setMyStopName(null); });   // 실패해도 '켜짐'은 그대로 알린다
+    return () => { alive = false; };
+  }, [companyId, myStopRouteId, myStopId]);
+
+  const [clearingStop, setClearingStop] = useState(false);
+  const handleClearMyStop = async () => {
+    setClearingStop(true);
+    await persistMyStop(companyId, session.empNo, null, null);
+    await loadTokenDoc();
+    setClearingStop(false);
+  };
 
   const handleReissue = async () => {
     setDiagLoading(true); setDiagResult(null);
@@ -3145,6 +3284,52 @@ function SettingsTab({ companyId, session, onLogout, onSessionUpdate }) {
             {msg.text}
           </div>
         )}
+
+        {/* 🔔 알림 설정 카드 (2026-08-10) — 도착 임박 알림 on/off 상태를 드러낸다.
+            🔴 여기에 "동작하지 않는 토글"을 두지 말 것. 이 스위치가 실제로 하는 일은
+               fcmTokens 의 routeId/stopId 를 쓰고 지우는 것이고, 그게 곧 CF 의 발송 대상이다.
+               발송에 영향을 못 주는 토글을 만들면 켜 둔 사람이 알림을 못 받고도 켰다고 믿는다. */}
+        <div style={{ background: "var(--color-bg)", borderRadius: "var(--radius-16)", padding: "16px 18px", border: "1px solid var(--color-line)", boxShadow: "var(--shadow-emphasize)" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-label)", marginBottom: 4 }}>🔔 알림 설정</div>
+          <div style={{ fontSize: 11.5, color: "var(--color-label-alt)", lineHeight: 1.5, marginBottom: 12 }}>
+            버스가 내 정류장에 가까워지면 알려드립니다(2정거장·1정거장 전).
+          </div>
+
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+            padding: "11px 12px", borderRadius: "var(--radius-12)",
+            background: myStopId ? "#E6F7EB" : "var(--color-bg-soft)",
+            border: `1px solid ${myStopId ? "#A7E2BB" : "var(--color-line)"}`,
+          }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: myStopId ? "#007A29" : "var(--color-label-mute)" }}>
+                {myStopId ? "도착 임박 알림 켜짐" : "도착 임박 알림 꺼짐"}
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--color-label-mute)", marginTop: 2, lineHeight: 1.45, wordBreak: "keep-all" }}>
+                {myStopId
+                  ? (myStopName ? `내 정류장 · ${myStopName}` : "내 정류장이 지정되어 있습니다")
+                  : "내 정류장을 지정해야 알림이 갑니다"}
+              </div>
+            </div>
+            {myStopId ? (
+              <button onClick={handleClearMyStop} disabled={clearingStop}
+                style={{ flexShrink: 0, background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: "var(--radius-8)", padding: "7px 12px", color: "var(--color-label-mute)", fontSize: 12, fontWeight: 600, cursor: clearingStop ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                {clearingStop ? "해제 중..." : "해제"}
+              </button>
+            ) : (
+              <button onClick={() => onGoHome && onGoHome()}
+                style={{ flexShrink: 0, background: "var(--color-primary)", border: "none", borderRadius: "var(--radius-8)", padding: "8px 12px", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                지정하러 가기
+              </button>
+            )}
+          </div>
+
+          {!myStopId && (
+            <div style={{ marginTop: 9, fontSize: 11, color: "var(--color-label-alt)", lineHeight: 1.55, wordBreak: "keep-all" }}>
+              홈 화면 지도에서 내가 타는 정류장을 누른 뒤 <b>“이 정류장을 내 정류장으로 설정”</b>을 누르시면 됩니다.
+            </div>
+          )}
+        </div>
 
         {/* 🔔 알림 진단 카드 (2026-05-21) — 권한·토큰 자가 점검·재발급 */}
         <div style={{ background: "var(--color-bg)", borderRadius: "var(--radius-16)", padding: "16px 18px", border: "1px solid var(--color-line)", boxShadow: "var(--shadow-emphasize)" }}>
@@ -3285,7 +3470,10 @@ function SettingsTab({ companyId, session, onLogout, onSessionUpdate }) {
 // ─── 스타일 (라이트 — tokens.css 변수 기반, 리디자인 6단계) ──────────
 const S = {
   appWrap: { display: "flex", flexDirection: "column", height: "100dvh", maxHeight: "100dvh", background: "var(--color-bg-alt)", fontFamily: "var(--font-base)", color: "var(--color-label)", overflow: "hidden" },
-  content: { flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" },
+  // position:relative = 도움말 버튼(?)의 배치 기준. 이 상자는 스크롤하지 않으므로
+  // (안쪽 탭이 각자 스크롤한다) 절대배치 자식이 탭바 바로 위에 고정된다.
+  // 🔴 탭바 높이를 px 로 빼서 fixed 로 두지 말 것 — 기기·안전영역마다 어긋난다.
+  content: { flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden", position: "relative" },
   tabBar: { display: "flex", background: "var(--color-bg)", borderTop: "1px solid var(--color-line)", flexShrink: 0, paddingBottom: "env(safe-area-inset-bottom, 0px)", boxShadow: "0 -1px 12px rgba(11,16,32,0.05)" },
   tabBtn: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 0", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", transition: "color .15s" },
   fullCenter: { minHeight: "100vh", background: "var(--color-bg-alt)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-base)", padding: 20 },

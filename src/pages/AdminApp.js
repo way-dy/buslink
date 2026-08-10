@@ -2597,7 +2597,10 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
             ? Promise.resolve()
             : updateDoc(doc(db, "companies", companyId, "routes", r.id), { order: i })
         ));
-        const orderById = new Map(seeded.map((r, i) => [r.id, i]));
+        // 🔴 `new Map()` 금지 — 이 파일은 상단에서 카카오 SDK 의 `Map` 을 import 해
+        //    내장 Map 이 가려진다(같은 파일 3781·5119행에 경고가 이미 있는데 이 줄만 남아 있었다).
+        //    던지면 아래 swap 이 실행되지 않아 **첫 ▲▼ 가 먹지 않는다**(2026-08-10 발견).
+        const orderById = new window.Map(seeded.map((r, i) => [r.id, i]));
         list = filtered.map(r => ({ ...r, order: orderById.get(r.id) }));
       }
       const a = list[idx], b = list[target];

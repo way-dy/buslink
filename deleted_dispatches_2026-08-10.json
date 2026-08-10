@@ -1,0 +1,593 @@
+[
+ {
+  "companyId": "dy001",
+  "date": "2026-06-12",
+  "id": "cYYcNZz7cs8PYmBk2q9G",
+  "data": {
+   "driverId": "MBV6MyPQ8Rr4MZEKHvUD",
+   "routeId": "pRmHOGHQHvnK4fjb8zFN",
+   "routeName": "등교(강남1)_월~수,금",
+   "vehicleNo": "254호2542",
+   "vehicleId": "vehicle_003",
+   "departTime": "06:30",
+   "date": "2026-06-12"
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-23",
+  "id": "1kh2uPv8Gegtb0GopSHv",
+  "data": {
+   "date": "2026-07-23",
+   "driverId": "MJI4d1Mi6YntPqL6VbAj",
+   "routeName": "17:50 판교역",
+   "routeId": "dBldPh4IfYlTsaOhyq1m",
+   "vehicleId": "p0WSfnNlUp14pCQnvyhr",
+   "vehicleNo": "경기76자3622",
+   "departTime": "17:50",
+   "createdBy": "X40MoDj8jSf5dEikd9iUn4G353K2"
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-23",
+  "id": "2QeLujhvN88Uncbnd34W",
+  "data": {
+   "vehicleNo": "경기70사8362",
+   "createdAt": "2026-07-10T15:30:48.040Z",
+   "vehicleId": "N0XXb3fx34eWjJwbg78b",
+   "scheduleId": "xRAx6C6WmPQJ085Ovs9A",
+   "routeName": "07:10 판교역",
+   "source": "schedule",
+   "routeId": "ngbbEDay334HzxvNEkpx",
+   "driverName": "박종민",
+   "date": "2026-07-23",
+   "departTime": "07:10",
+   "driverId": "2bGEemz79YtftCvkoPCt",
+   "stopArrivals": {}
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-23",
+  "id": "Nu4bTsMZTJDkjJ0LfAji",
+  "data": {
+   "vehicleId": "N0XXb3fx34eWjJwbg78b",
+   "createdAt": "2026-07-15T15:30:31.313Z",
+   "vehicleNo": "경기70사8362",
+   "routeName": "07:10 판교역",
+   "scheduleId": "xRAx6C6WmPQJ085Ovs9A",
+   "date": "2026-07-23",
+   "driverName": "박종민",
+   "routeId": "ngbbEDay334HzxvNEkpx",
+   "source": "schedule",
+   "driverId": "2bGEemz79YtftCvkoPCt",
+   "departTime": "07:10",
+   "stopArrivals": {}
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-23",
+  "id": "o9pYo8QLwU22vvdhgO0h",
+  "data": {
+   "createdAt": "2026-07-14T15:30:45.441Z",
+   "vehicleId": "N0XXb3fx34eWjJwbg78b",
+   "vehicleNo": "경기70사8362",
+   "routeName": "07:10 판교역",
+   "scheduleId": "xRAx6C6WmPQJ085Ovs9A",
+   "routeId": "ngbbEDay334HzxvNEkpx",
+   "driverName": "박종민",
+   "date": "2026-07-23",
+   "source": "schedule",
+   "driverId": "2bGEemz79YtftCvkoPCt",
+   "departTime": "07:10",
+   "stopArrivals": {}
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-23",
+  "id": "4aKG1H03GQ6hFBQPGwd5_2026-07-23",
+  "data": {
+   "driverId": "kQv1zgtMX9dmnqaoIGKH",
+   "driverName": "김순섭",
+   "routeId": "DzkJnBuwP63O0K8ZgtVt",
+   "routeName": "18:50 판교역",
+   "vehicleNo": "경기78사8292",
+   "vehicleId": "KbQVmpeSuhaywV0jr1Q9",
+   "departTime": "18:50",
+   "date": "2026-07-23",
+   "scheduleId": "4aKG1H03GQ6hFBQPGwd5",
+   "source": "schedule",
+   "createdAt": "2026-07-22T15:30:24.296Z"
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-23",
+  "id": "76KjOpqvr2qqZqleI2YP_2026-07-23",
+  "data": {
+   "driverId": "vkvJ5LN8HbxwqSiNXMP4",
+   "driverName": "심봉섭",
+   "routeId": "ewM8rrZM8ihVT3T6V2g2",
+   "routeName": "07:30 판교역",
+   "vehicleNo": "경기70아7072",
+   "vehicleId": "HAtu2yUnKDSElGcTyTeN",
+   "departTime": "07:30",
+   "date": "2026-07-23",
+   "scheduleId": "76KjOpqvr2qqZqleI2YP",
+   "source": "schedule",
+   "createdAt": "2026-07-22T15:30:28.125Z"
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-23",
+  "id": "bAhv7UynKaecnCAItV1r",
+  "data": {
+   "vehicleNo": "서울72바7012",
+   "createdBy": "X40MoDj8jSf5dEikd9iUn4G353K2",
+   "departTime": "17:40",
+   "routeName": "17:40 판교역",
+   "driverId": "yuuJYmOrTOIKvk3yz4t0",
+   "date": "2026-07-23",
+   "routeId": "hvuq01EXmO6tWAK2tQSB",
+   "vehicleId": "q7l3iUqGnISp9kdWzKp1"
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-23",
+  "id": "BnJCkyxLYW8KQm4woOvW",
+  "data": {
+   "driverId": "yuuJYmOrTOIKvk3yz4t0",
+   "routeName": "18:30 판교역",
+   "date": "2026-07-23",
+   "vehicleId": "q7l3iUqGnISp9kdWzKp1",
+   "routeId": "TtRLKEbFGdH6QTUYVwe7",
+   "vehicleNo": "서울72바7012",
+   "departTime": "18:30",
+   "createdBy": "X40MoDj8jSf5dEikd9iUn4G353K2"
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-23",
+  "id": "CxATf7DJ5AAcXY1Wo3ZG",
+  "data": {
+   "routeId": "X6Dl7rCSQY9r8xpOi71o",
+   "vehicleId": "7QEZPSjwKCGcKsRVfeEl",
+   "date": "2026-07-23",
+   "createdBy": "X40MoDj8jSf5dEikd9iUn4G353K2",
+   "vehicleNo": "임시123615",
+   "routeName": "18:10 판교역",
+   "driverId": "BAX8l6al7H1nhG0o1S75",
+   "departTime": "18:10",
+   "stopArrivals": {}
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-23",
+  "id": "D6Adxcn3Dj8F2uQHPdC5_2026-07-23",
+  "data": {
+   "driverId": "KkMsGgz0FHMojswDCGUf",
+   "driverName": "김윤환",
+   "routeId": "wVJpSfHB5CX6jmv4Bub6",
+   "routeName": "08:40 판교역",
+   "vehicleNo": "경기79사9639",
+   "vehicleId": "fPAVbt1572t4H1mAF8ha",
+   "departTime": "08:40",
+   "date": "2026-07-23",
+   "scheduleId": "D6Adxcn3Dj8F2uQHPdC5",
+   "source": "schedule",
+   "createdAt": "2026-07-22T15:30:33.008Z"
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-23",
+  "id": "emEJznQ6ycZJa2Vy4DHD",
+  "data": {
+   "createdBy": "X40MoDj8jSf5dEikd9iUn4G353K2",
+   "vehicleNo": "서울72바7012",
+   "vehicleId": "q7l3iUqGnISp9kdWzKp1",
+   "routeId": "C64Uc1Ja72v9qm1pdH41",
+   "date": "2026-07-23",
+   "departTime": "19:10",
+   "routeName": "19:10 판교역",
+   "driverId": "yuuJYmOrTOIKvk3yz4t0",
+   "stopArrivals": {}
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-23",
+  "id": "Jr2acaMb6JlfL8Ch3izz",
+  "data": {
+   "vehicleNo": "경기76아6984",
+   "createdBy": "X40MoDj8jSf5dEikd9iUn4G353K2",
+   "date": "2026-07-23",
+   "vehicleId": "uAU9B3aKfVwZDNAcr9HY",
+   "routeId": "mlBkGrqXwa6znYcqNQG4",
+   "departTime": "17:20",
+   "driverId": "eUL6vjXSwB8BnVQoguh8",
+   "routeName": "17:20 판교역",
+   "stopArrivals": {}
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-23",
+  "id": "QLSGo82p7cTtROd91Zpn_2026-07-23",
+  "data": {
+   "driverId": "LcRUFG7kF7FXpkaWPyBg",
+   "driverName": "김규행",
+   "routeId": "07eYGPaN7BDBSBgMTCtI",
+   "routeName": "19:50 판교역",
+   "vehicleNo": "서울71바7294",
+   "vehicleId": "AI3S4mT5rnJBN7baJbgk",
+   "departTime": "19:50",
+   "date": "2026-07-23",
+   "scheduleId": "QLSGo82p7cTtROd91Zpn",
+   "source": "schedule",
+   "createdAt": "2026-07-22T15:30:39.250Z"
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-23",
+  "id": "V6UuPKeRG6Vw1AdmafGI_2026-07-23",
+  "data": {
+   "driverId": "MJI4d1Mi6YntPqL6VbAj",
+   "driverName": "배광남",
+   "routeId": "9OcXzlJ6gZSkgv6V4GY9",
+   "routeName": "19:30 판교역",
+   "vehicleNo": "경기76자3622",
+   "vehicleId": "p0WSfnNlUp14pCQnvyhr",
+   "departTime": "19:30",
+   "date": "2026-07-23",
+   "scheduleId": "V6UuPKeRG6Vw1AdmafGI",
+   "source": "schedule",
+   "createdAt": "2026-07-22T15:30:44.920Z"
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-23",
+  "id": "XqsKoBClPJBRVaJHugQK_2026-07-23",
+  "data": {
+   "driverId": "yuuJYmOrTOIKvk3yz4t0",
+   "driverName": "양승환",
+   "routeId": "TqItOQvOQqT4oUUTVrM7",
+   "routeName": "08:20 판교역",
+   "vehicleNo": "서울72바7012",
+   "vehicleId": "q7l3iUqGnISp9kdWzKp1",
+   "departTime": "08:20",
+   "date": "2026-07-23",
+   "scheduleId": "XqsKoBClPJBRVaJHugQK",
+   "source": "schedule",
+   "createdAt": "2026-07-22T15:30:46.810Z"
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-23",
+  "id": "ZUNLwIrLDwvSNTHZQcku",
+  "data": {
+   "createdBy": "X40MoDj8jSf5dEikd9iUn4G353K2",
+   "vehicleNo": "경기79사9849",
+   "routeId": "5ubbBZynfallUY3IWdcC",
+   "vehicleId": "0MNdo687nv7nBucf8SVc",
+   "date": "2026-07-23",
+   "departTime": "07:50",
+   "routeName": "07:50 판교역",
+   "driverId": "tU7Qsprvn1LklcLx0GdJ",
+   "stopArrivals": {}
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-23",
+  "id": "cJhWAZlDiVqpsF7OsNHt",
+  "data": {
+   "date": "2026-07-23",
+   "routeId": "1yWML8FuDK3qGvmwk2jJ",
+   "vehicleId": "IyNnvaFi1Ta2CZdUGW64",
+   "vehicleNo": "임시123692",
+   "createdBy": "X40MoDj8jSf5dEikd9iUn4G353K2",
+   "routeName": "09:40 판교역",
+   "driverId": "YNFCevELBGQe41lkB8MY",
+   "departTime": "09:40",
+   "stopArrivals": {}
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-24",
+  "id": "2h6CgHVRsT2hQsexHujS",
+  "data": {
+   "date": "2026-07-24",
+   "routeId": "07eYGPaN7BDBSBgMTCtI",
+   "vehicleId": "AI3S4mT5rnJBN7baJbgk",
+   "vehicleNo": "서울71바7294",
+   "createdBy": "X40MoDj8jSf5dEikd9iUn4G353K2",
+   "routeName": "19:50 판교역",
+   "driverId": "LcRUFG7kF7FXpkaWPyBg",
+   "departTime": "19:50",
+   "stopArrivals": {}
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-24",
+  "id": "4aKG1H03GQ6hFBQPGwd5_2026-07-24",
+  "data": {
+   "driverId": "kQv1zgtMX9dmnqaoIGKH",
+   "driverName": "김순섭",
+   "routeId": "DzkJnBuwP63O0K8ZgtVt",
+   "routeName": "18:50 판교역",
+   "vehicleNo": "경기78사8292",
+   "vehicleId": "KbQVmpeSuhaywV0jr1Q9",
+   "departTime": "18:50",
+   "date": "2026-07-24",
+   "scheduleId": "4aKG1H03GQ6hFBQPGwd5",
+   "source": "schedule",
+   "createdAt": "2026-07-22T15:30:24.676Z"
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-24",
+  "id": "76KjOpqvr2qqZqleI2YP_2026-07-24",
+  "data": {
+   "driverId": "vkvJ5LN8HbxwqSiNXMP4",
+   "driverName": "심봉섭",
+   "routeId": "ewM8rrZM8ihVT3T6V2g2",
+   "routeName": "07:30 판교역",
+   "vehicleNo": "경기70아7072",
+   "vehicleId": "HAtu2yUnKDSElGcTyTeN",
+   "departTime": "07:30",
+   "date": "2026-07-24",
+   "scheduleId": "76KjOpqvr2qqZqleI2YP",
+   "source": "schedule",
+   "createdAt": "2026-07-22T15:30:28.502Z"
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-24",
+  "id": "EYJtfLt20SIp6SXgfHQB",
+  "data": {
+   "createdBy": "X40MoDj8jSf5dEikd9iUn4G353K2",
+   "departTime": "17:40",
+   "vehicleNo": "서울72바7012",
+   "routeId": "hvuq01EXmO6tWAK2tQSB",
+   "vehicleId": "q7l3iUqGnISp9kdWzKp1",
+   "routeName": "17:40 판교역",
+   "driverId": "yuuJYmOrTOIKvk3yz4t0",
+   "date": "2026-07-24"
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-24",
+  "id": "D6Adxcn3Dj8F2uQHPdC5_2026-07-24",
+  "data": {
+   "driverId": "KkMsGgz0FHMojswDCGUf",
+   "driverName": "김윤환",
+   "routeId": "wVJpSfHB5CX6jmv4Bub6",
+   "routeName": "08:40 판교역",
+   "vehicleNo": "경기79사9639",
+   "vehicleId": "fPAVbt1572t4H1mAF8ha",
+   "departTime": "08:40",
+   "date": "2026-07-24",
+   "scheduleId": "D6Adxcn3Dj8F2uQHPdC5",
+   "source": "schedule",
+   "createdAt": "2026-07-22T15:30:33.388Z"
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-24",
+  "id": "EdvRsO55HYEjmcX2oW2B",
+  "data": {
+   "departTime": "19:30",
+   "driverId": "MJI4d1Mi6YntPqL6VbAj",
+   "routeName": "19:30 판교역",
+   "createdBy": "X40MoDj8jSf5dEikd9iUn4G353K2",
+   "vehicleNo": "경기76자3622",
+   "vehicleId": "p0WSfnNlUp14pCQnvyhr",
+   "routeId": "9OcXzlJ6gZSkgv6V4GY9",
+   "date": "2026-07-24",
+   "stopArrivals": {}
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-24",
+  "id": "R57Z9zBPrKBCtBbOneal",
+  "data": {
+   "date": "2026-07-24",
+   "vehicleId": "q7l3iUqGnISp9kdWzKp1",
+   "routeId": "C64Uc1Ja72v9qm1pdH41",
+   "vehicleNo": "서울72바7012",
+   "createdBy": "X40MoDj8jSf5dEikd9iUn4G353K2",
+   "routeName": "19:10 판교역",
+   "driverId": "yuuJYmOrTOIKvk3yz4t0",
+   "departTime": "19:10",
+   "stopArrivals": {}
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-24",
+  "id": "I17bGX1y8CXVKlDrqT0w",
+  "data": {
+   "routeId": "X6Dl7rCSQY9r8xpOi71o",
+   "vehicleId": "7QEZPSjwKCGcKsRVfeEl",
+   "date": "2026-07-24",
+   "createdBy": "X40MoDj8jSf5dEikd9iUn4G353K2",
+   "vehicleNo": "임시123615",
+   "routeName": "18:10 판교역",
+   "driverId": "BAX8l6al7H1nhG0o1S75",
+   "departTime": "18:10",
+   "stopArrivals": {}
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-24",
+  "id": "IQQLg8ug8XBdTjTxaBHL",
+  "data": {
+   "vehicleId": "q7l3iUqGnISp9kdWzKp1",
+   "routeId": "TtRLKEbFGdH6QTUYVwe7",
+   "driverId": "yuuJYmOrTOIKvk3yz4t0",
+   "routeName": "18:30 판교역",
+   "date": "2026-07-24",
+   "departTime": "18:30",
+   "createdBy": "X40MoDj8jSf5dEikd9iUn4G353K2",
+   "vehicleNo": "서울72바7012"
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-24",
+  "id": "JyzjK6g5UIksvYcmbROO",
+  "data": {
+   "departTime": "08:20",
+   "routeName": "08:20 판교역",
+   "driverId": "yuuJYmOrTOIKvk3yz4t0",
+   "vehicleNo": "서울72바7012",
+   "createdBy": "X40MoDj8jSf5dEikd9iUn4G353K2",
+   "date": "2026-07-24",
+   "routeId": "TqItOQvOQqT4oUUTVrM7",
+   "vehicleId": "q7l3iUqGnISp9kdWzKp1",
+   "stopArrivals": {}
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-24",
+  "id": "deVYQYsnL8YTlF1DQxo4",
+  "data": {
+   "driverId": "2bGEemz79YtftCvkoPCt",
+   "departTime": "07:10",
+   "date": "2026-07-24",
+   "driverName": "박종민",
+   "routeId": "ngbbEDay334HzxvNEkpx",
+   "source": "schedule",
+   "routeName": "07:10 판교역",
+   "scheduleId": "xRAx6C6WmPQJ085Ovs9A",
+   "vehicleId": "N0XXb3fx34eWjJwbg78b",
+   "createdAt": "2026-07-15T15:30:31.313Z",
+   "vehicleNo": "경기70사8362",
+   "stopArrivals": {}
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-24",
+  "id": "Q1CLZzvHO3otROXxDdP0",
+  "data": {
+   "vehicleNo": "경기70사8362",
+   "createdAt": "2026-07-10T15:30:48.040Z",
+   "vehicleId": "N0XXb3fx34eWjJwbg78b",
+   "scheduleId": "xRAx6C6WmPQJ085Ovs9A",
+   "routeName": "07:10 판교역",
+   "source": "schedule",
+   "routeId": "ngbbEDay334HzxvNEkpx",
+   "driverName": "박종민",
+   "date": "2026-07-24",
+   "departTime": "07:10",
+   "driverId": "2bGEemz79YtftCvkoPCt",
+   "stopArrivals": {}
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-24",
+  "id": "XLv6DOdTE5id7zMa7sgj",
+  "data": {
+   "scheduleId": "xRAx6C6WmPQJ085Ovs9A",
+   "routeName": "07:10 판교역",
+   "vehicleNo": "경기70사8362",
+   "createdAt": "2026-07-14T15:30:45.441Z",
+   "vehicleId": "N0XXb3fx34eWjJwbg78b",
+   "departTime": "07:10",
+   "driverId": "2bGEemz79YtftCvkoPCt",
+   "source": "schedule",
+   "date": "2026-07-24",
+   "routeId": "ngbbEDay334HzxvNEkpx",
+   "driverName": "박종민",
+   "stopArrivals": {}
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-24",
+  "id": "T1UsUCXQUh4vdjkDUtwi_2026-07-24",
+  "data": {
+   "driverId": "MJI4d1Mi6YntPqL6VbAj",
+   "driverName": "배광남",
+   "routeId": "dBldPh4IfYlTsaOhyq1m",
+   "routeName": "17:50 판교역",
+   "vehicleNo": "경기76자3622",
+   "vehicleId": "p0WSfnNlUp14pCQnvyhr",
+   "departTime": "17:50",
+   "date": "2026-07-24",
+   "scheduleId": "T1UsUCXQUh4vdjkDUtwi",
+   "source": "schedule",
+   "createdAt": "2026-07-22T15:30:41.505Z"
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-24",
+  "id": "YPC4iq5dbm1b2As9bxde",
+  "data": {
+   "vehicleId": "uAU9B3aKfVwZDNAcr9HY",
+   "routeId": "mlBkGrqXwa6znYcqNQG4",
+   "date": "2026-07-24",
+   "createdBy": "X40MoDj8jSf5dEikd9iUn4G353K2",
+   "vehicleNo": "경기76아6984",
+   "driverId": "eUL6vjXSwB8BnVQoguh8",
+   "routeName": "17:20 판교역",
+   "departTime": "17:20",
+   "stopArrivals": {}
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-24",
+  "id": "d3AXCNVtltXj0NoS7uRt",
+  "data": {
+   "departTime": "07:50",
+   "routeName": "07:50 판교역",
+   "driverId": "tU7Qsprvn1LklcLx0GdJ",
+   "vehicleNo": "경기79사9849",
+   "createdBy": "X40MoDj8jSf5dEikd9iUn4G353K2",
+   "date": "2026-07-24",
+   "routeId": "5ubbBZynfallUY3IWdcC",
+   "vehicleId": "0MNdo687nv7nBucf8SVc",
+   "stopArrivals": {}
+  }
+ },
+ {
+  "companyId": "dy001",
+  "date": "2026-07-24",
+  "id": "mkvhOX9mt3afch5dVNvy",
+  "data": {
+   "createdBy": "X40MoDj8jSf5dEikd9iUn4G353K2",
+   "vehicleNo": "임시123692",
+   "routeId": "1yWML8FuDK3qGvmwk2jJ",
+   "vehicleId": "IyNnvaFi1Ta2CZdUGW64",
+   "date": "2026-07-24",
+   "departTime": "09:40",
+   "routeName": "09:40 판교역",
+   "driverId": "YNFCevELBGQe41lkB8MY",
+   "stopArrivals": {}
+  }
+ }
+]
