@@ -3,8 +3,9 @@
 //   2) node scripts/headless_check_help_and_timetable.cjs [거래처이름일부]
 //
 // prod 쓰기 0 — 세션은 localStorage 주입, 읽기만.
-// ⚠ localhost 는 카카오 도메인 미등록이라 지도는 안 뜬다. 여기서 보는 세 화면
-//   (노선 탭 시간표·설정 탭·도움말 시트)은 지도를 안 쓰므로 검증에 지장 없다.
+// 여기서 보는 세 화면(노선 탭 시간표·설정 탭·도움말 시트)은 지도를 쓰지 않는다.
+// (참고: localhost 에서도 카카오 지도는 정상 렌더된다 — 2026-08-10 실측으로 prod 와
+//  타일 수·응답 코드가 같음을 확인했다. 예전 주석의 "미등록이라 안 뜬다"는 반증됐다.)
 const path = require("path");
 const os = require("os");
 const fs = require("fs");
