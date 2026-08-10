@@ -7,14 +7,25 @@
 // ---------------------------------------------------------------------------
 import { useState } from "react";
 import { usePermissions } from "../lib/usePermissions";
+import { Icon } from "./ui";
 
+// 🔴 이 배너는 **누락되면 안 되는 메시지**다(way 2026-08-10). 권한이 없으면 도착 알림도
+//    실시간 위치도 동작하지 않는데, 사용자는 "앱이 고장났다"로만 인지한다.
+//    그래서 아래 규칙을 지킨다:
+//      ① `needsBanner` 면 **어떤 경우에도 무언가는 반드시 렌더**한다(조건부 숨김 금지).
+//      ② 차단(`anyDenied`)은 **항상 큰 빨간 카드** — 압축 대상이 아니다.
+//      ③ 압축(한 줄)은 아직 안 물어본 상태에만 적용하고, 그때도 **행동 버튼을 유지**한다.
+//    ⚠ 설치 안내는 여기서 하지 않는다 — `InstallPrompt` 로 일원화(스누즈·iOS Safari 커버).
+//       예전엔 둘 다 카드를 띄워 홈 상단에 회색 카드가 두 장 쌓였다.
 export default function PermissionGate({ containerStyle }) {
   const {
     perm, notifBad, geoBad, needsBanner, anyDenied,
-    installable, requestNotif, requestGeo, promptInstall,
+    requestNotif, requestGeo,
   } = usePermissions();
   const [showModal, setShowModal] = useState(false);
-  const hasContent = needsBanner || installable;
+  const hasContent = needsBanner;
+  // 아직 아무 문제도 아닌 상태(물어보지 않았을 뿐)는 한 줄로 — 단 버튼은 남긴다.
+  const compact = needsBanner && !anyDenied;
 
   const handleBannerClick = async () => {
     // 어느 한쪽이라도 차단(denied)이면 OS 팝업이 안 뜨므로 안내 모달
@@ -33,64 +44,61 @@ export default function PermissionGate({ containerStyle }) {
       {hasContent && (
       <div style={containerStyle}>
       {/* ── 권한 경고 배너 ── */}
-      {needsBanner && (
+      {/* ② 차단됨 — 실제 문제 상황이라 크게. 압축하지 않는다. */}
+      {needsBanner && anyDenied && (
         <div style={{
           display: "flex", alignItems: "center", gap: 10,
           padding: "10px 14px", margin: "0 0 4px",
-          background: anyDenied ? "#FDECEC" : "var(--color-primary-soft)",
-          border: anyDenied ? "1px solid var(--color-destructive)" : "1px solid var(--color-primary)",
+          background: "#FDECEC",
+          border: "1px solid var(--color-destructive)",
           borderRadius: "var(--radius-12)",
         }}>
-          <div style={{ fontSize: 20, flexShrink: 0 }}>{anyDenied ? "🔒" : "🔔"}</div>
+          <div style={{ flexShrink: 0, color: "var(--color-destructive)", display: "inline-flex" }}>
+            <Icon name="bell" size={20} stroke={1.9} />
+          </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{
-              fontSize: 13, fontWeight: 800,
-              color: anyDenied ? "var(--color-destructive)" : "var(--color-primary-deep)",
-            }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--color-destructive)" }}>
               {items.join(" · ")} 권한 필요
             </div>
             <div style={{ fontSize: 11, color: "var(--color-label-mute)", marginTop: 2, lineHeight: 1.45 }}>
-              {anyDenied
-                ? "권한이 차단되어 도착 알림·실시간 위치가 동작하지 않습니다. 설정에서 허용해주세요."
-                : "버스 도착 알림과 실시간 위치 표시를 위해 필요합니다."}
+              권한이 차단되어 도착 알림·실시간 위치가 동작하지 않습니다. 설정에서 허용해주세요.
             </div>
           </div>
           <button onClick={handleBannerClick}
             style={{
-              flexShrink: 0, padding: "8px 14px", borderRadius: "var(--radius-8)",
+              flexShrink: 0, height: 32, padding: "0 13px", borderRadius: "var(--radius-8)",
               border: "none", cursor: "pointer", fontFamily: "inherit",
               fontSize: 12, fontWeight: 700, color: "#fff",
-              background: anyDenied ? "var(--color-destructive)" : "var(--color-primary)",
+              background: "var(--color-destructive)",
             }}>
-            {anyDenied ? "설정 방법" : "허용하기"}
+            설정 방법
           </button>
         </div>
       )}
 
-      {/* ── PWA 설치 버튼 (설치 가능 + 미설치 시) ── */}
-      {installable && (
+      {/* ③ 아직 안 물어본 상태 — 한 줄로. 🔴 버튼은 남긴다(여기서 허용을 받는다). */}
+      {compact && (
         <div style={{
-          display: "flex", alignItems: "center", gap: 10,
-          padding: "10px 14px", margin: "0 0 4px",
-          background: "var(--color-bg)",
-          border: "1px solid var(--color-line)", borderRadius: "var(--radius-12)",
-          boxShadow: "var(--shadow-emphasize)",
+          display: "flex", alignItems: "center", gap: 9,
+          padding: "7px 12px", margin: "0 0 4px",
+          background: "var(--color-primary-soft)",
+          border: "1px solid var(--color-primary)",
+          borderRadius: "var(--radius-pill)",
         }}>
-          <div style={{ fontSize: 22, flexShrink: 0 }}>📲</div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--color-label)" }}>홈 화면에 앱 추가</div>
-            <div style={{ fontSize: 11, color: "var(--color-label-mute)", marginTop: 2 }}>
-              빠른 실행을 위해 설치하세요
-            </div>
+          <div style={{ flexShrink: 0, color: "var(--color-primary-deep)", display: "inline-flex" }}>
+            <Icon name="bell" size={15} stroke={2} />
           </div>
-          <button onClick={promptInstall}
+          <div style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 700, color: "var(--color-primary-deep)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            도착 알림을 받으려면 {items.join(" · ")} 권한이 필요합니다
+          </div>
+          <button onClick={handleBannerClick}
             style={{
-              flexShrink: 0, padding: "8px 14px", borderRadius: "var(--radius-8)",
-              border: "1px solid var(--color-primary)", cursor: "pointer",
-              fontFamily: "inherit", fontSize: 12, fontWeight: 700,
-              color: "var(--color-primary-deep)", background: "var(--color-primary-soft)",
+              flexShrink: 0, height: 26, padding: "0 12px", borderRadius: "var(--radius-pill)",
+              border: "none", cursor: "pointer", fontFamily: "inherit",
+              fontSize: 11.5, fontWeight: 700, color: "#fff",
+              background: "var(--color-primary)",
             }}>
-            설치
+            허용
           </button>
         </div>
       )}

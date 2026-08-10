@@ -501,11 +501,11 @@ export default function EmployeeApp() {
           줄 수를 2줄로 묶어도 글꼴·기기·언어에 따라 높이는 달라지므로 고정 px 로 되돌리지 말 것.
           되먹임 없음 — 배너는 fixed 라 이 margin 이 배너 높이에 영향을 주지 않는다. */}
       <div style={{ ...S.content, marginTop: activeNotice ? noticeBarH : 0 }}>
+        {/* PermissionGate 는 HomeTab **안**(브랜드 밴드 아래)에서 렌더한다 — 2026-08-10.
+            예전엔 여기 밴드보다 위에 있어서 앱을 처음 여는 사람이 브랜드가 아니라
+            회색 카드부터 봤다. 🔴 위치만 바꿨고 **노출 조건은 그대로**다(권한 메시지 누락 금지). */}
         {tab === "home"     && (
-          <>
-            <PermissionGate containerStyle={{ flexShrink: 0, padding: "8px 12px 0" }} />
-            <HomeTab companyId={companyId} session={session} branding={branding} onScanTab={() => setTab("scan")} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />
-          </>
+          <HomeTab companyId={companyId} session={session} branding={branding} onScanTab={() => setTab("scan")} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />
         )}
         {tab === "routes"   && <RoutesTab companyId={companyId} session={session} onSessionUpdate={(s) => { saveSession({...session,...s}); setSession(p=>({...p,...s})); }} />}
         {tab === "notices"  && <NoticesTab notices={notices} unreadCount={unreadCount} />}
@@ -1267,6 +1267,11 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
           </div>
         )}
       </div>
+
+      {/* 권한 안내 — 브랜드 밴드 **바로 아래**, 지도 위(2026-08-10).
+          🔴 스크롤 밖으로 밀리면 안 되는 메시지라 지도보다 위, `flexShrink:0` 자리에 둔다.
+             위치만 옮겼고 노출 조건은 그대로다(권한 없으면 도착 알림이 아예 안 간다). */}
+      <PermissionGate containerStyle={{ flexShrink: 0, padding: '8px 12px 0' }} />
 
       {/* [DIAG-ETA 제거예정] EmployeeApp 진단 — URL ?debug=1 일 때만, 내 정류장 한정.
           prod 영향 0(URL 파라미터 없으면 미렌더). 다음 커밋에 grep "[DIAG-ETA" 통째 제거. */}
