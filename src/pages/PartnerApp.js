@@ -2118,7 +2118,7 @@ function OperationsMode({ codeData, code, routes }) {
             </div>
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 8, padding: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8, padding: 12 }}>
             {myRoutesList.map(r => {
               const active = routeFilter === r.id;
               return (
@@ -2128,8 +2128,12 @@ function OperationsMode({ codeData, code, routes }) {
                     border: `1px solid ${active ? "var(--color-primary)" : "var(--color-line)"}`,
                     borderRadius: 10, padding: "10px 12px", cursor: "pointer",
                   }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 4 }}>
-                    <span style={{ fontSize: 13, fontWeight: 800, color: active ? "var(--color-primary-deep)" : "var(--color-label)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
+                  {/* 🔴 노선명은 자르지 않는다(2026-08-11) — 채드윅 이름이 44자라 한 줄 말줄임이면
+                      `[H1] 등교(월~수,금) / To S…` 처럼 구분이 안 된다. 글자 크기는 줄이지 않고
+                      줄바꿈으로 푼다(2026-08-07 승객앱과 같은 결정). `keep-all` 만으로는 띄어쓰기
+                      없는 긴 이름이 가로로 넘치므로 `anywhere` 병용. */}
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 6, marginBottom: 4 }}>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: active ? "var(--color-primary-deep)" : "var(--color-label)", flex: 1, minWidth: 0, wordBreak: "keep-all", overflowWrap: "anywhere" }}>{r.name}</span>
                     {r.type && <Pill tone="primary">{r.type}</Pill>}
                   </div>
                   <div style={{ display: "flex", gap: 8, fontSize: 11, color: "var(--color-label-mute)" }}>

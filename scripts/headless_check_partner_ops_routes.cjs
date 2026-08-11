@@ -75,7 +75,17 @@ function loadDb() {
       const card = el.parentElement || el;
       const nameEl = card.querySelector("span");
       const r = card.getBoundingClientRect();
-      out.push({ name: (nameEl ? nameEl.textContent : "").trim(), visible: r.width > 0 && r.height > 0 });
+      // 잘림은 "줄바꿈 넣었으니 되겠지"가 아니라 픽셀로 잰다(2026-08-07 노선명 건과 같은 잣대).
+      const clipped = nameEl
+        ? (nameEl.scrollWidth > nameEl.clientWidth + 1 || nameEl.scrollHeight > nameEl.clientHeight + 1)
+        : false;
+      const fontPx = nameEl ? parseFloat(getComputedStyle(nameEl).fontSize) : 0;
+      out.push({
+        name: (nameEl ? nameEl.textContent : "").trim(),
+        visible: r.width > 0 && r.height > 0,
+        clipped, fontPx,
+        overflowsCard: nameEl ? nameEl.getBoundingClientRect().right > r.right + 1 : false,
+      });
     });
     return out;
   });
@@ -93,7 +103,15 @@ function loadDb() {
   const zeroShown = zeroPassengerNames.filter((n) => shown.some((s) => s === n || n.startsWith(s.replace(/…$/, ""))));
   ok(`[3] 승객 0명 노선도 나온다(${zeroPassengerNames.length}개 중 ${zeroShown.length})`,
     zeroPassengerNames.length === 0 || zeroShown.length === zeroPassengerNames.length, zeroPassengerNames.length - zeroShown.length);
-  ok("[4] 콘솔 오류 0", errors.length === 0, errors.slice(0, 3));
+  // [4] 노선명 잘림 — 이름이 다 보이지 않으면 29개가 나와도 구분이 안 된다(2026-08-11 후속)
+  const vis = cards.filter((c) => c.visible && c.name);
+  const clipped = vis.filter((c) => c.clipped).map((c) => norm(c.name));
+  const overflow = vis.filter((c) => c.overflowsCard).map((c) => norm(c.name));
+  const longest = routeNames.reduce((a, b) => (b.length > a.length ? b : a), "");
+  ok(`[4] 노선명 잘린 카드 0개(가장 긴 이름 ${longest.length}자)`, clipped.length === 0, clipped.slice(0, 5));
+  ok("[5] 카드 밖으로 넘친 이름 0개", overflow.length === 0, overflow.slice(0, 5));
+  ok("[6] 글자 크기 13px 유지(축소로 때우지 않았다)", vis.every((c) => c.fontPx >= 13), vis.map((c) => c.fontPx)[0]);
+  ok("[7] 콘솔 오류 0", errors.length === 0, errors.slice(0, 3));
 
   const shot = process.env.SHOT || path.join(require("os").tmpdir(), "partner_ops_routes.png");
   await page.screenshot({ path: shot, fullPage: true }).catch(() => {});

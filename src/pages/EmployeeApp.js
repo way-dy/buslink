@@ -3226,6 +3226,26 @@ function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, session.empNo]);
 
+  // ── 배정 노선 이름(2026-08-11) ──
+  // 세션에는 `routeId` 밖에 없어 이 카드가 문서 ID(`yRhXBbOI…`)를 그대로 노출하고 있었다.
+  // 승객(학생·학부모)이 보는 화면이므로 이름으로 바꾼다. 조회 1회·실패하면 표시만 "–".
+  // 🔴 실패해도 ID 로 폴백하지 말 것 — 사람이 읽을 수 없는 값이라 없느니만 못하다.
+  const [routeName, setRouteName] = useState("");
+  useEffect(() => {
+    let alive = true;
+    if (!session.routeId) { setRouteName(""); return; }
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "companies", companyId, "routes", session.routeId));
+        if (!alive || !snap.exists()) return;
+        setRouteName(snap.data().name || snap.data().code || "");
+      } catch (e) {
+        console.warn("[설정] 배정 노선 조회 실패(무시):", e.message);
+      }
+    })();
+    return () => { alive = false; };
+  }, [companyId, session.routeId]);
+
   // 배터리 절전 안내 카드(작업B) — 안드로이드만, 삼성/일반 분기. iOS·데스크톱은 null.
   const batteryPlatform = detectBatteryGuidePlatform();
   // 앱 설치 가이드 재노출(작업C) — 설정에서 언제든 설치 진입 가능(3일 스누즈 무관).
@@ -3347,10 +3367,10 @@ function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate }
         {/* 내 정보 */}
         <div style={{ background: "var(--color-bg)", borderRadius: "var(--radius-16)", padding: "16px 18px", border: "1px solid var(--color-line)", boxShadow: "var(--shadow-emphasize)" }}>
           <div style={{ fontSize: 11, color: "var(--color-label-mute)", marginBottom: 10, fontWeight: 700, letterSpacing: "0.05em" }}>내 정보</div>
-          {[["이름", session.name], ["사번", session.empNo], ["부서", session.dept || "–"], ["배정 노선", session.routeId || "–"]].map(([k,v]) => (
-            <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid var(--color-line)" }}>
-              <span style={{ fontSize: 13, color: "var(--color-label-mute)" }}>{k}</span>
-              <span style={{ fontSize: 13, fontWeight: 700, color: "var(--color-label)" }}>{v}</span>
+          {[["이름", session.name], ["사번", session.empNo], ["부서", session.dept || "–"], ["배정 노선", routeName || "–"]].map(([k,v]) => (
+            <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "7px 0", borderBottom: "1px solid var(--color-line)" }}>
+              <span style={{ fontSize: 13, color: "var(--color-label-mute)", flexShrink: 0 }}>{k}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "var(--color-label)", textAlign: "right", wordBreak: "keep-all", overflowWrap: "anywhere" }}>{v}</span>
             </div>
           ))}
         </div>
