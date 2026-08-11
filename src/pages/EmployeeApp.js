@@ -167,6 +167,14 @@ function NoticeForceModal({ notice, onClose }) {
   const canClose = !isEmergency || countdown <= 0;
   const headerBg = isEmergency ? "var(--color-destructive)" : "var(--color-primary)";
 
+  // 🔴 화면을 통째로 덮는 모달은 **자기 힘으로 닫힐 수 있어야 한다**(2026-08-11).
+  //    예전엔 닫힘이 전적으로 부모의 `markNoticesRead` 부수효과에 달려 있어서,
+  //    그게 조용히 실패하면(세션에 empNo 없음 등) 사용자가 앱을 아예 못 썼다.
+  //    로컬 dismissed 를 두면 부모에서 무슨 일이 나든 버튼은 항상 듣는다.
+  //    ⚠ 부모가 `key={notice.id}` 로 렌더하므로 **새 공지는 새 인스턴스**라 다시 뜬다.
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed) return null;
+
   const createdLabel = (() => {
     const ms = noticeCreatedMs(notice);
     if (!ms) return "";
@@ -209,7 +217,7 @@ function NoticeForceModal({ notice, onClose }) {
         </div>
         <div style={{ padding: "12px 16px 16px", borderTop: "1px solid var(--color-line)" }}>
           <button
-            onClick={canClose ? onClose : undefined}
+            onClick={canClose ? () => { setDismissed(true); try { onClose && onClose(); } catch (e) { console.warn("[공지 읽음 처리 실패]", e); } } : undefined}
             disabled={!canClose}
             style={{
               width: "100%", padding: "14px",
@@ -357,10 +365,14 @@ export default function EmployeeApp() {
 
   // 공지함 진입 시 읽음 시각 갱신(가장 최신 공지보다 나중으로 — 안 읽음 0건 처리).
   const markNoticesRead = useCallback(() => {
-    if (!session?.empNo) return;
     const latest = notices.reduce((m, n) => Math.max(m, noticeCreatedMs(n)), 0);
     const now = Math.max(Date.now(), latest + 1);
-    saveNoticeReadAt(session.empNo, now);
+    // 🔴 empNo 가 없어도 **화면 상태는 반드시 갱신한다**(2026-08-11 way 신고).
+    //    예전엔 맨 앞에서 `if (!session?.empNo) return;` 으로 조용히 빠져나가
+    //    강제 공지 모달이 안 닫히고 **앱 전체가 잠겼다** — 그 모달은 inset:0·z-index 99999 라
+    //    탭바까지 덮어서 사용자가 할 수 있는 게 아무것도 없어진다.
+    //    영속화(localStorage)만 empNo 가 있을 때 하고, 세션 내 읽음 처리는 항상 한다.
+    if (session?.empNo) saveNoticeReadAt(session.empNo, now);
     setNoticeReadAt(now);
   }, [session?.empNo, notices]);
 
@@ -463,7 +475,9 @@ export default function EmployeeApp() {
     <div style={S.appWrap}>
       <InstallPrompt />
       {/* ── 강제 공지 모달 — 안 읽음 공지 1건을 풀스크린으로 노출(푸시 누락 대비 도달성 보장 통로) ── */}
-      {forceNotice && <NoticeForceModal notice={forceNotice} onClose={markNoticesRead} />}
+      {/* key={id} 필수 — 모달이 로컬 dismissed 를 갖게 됐으므로, 키가 없으면 인스턴스가
+          재사용되어 **새 공지가 도착해도 다시 뜨지 않는다**(2026-08-11). */}
+      {forceNotice && <NoticeForceModal key={forceNotice.id} notice={forceNotice} onClose={markNoticesRead} />}
       {/* ── 공지 배너 — 본문 영역 탭 시 공지함으로 이동(읽음 처리) ── */}
       {activeNotice && (
         <div ref={noticeBarRef} style={{
