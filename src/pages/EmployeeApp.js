@@ -1329,7 +1329,11 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
       {/* [/DIAG-ETA] */}
 
       {/* ── 지도 (상단 55%) ── */}
-      <div style={{ flex: '0 0 55%', minHeight: 0, position: 'relative' }}>
+      {/* 지도 52% — 2026-08-11 최우석 "노선(차량위치)쪽이 한눈에 보기 힘들다".
+          노선도에 시각·'내 정류장' 줄이 늘면서 라벨 아래끝이 탭바를 17px 넘어 가려졌다(실측).
+          🔴 눈대중이 아니라 `headless_check_home_strip.cjs` 가 **탭바 윗변과 라벨 아래끝을 픽셀로
+             비교**하므로, 이 값을 되돌리면 그 검사가 빨간불이 된다. */}
+      <div style={{ flex: '0 0 52%', minHeight: 0, position: 'relative' }}>
         {/* onCreate relayout: 이 지도 컨테이너는 100dvh→flex:1→flex:1→flex:'0 0 55%' 체인.
             카카오 맵이 dvh/flex 확정 전 0px로 초기화되면 CSS와 달리 자동 복구 안 함(영구 흰화면).
             생성 직후 + 레이아웃 안정 후 relayout 1회씩 = /bus(고정 100vh)와 동등한 안정성. */}
@@ -1504,6 +1508,11 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
               </div>
             ) : (
               <>
+                {/* 안내 문구(2026-08-11 최우석 요청) — "QR 태깅 화면을 못 찾겠다"에 대한 답.
+                    정류장을 고르는 행동과 QR 탑승이 이어져 있다는 걸 노선도 바로 위에서 말해 준다. */}
+                <div style={{ padding: '0 16px 8px', fontSize: 12.5, fontWeight: 700, color: 'var(--color-primary-deep)', wordBreak: 'keep-all', lineHeight: 1.4 }}>
+                  탑승하실 정류장을 선택하시면 QR탑승 하실 수 있습니다.
+                </div>
                 {/* 가로 스크롤 — 정류장이 많으면 넘치므로 스크롤(스크롤바는 숨김·모바일 친화) */}
                 <div data-route-strip ref={stripRef} style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: 4 }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', paddingLeft: 16, paddingRight: 16, minWidth: 'max-content', gap: 0 }}>
@@ -1523,8 +1532,11 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
                       const role = roles.join('·');
 
                       const est = estByStopId[s.id];
-                      // 시각은 내 정류장·역할이 있는 정류장에만(전 정류장에 붙이면 글자가 뒤엉킨다 — 2026-06-26 #5 와 같은 이유)
-                      const timeLabel = (role || isMyStop) ? (est && (est.estimatedAt || est.plannedAt)) : null;
+                      // 시각을 **전 정류장**에 표시(2026-08-11 최우석 요청 목업). 예전엔 역할·내 정류장에만
+                      // 붙였는데("전 정류장에 붙이면 글자가 뒤엉킨다" — 2026-06-26 #5), 그때는 컬럼이 좁고
+                      // 이름이 시각과 같은 줄 폭을 다퉜다. 지금은 컬럼을 넓히고(78→86) 줄을 분리했으며,
+                      // 🔴 겹침을 픽셀로 재는 하네스(headless_check_home_strip.cjs)로 잠갔다.
+                      const timeLabel = est && (est.estimatedAt || est.plannedAt);
 
                       const nameColor = isMyStop ? 'var(--color-primary)'
                         : isFirst ? 'var(--color-positive)'
@@ -1535,7 +1547,7 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
                         <div key={s.id} style={{ display: 'flex', alignItems: 'center' }}>
                           {/* 자동 스크롤 기준점 = 버스 위치(운행 중) → 없으면 내 정류장 */}
                           <div ref={(inService ? isBusHere : isMyStop) ? stripFocusRef : undefined}
-                            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 78, cursor: 'pointer' }}
+                            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 86, cursor: 'pointer' }}
                             onClick={() => {
                               // #3(2026-06-26) — 터치한 정류장을 지도 중앙으로. 자동 재센터 억제.
                               userCenteredRef.current = true;
@@ -1570,16 +1582,36 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
                             }} />
                             {/* 정류장 이름 */}
                             <div style={{
-                              fontSize: 13, marginTop: 6, textAlign: 'center', width: 72,
+                              // 🔴 한 줄 말줄임을 걷고 **2줄까지** 보여준다(2026-08-11 최우석
+                              //    "한눈에 보기 어렵다"). prod 정류장 이름은 `구 서울행정법원 버스정류장
+                              //    (서초…)` 처럼 길어 한 줄에선 거의 다 잘렸다. 2026-08-07 노선명을
+                              //    2줄로 푼 것과 같은 처방이며, 글자 크기는 줄이지 않는다.
+                              //    높이를 고정(2줄분)해 정류장마다 아래 줄이 어긋나지 않게 한다.
+                              fontSize: 14, marginTop: 7, textAlign: 'center', width: 80,
                               color: nameColor,
                               fontWeight: isMyStop ? 900 : isFirst || isLast ? 800 : 700,
-                              wordBreak: 'keep-all', lineHeight: 1.25,
-                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                              // `keep-all` 만 두면 띄어쓰기 없는 긴 이름(`채드윅국제학교(Chadwick)`)이
+                              // 줄바꿈을 못 해 가로로 넘친다 → `overflowWrap:'anywhere'` 로 그때만 끊는다
+                              // (낱말 경계 우선은 그대로 유지).
+                              wordBreak: 'keep-all', overflowWrap: 'anywhere', lineHeight: 1.25, height: 35,
+                              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden'
                             }}>
                               {s.name}
                             </div>
-                            {timeLabel && <div style={{ fontSize: 10, color: 'var(--color-label-alt)', marginTop: 1 }}>{timeLabel}</div>}
-                            {isMyStop && <div style={{ color: 'var(--color-primary)', fontSize: 10, fontWeight: 800, marginTop: 1 }}>내 정류장</div>}
+                            <div style={{ height: 15, fontSize: 11.5, lineHeight: '15px', color: 'var(--color-label-alt)', fontVariantNumeric: 'tabular-nums' }}>
+                              {timeLabel || ''}
+                            </div>
+                            {/* 🔴 "내 정류장" 을 **모든 정류장 아래** 둔다(2026-08-11 목업). 예전엔 이미 고른
+                                정류장에만 보여서 **지정할 수 있다는 것 자체가 안 보였다** — 푸시 토큰 8개 중
+                                내 정류장 지정이 5명뿐이던 병목의 화면 쪽 원인이다. 선택된 곳은 진하게,
+                                나머지는 흐리게 둬서 "여기를 누르면 내 정류장이 된다"가 읽히게 한다. */}
+                            <div style={{
+                              fontSize: 11, fontWeight: isMyStop ? 800 : 600, marginTop: 1,
+                              color: isMyStop ? 'var(--color-primary)' : 'var(--color-label-alt)',
+                              opacity: isMyStop ? 1 : 0.75,
+                            }}>
+                              내 정류장
+                            </div>
                           </div>
 
                           {/* 연결선 (마지막 제외) — 정류장 원 높이에 맞춤.
