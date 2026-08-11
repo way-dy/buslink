@@ -3,7 +3,7 @@ import {
   validatePartnerCode, parseEmployeeExcel,
   importEmployees, downloadSampleExcel, reissuePins
 } from "../lib/partner";
-import { partnerRouteOptions } from "../lib/partnerAccess";
+import { partnerRouteOptions, partnerOpsRoutes } from "../lib/partnerAccess";
 import { seatUsage } from "../lib/routeOrder";
 import QRCode from "qrcode";
 import { buildAccountCardsHtml, buildPassengerLoginUrl, openPrintWindow } from "../lib/accountCards";
@@ -1750,21 +1750,14 @@ function OperationsMode({ codeData, code, routes }) {
     });
   }, [companyId, code]);
 
-  // 자사 routeId 집합 + 노선별 직원 수
+  // 자사 routeId 집합 + 노선별 승객 수 — 정본 = partnerAccess.partnerOpsRoutes
+  // 🔴 기준축은 **거래처에 지정된 노선**(routes.partnerCode)이고 승객 배정 노선은 합집합.
+  //    승객 배정만으로 모으면 하교·요일별·방과후처럼 아무도 기준노선으로 잡지 않는 노선이
+  //    통째로 빠진다(2026-08-11 실측: 채드윅 29개 중 8개만 표시). 되돌리지 말 것.
   const { myRouteIds, byRouteCount, unassignedCount } = useMemo(() => {
-    const m = new window.Map();
-    let unassigned = 0;
-    passengers.forEach(p => {
-      const rid = p.routeId || null;
-      if (!rid) { unassigned++; return; }
-      m.set(rid, (m.get(rid) || 0) + 1);
-    });
-    return {
-      myRouteIds: new window.Set(m.keys()),
-      byRouteCount: m,
-      unassignedCount: unassigned,
-    };
-  }, [passengers]);
+    const r = partnerOpsRoutes(routes, code, passengers);
+    return { myRouteIds: r.ids, byRouteCount: r.byRouteCount, unassignedCount: r.unassignedCount };
+  }, [passengers, routes, code]);
 
   // 노선 카드용 — routes props에서 매칭 + 필요 정보만 추출.
   const myRoutesList = useMemo(() => {
@@ -2119,9 +2112,9 @@ function OperationsMode({ codeData, code, routes }) {
           <div style={{ padding: 20, textAlign: "center", color: "var(--color-label-mute)", fontSize: 12 }}>로딩 중...</div>
         ) : myRoutesList.length === 0 ? (
           <div style={{ padding: 24, textAlign: "center", color: "var(--color-label-mute)", fontSize: 13 }}>
-            배정된 승객이 없습니다
+            표시할 노선이 없습니다
             <div style={{ fontSize: 11, color: "var(--color-label-alt)", marginTop: 4 }}>
-              승객 등록 탭에서 노선을 배정하세요
+              노선이 등록되면 여기에 표시됩니다
             </div>
           </div>
         ) : (
@@ -2170,7 +2163,7 @@ function OperationsMode({ codeData, code, routes }) {
         </div>
         {myRoutesList.length === 0 ? (
           <div style={{ padding: 24, textAlign: "center", color: "var(--color-label-mute)", fontSize: 13 }}>
-            배정된 노선이 없습니다
+            표시할 노선이 없습니다
           </div>
         ) : (
           <div style={{ height: "40vh", minHeight: 280, position: "relative" }}>

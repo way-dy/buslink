@@ -77,6 +77,37 @@ export function partnerRouteOptions(routes, code, current) {
 }
 
 /**
+ * 협력사 포털 **운영 포털**이 보여줄 노선 집합 (2026-08-11 배시현 개선요청 `DnPGSfHB…`).
+ *
+ * 🔴 기준축은 **거래처에 지정된 노선**(`routes.partnerCode === code`)이다.
+ *   예전엔 "승객이 배정된 노선"만 모아 썼는데, 승객 문서는 `routeId` 를 **하나만** 갖는다.
+ *   그래서 아무도 기준노선으로 잡지 않는 하교·요일별·방과후 노선이 통째로 빠졌다
+ *   (prod 실측 2026-08-11: 채드윅 29개 중 **8개** · 다우디지털스퀘어 18개 중 **2개**만 표시).
+ *
+ * 🔴 승객 배정에서 나온 노선은 **합집합으로 남긴다** — 거래처가 지정 안 된 노선이나 과거에
+ *   다른 거래처 노선으로 배정된 승객이 실재하므로(prod 실측), 빼면 지금 보이던 노선이 사라진다.
+ *
+ * @param {Array} routes     회사 전체 노선 [{id, partnerCode?}]
+ * @param {string} code      이 포털의 업체코드
+ * @param {Array} passengers 이 거래처 활성 승객 [{routeId?}]
+ * @returns {{ids:Set<string>, byRouteCount:Map<string,number>, unassignedCount:number}}
+ */
+export function partnerOpsRoutes(routes, code, passengers) {
+  const byRouteCount = new Map();
+  let unassignedCount = 0;
+  (Array.isArray(passengers) ? passengers : []).forEach((p) => {
+    const rid = (p && p.routeId) || null;
+    if (!rid) { unassignedCount++; return; }
+    byRouteCount.set(rid, (byRouteCount.get(rid) || 0) + 1);
+  });
+  const ids = new Set(byRouteCount.keys());
+  (Array.isArray(routes) ? routes : []).forEach((r) => {
+    if (r && r.id && code && r.partnerCode === code) ids.add(r.id);
+  });
+  return { ids, byRouteCount, unassignedCount };
+}
+
+/**
  * 좌석예약 모드 (2026-07-30 way 결정 — 고객사가 셋 중 고른다).
  *
  * boolean 이 아니라 **한 축의 3단계**다(탑승 모드 `boardingMode` 와 같은 방식):
