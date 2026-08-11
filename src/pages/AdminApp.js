@@ -231,7 +231,9 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
             <BusLinkLogo size={22} sub="관리자" />
           </div>
           <div style={S.sideSection}>메뉴</div>
-          <nav style={S.nav}>
+          {/* 메뉴 리스트만 스크롤(2026-08-11) — 탭이 14개(+슈퍼관리자 15개)라 창 높이가 낮으면
+              아래 항목이 잘린 채 접근 불가였다. 로고·회사ID·로그아웃은 고정 유지. */}
+          <nav data-nav-scroll style={S.nav}>
             {TABS.map((t, i) => (
               <div key={i} data-nav-item onClick={() => setTab(i)}
                 style={{ ...S.navItem, ...(tab === i ? S.navActive : {}) }}>
@@ -250,7 +252,6 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
               </div>
             )}
           </nav>
-          <div style={{ flex: 1 }} />
           <div style={S.sideFoot}>
             <StatusDot tone="positive" size={7} />
             {isSuperAdmin ? (
@@ -312,9 +313,10 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
           </div>
         )}
 
-        {/* 모바일 드롭다운 메뉴 */}
+        {/* 모바일 드롭다운 메뉴 — maxHeight+스크롤 필수: 부모(content)가 overflow:hidden 이라
+            넘치면 항목이 통째로 잘린 채 접근 불가가 된다(PC 사이드바와 같은 함정). */}
         {isMobile && menuOpen && (
-          <div style={{ position:"absolute", top:50, left:0, right:0, background:"var(--color-bg)", zIndex:100, borderBottom:"1px solid var(--color-line)", boxShadow:"var(--shadow-strong)" }}>
+          <div data-nav-scroll style={{ position:"absolute", top:50, left:0, right:0, maxHeight:"calc(100dvh - 50px)", overflowY:"auto", background:"var(--color-bg)", zIndex:100, borderBottom:"1px solid var(--color-line)", boxShadow:"var(--shadow-strong)" }}>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:0 }}>
               {TABS.map((t, i) => (
                 <div key={i} onClick={() => { setTab(i); setMenuOpen(false); }}
@@ -5936,18 +5938,20 @@ function ImprovementDetailModal({ req, user, isSuperAdmin, companyLabel, onClose
 
 const S = {
   wrap:{display:"flex",height:"100dvh",background:"var(--color-bg-soft)",fontFamily:"var(--font-base)",color:"var(--color-label)",position:"relative",overflow:"hidden",fontSize:13},
-  sidebar:{width:236,background:"var(--color-bg)",borderRight:"1px solid var(--color-line)",display:"flex",flexDirection:"column",padding:"18px 14px"},
-  logo:{display:"flex",alignItems:"baseline",gap:8,padding:"4px 8px 16px",marginBottom:10,borderBottom:"1px solid var(--color-line)"},
+  sidebar:{width:236,flexShrink:0,background:"var(--color-bg)",borderRight:"1px solid var(--color-line)",display:"flex",flexDirection:"column",minHeight:0,padding:"18px 14px"},
+  logo:{display:"flex",alignItems:"baseline",gap:8,flexShrink:0,padding:"4px 8px 16px",marginBottom:10,borderBottom:"1px solid var(--color-line)"},
   logoText:{fontSize:20,fontWeight:800,fontFamily:"var(--font-brand)",letterSpacing:"-0.03em",color:"var(--color-primary)"},
   logoSub:{fontSize:12,color:"var(--color-label-mute)"},
-  sideSection:{fontSize:11,fontWeight:700,letterSpacing:"0.04em",color:"var(--color-label-alt)",padding:"6px 12px 8px"},
-  nav:{display:"flex",flexDirection:"column",gap:2},
-  navItem:{display:"flex",alignItems:"center",gap:11,padding:"10px 12px",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:500,color:"var(--color-label-mute)",position:"relative",transition:"background .15s,color .15s",userSelect:"none"},
+  sideSection:{fontSize:11,fontWeight:700,letterSpacing:"0.04em",color:"var(--color-label-alt)",flexShrink:0,padding:"6px 12px 8px"},
+  // flex:1+minHeight:0 = 남는 높이를 전부 차지하고 넘치면 자기 안에서 스크롤.
+  // 🔴 minHeight:0 을 빼면 flex 기본 min-content 때문에 스크롤이 안 생기고 다시 잘린다.
+  nav:{display:"flex",flexDirection:"column",gap:2,flex:1,minHeight:0,overflowY:"auto",overflowX:"hidden"},
+  navItem:{display:"flex",alignItems:"center",gap:11,flexShrink:0,padding:"10px 12px",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:500,color:"var(--color-label-mute)",position:"relative",transition:"background .15s,color .15s",userSelect:"none"},
   navActive:{background:"var(--color-primary-soft)",color:"var(--color-primary-deep)",fontWeight:700},
   navAccent:{position:"absolute",left:3,top:"50%",transform:"translateY(-50%)",width:3,height:18,borderRadius:3,background:"var(--color-primary)"},
   navIcon:{flexShrink:0,display:"flex",opacity:.92},
-  sideFoot:{display:"flex",alignItems:"center",gap:7,padding:"10px 12px 8px",fontSize:11,color:"var(--color-label-alt)"},
-  logoutBtn:{display:"flex",alignItems:"center",justifyContent:"center",gap:7,width:"100%",border:"1px solid var(--color-line)",borderRadius:10,padding:"10px 12px",color:"var(--color-label-mute)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"},
+  sideFoot:{display:"flex",alignItems:"center",gap:7,flexShrink:0,padding:"10px 12px 8px",marginTop:8,borderTop:"1px solid var(--color-line)",fontSize:11,color:"var(--color-label-alt)"},
+  logoutBtn:{display:"flex",alignItems:"center",justifyContent:"center",gap:7,width:"100%",flexShrink:0,border:"1px solid var(--color-line)",borderRadius:10,padding:"10px 12px",color:"var(--color-label-mute)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"},
   content:{flex:1,display:"flex",flexDirection:"column",minHeight:0,overflow:"hidden"},
   mapSidebar:{width:"min(280px,38vw)",minWidth:180,background:"var(--color-bg)",borderRight:"1px solid var(--color-line)",display:"flex",flexDirection:"column",overflowY:"auto"},
   panelHeader:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,padding:"14px 20px",borderBottom:"1px solid var(--color-line)",background:"var(--color-bg)",flexShrink:0},
