@@ -10,6 +10,10 @@ import {
 } from "firebase/firestore";
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { compareRoutes, seatUsage } from "../lib/routeOrder";
+// 배차 일정 수정 후 남는 펼침 배차 정리(2026-08-12) — 순수 판정, 서버 shouldExpand 미러
+import {
+  PRUNE_LOOKAHEAD_DAYS, todayKST, upcomingDates, selectPrunableDispatches,
+} from "../lib/dispatchSchedule";
 import { sendGPS } from "../lib/gps";
 import { forceReconnect } from "../lib/forceReconnect";
 import { classifyRunSignals, STALE_SIGNAL_MIN } from "../lib/runSignals";
@@ -1800,6 +1804,50 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
     setForm(f => ({...f, excludeDates: f.excludeDates.filter(x => x !== v)}));
   };
 
+  // ── 일정 변경 후 남는 펼침 배차 정리 ──────────────────────────────
+  // CF `expandDispatchSchedules` 는 만들기만 하고 지우지 않는다(일별 수동 수정 보존이 목적).
+  // 그래서 시작일을 미래로 밀거나 요일을 줄이거나 비활성으로 바꾸면 **이미 만들어진 배차가 남아**
+  // 그날 아침 단말 차량 위치가 승객앱에 뜬다(2026-08-12 신고). 변경 직후 그 잔여분을 세어
+  // 운영자에게 확인받고 지운다. 🔴 과거 배차·수동 배차·운행 흔적 있는 배차는 대상에서 뺀다.
+  const pruneScheduleDispatches = async (scheduleId, nextSchedule) => {
+    const today = todayKST();
+    const days = upcomingDates(today, PRUNE_LOOKAHEAD_DAYS);
+    const dispatchesByDay = {};
+    for (const day of days) {
+      const snap = await getDocs(query(
+        collection(db, "companies", companyId, "dispatches", day, "list"),
+        where("scheduleId", "==", scheduleId)
+      ));
+      dispatchesByDay[day] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+    const { prunable, keptWithTrace } = selectPrunableDispatches({
+      scheduleId, schedule: nextSchedule, dispatchesByDay, today,
+    });
+    if (prunable.length === 0) {
+      if (keptWithTrace.length > 0) {
+        alert(`바뀐 조건과 맞지 않는 배차 ${keptWithTrace.length}건이 있지만 이미 운행 기록이 남아 있어 그대로 두었습니다.\n필요하면 배차 관리 탭에서 직접 삭제하세요.`);
+      }
+      return;
+    }
+    const preview = prunable.slice(0, 8).map(p => `· ${p.day} ${p.departTime} ${p.routeName}`).join("\n");
+    const more = prunable.length > 8 ? `\n… 외 ${prunable.length - 8}건` : "";
+    const traceNote = keptWithTrace.length > 0
+      ? `\n\n※ 운행 기록이 남은 ${keptWithTrace.length}건은 삭제하지 않습니다.` : "";
+    if (!window.confirm(
+      `이 일정으로 이미 만들어진 배차 ${prunable.length}건이 바뀐 조건과 맞지 않습니다.\n함께 삭제할까요?\n\n${preview}${more}${traceNote}\n\n삭제하지 않으면 그날 관제 화면과 승객앱에 계속 운행중으로 표시됩니다.`
+    )) return;
+    let done = 0;
+    for (const p of prunable) {
+      try {
+        await deleteDoc(doc(db, "companies", companyId, "dispatches", p.day, "list", p.id));
+        done++;
+      } catch (e) { /* 개별 실패는 아래 합계로 알린다 */ }
+    }
+    alert(done === prunable.length
+      ? `배차 ${done}건을 삭제했습니다.`
+      : `배차 ${done}/${prunable.length}건을 삭제했습니다. 남은 건은 배차 관리 탭에서 확인해주세요.`);
+  };
+
   const handleSave = async () => {
     if (!form.name?.trim()) return alert("일정 이름을 입력해주세요");
     if (!form.routeId && !form.routeName?.trim()) return alert("노선을 선택해주세요");
@@ -1830,12 +1878,17 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
     try {
       if (editId) {
         await updateDoc(doc(db, "companies", companyId, "dispatchSchedules", editId), payload);
+        setShowForm(false);
+        // 바뀐 조건과 안 맞는 기존 배차 정리(확인 후 삭제). 저장 자체는 이미 끝났으므로
+        // 여기서 나는 오류가 저장을 되돌리지 않게 분리해 잡는다.
+        try { await pruneScheduleDispatches(editId, payload); }
+        catch (e) { alert("이미 만들어진 배차를 확인하지 못했습니다: " + e.message); }
       } else {
         await addDoc(collection(db, "companies", companyId, "dispatchSchedules"), {
           ...payload, createdAt: new Date().toISOString(), createdBy: currentUserUid || null,
         });
+        setShowForm(false);
       }
-      setShowForm(false);
     } catch (e) {
       alert("저장 오류: " + e.message);
     }
@@ -1843,9 +1896,11 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
   };
 
   const handleDelete = async (s) => {
-    if (!window.confirm(`일정 "${s.name}"을(를) 삭제하시겠습니까?\n\n※ 이미 생성된 미래 배차(dispatches)는 그대로 유지됩니다. 필요시 배차 관리 탭에서 수동 삭제하세요.`)) return;
+    if (!window.confirm(`일정 "${s.name}"을(를) 삭제하시겠습니까?\n\n※ 이미 생성된 배차가 있으면 함께 삭제할지 다음 단계에서 확인합니다.`)) return;
     try {
       await deleteDoc(doc(db, "companies", companyId, "dispatchSchedules", s.id));
+      try { await pruneScheduleDispatches(s.id, null); }
+      catch (e) { alert("이미 만들어진 배차를 확인하지 못했습니다: " + e.message); }
     } catch (e) {
       alert("삭제 오류: " + e.message);
     }
@@ -1853,9 +1908,15 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
 
   const handleToggleActive = async (s) => {
     try {
+      const next = { ...s, active: !s.active };
       await updateDoc(doc(db, "companies", companyId, "dispatchSchedules", s.id), {
-        active: !s.active, updatedAt: new Date().toISOString(),
+        active: next.active, updatedAt: new Date().toISOString(),
       });
+      // 비활성으로 바꾸면 이미 만들어진 배차가 그대로 남아 계속 운행중으로 표시된다.
+      if (!next.active) {
+        try { await pruneScheduleDispatches(s.id, next); }
+        catch (e) { alert("이미 만들어진 배차를 확인하지 못했습니다: " + e.message); }
+      }
     } catch (e) {
       alert("토글 오류: " + e.message);
     }
