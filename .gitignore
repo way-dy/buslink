@@ -40,3 +40,6 @@ yarn-error.log*
 /key/
 *serviceAccount*.json
 *-adminsdk-*.json
+
+# 회의 원본 녹음 — 용량이 크고 로컬 자료다(전사본 meeting.txt 가 정본)
+RQ/**/*.m4a
