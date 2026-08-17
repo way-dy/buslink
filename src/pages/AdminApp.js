@@ -15,6 +15,9 @@ import {
   PRUNE_LOOKAHEAD_DAYS, todayKST, upcomingDates, selectPrunableDispatches,
 } from "../lib/dispatchSchedule";
 import { sendGPS } from "../lib/gps";
+import { toLatLngPath } from "../lib/routeProgress";
+// 운행 이력 GPS 궤적 분해(2026-08-18) — 연속 구간/신호 공백/표본 간격 실측
+import { trackSegments, formatDuration, TRACK_GAP_SEC } from "../lib/gpsTrack";
 import { forceReconnect } from "../lib/forceReconnect";
 import { classifyRunSignals, STALE_SIGNAL_MIN } from "../lib/runSignals";
 import { forceEndRun } from "../lib/forceEndRun";
@@ -143,6 +146,9 @@ function gpsAgeMs(updatedAt) {
 function isGpsFresh(updatedAt) {
   return gpsAgeMs(updatedAt) < GPS_FRESH_MS;
 }
+// 지도 마커의 "신호 지연" 표시 임계(2026-08-18). 목록의 isGpsFresh(60초)와 일부러 다르다 —
+// 단말(유비칸) 차량은 서버 폴러가 1분 주기라 60초 잣대로는 마커가 매 분 회색↔파랑으로 깜빡인다.
+const MARKER_STALE_MS = 5 * 60 * 1000;
 
 // ═══════════════════════════════════════════════════════
 export default function AdminApp({ user, companyId, role, allowedPartnerCodes }) {
@@ -867,9 +873,56 @@ function MapTab({ companyId, allowed, drivers }) {
       <div style={{ position:"absolute", inset:0, visibility: viewMode === "map" ? "visible" : "hidden" }}>
         <Map center={center} style={MS.map} level={7}>
           {/* 선택 차량 있으면 그 차량만 표시(클릭 후 그 차량만 보기), 없으면 전체(2026-06-23) */}
-          {(selected ? vehicles.filter(v => v.id === selected.id) : vehicles).map(v => v.lat && v.lng && (
-            <MapMarker key={v.id} position={{ lat:v.lat, lng:v.lng }} onClick={() => setSelected(v)} />
-          ))}
+          {/* 차량 마커 — 기본 핀 대신 버스 아이콘 + 간략 정보 칩(2026-08-18 way 요청).
+              승객앱(EmployeeApp) 버스 마커와 같은 시각 언어(원형 primary + 흰 테두리 + buspulse).
+              🔴 신호 지연 판정은 MARKER_STALE_MS(5분) — 관제 목록의 isGpsFresh(60초)를 쓰면
+              단말 차량이 1분 주기 폴링이라 마커 색이 매 분 깜빡인다. */}
+          {(selected ? vehicles.filter(v => v.id === selected.id) : vehicles).map(v => v.lat && v.lng && (() => {
+            const on = selected?.id === v.id;
+            const stale = gpsAgeMs(v.updatedAt) >= MARKER_STALE_MS;
+            const tone = stale ? "var(--color-label-alt)" : "var(--color-primary)";
+            return (
+              <CustomOverlayMap key={v.id} position={{ lat:v.lat, lng:v.lng }} yAnchor={0.5}
+                zIndex={on ? 40 : 20} clickable>
+                <div onClick={() => { setSelected(v); setCenter({ lat:v.lat, lng:v.lng }); }}
+                  style={{ position:"relative", width:34, height:34, cursor:"pointer" }}>
+                  {!stale && (
+                    <span style={{ position:"absolute", inset:0, borderRadius:"50%", background:tone,
+                      opacity:0.45, animation:"buspulse 2s ease-out infinite", pointerEvents:"none" }} />
+                  )}
+                  <div style={{ position:"absolute", inset:0, background:tone, border:"3px solid #fff",
+                    borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff",
+                    boxShadow: on ? "0 0 0 5px rgba(0,102,255,.28), var(--shadow-float)" : "var(--shadow-float)" }}>
+                    <Icon name="bus" size={18} stroke={2} />
+                  </div>
+                  {/* 간략 정보 — 차량번호 + 속도(선택 시 노선명 한 줄 추가) */}
+                  <div style={{ position:"absolute", top:39, left:"50%", transform:"translateX(-50%)",
+                    display:"flex", flexDirection:"column", alignItems:"center", gap:2, pointerEvents:"none" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:5, whiteSpace:"nowrap",
+                      padding:"2px 7px", borderRadius:7, fontSize:10.5, lineHeight:1.3,
+                      background: on ? tone : "rgba(255,255,255,0.95)",
+                      color: on ? "#fff" : "var(--color-label)",
+                      border: `1px solid ${on ? tone : "var(--color-line)"}`,
+                      boxShadow:"var(--shadow-emphasize)" }}>
+                      <span style={{ fontWeight:700 }}>{v.vehicleNo || v.id}</span>
+                      <span style={{ fontWeight:600, opacity:0.75, fontFamily:"var(--font-mono)" }}>
+                        {stale ? timeSince(v.updatedAt) : `${v.speed ?? 0}km/h`}
+                      </span>
+                    </div>
+                    {on && (v.routeName || v.driverName) && (
+                      <div style={{ maxWidth:170, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                        padding:"1px 6px", borderRadius:6, fontSize:9.5, fontWeight:600,
+                        background:"rgba(255,255,255,0.95)", color:"var(--color-label-mute)",
+                        border:"1px solid var(--color-line)", boxShadow:"var(--shadow-emphasize)" }}>
+                        {v.routeName || v.routeId || "노선 미지정"}
+                        {v.driverName ? ` · ${v.driverName}` : ""}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </CustomOverlayMap>
+            );
+          })())}
         </Map>
       </div>
 
@@ -3965,7 +4018,17 @@ function HistoryTab({ companyId, vehicles, allowed }) {
     setLoading(false);
   };
 
-  const path = points.map(p=>({lat:p.lat,lng:p.lng}));
+  // GPS 궤적 밀도·공백 — "경로가 직선으로 나온다" 신고(2026-08-18)의 답을 화면에 적기 위한 실측값.
+  // 이 화면의 파랑 선은 도로 경로가 아니라 **GPS 수신점을 순서대로 이은 선**이다. 단말(유비칸)
+  // 차량은 좌표를 1~2분에 한 번 보내므로 점 사이가 수백 m~수 km 이고, 그 사이는 직선이 된다.
+  // 곡선이 아닌 게 결함이 아니라는 것과, 진짜 결함(신호 공백)을 화면에서 가르는 게 목적.
+  const track = trackSegments(points);
+  // 등록 노선 경로(관리자가 그린 routePath) — GPS 궤적과 대조용 밑선(2026-08-18).
+  // 이 화면만 사전 경로를 안 그리고 있었다(승객앱·직원앱·협력사 포털은 이미 그린다).
+  // 미설정 노선은 빈 배열 → 안 그린다(정류장 직선으로 지어내지 않는다).
+  const drawnRoute = toLatLngPath(
+    routes.find(r => r.id === (selectedDispatchId ? dispatches.find(x => x.id === selectedDispatchId)?.routeId : null))?.routePath
+  );
   const formatTs = (ts) => { if (!ts) return "–"; const d=ts.toDate?ts.toDate():new Date(ts); return d.toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit"}); };
 
   return (
@@ -4056,6 +4119,20 @@ function HistoryTab({ companyId, vehicles, allowed }) {
               <div style={{fontSize:11,color:"var(--color-label-mute)",padding:"0 2px 4px",fontWeight:700,textTransform:"uppercase",letterSpacing:0.04}}>
                 📍 GPS 포인트 · {points.length}개 ({vehicle?.plateNo || "–"})
               </div>
+              {/* 표본 간격 요약 — "경로가 직선으로 나온다"의 답(2026-08-18).
+                  지도의 파랑 선은 도로가 아니라 수신점을 이은 선이고, 점 사이 간격이 곧 직선의 길이다. */}
+              <div style={{ fontSize:10, color:"var(--color-label-alt)", padding:"0 2px 8px", lineHeight:1.6 }}>
+                좌표 갱신 간격 중앙 <b style={{color:"var(--color-label-mute)"}}>{formatDuration(track.stats.medianMoveGapSec)}</b>
+                {" · "}점 사이 중앙 <b style={{color:"var(--color-label-mute)"}}>{track.stats.medianStepM ?? "–"}m</b>
+                {track.stats.maxStepM != null && <> (최대 {track.stats.maxStepM}m)</>}
+                {track.stats.duplicates > 0 && <> · 같은 좌표 재기록 {track.stats.duplicates}개</>}
+                {track.gaps.length > 0 && (
+                  <> · <span style={{color:"#B26A00",fontWeight:700}}>신호 공백 {track.gaps.length}회
+                    (최대 {formatDuration(track.stats.maxGapSec)})</span></>
+                )}
+                <br/>지도의 파랑 선은 도로 경로가 아니라 <b>수신점을 순서대로 이은 선</b>입니다 —
+                단말이 좌표를 보내는 간격만큼 점 사이가 벌어지고 그 사이는 직선이 됩니다.
+              </div>
               {selectedDispatchId && (() => {
                 const d = dispatches.find(x => x.id === selectedDispatchId);
                 if (!d) return null;
@@ -4110,7 +4187,24 @@ function HistoryTab({ companyId, vehicles, allowed }) {
             .filter(s => isFinite(s.lat) && isFinite(s.lng));
           return (
             <Map center={center} style={{width:"100%",height:"100%"}} level={7}>
-              {path.length>=2&&<Polyline path={path} strokeWeight={4} strokeColor="#0066FF" strokeOpacity={0.8} strokeStyle="solid"/>}
+              {/* ① 등록 경로 — 회색 밑선(도로를 따라간다). GPS 궤적과 겹쳐 보며 이탈을 판단. */}
+              {drawnRoute.length>=2&&<Polyline path={drawnRoute} strokeWeight={7} strokeColor="#8A94A6" strokeOpacity={0.45} strokeStyle="solid"/>}
+              {/* ② GPS 실측 궤적 — 연속 수신 구간만 실선. 3분 넘게 끊긴 구간은 아래 점선으로. */}
+              {track.runs.map((seg,i)=>(
+                <Polyline key={`trk-${i}`} path={seg} strokeWeight={4} strokeColor="#0066FF" strokeOpacity={0.85} strokeStyle="solid"/>
+              ))}
+              {/* ③ 신호 공백 — 이은 선 자체가 추정이므로 점선(실측이 없는 구간을 실선으로 그리지 말 것) */}
+              {track.gaps.map((g,i)=>(
+                <Polyline key={`gap-${i}`} path={[g.from,g.to]} strokeWeight={3} strokeColor="#E8A33D" strokeOpacity={0.9} strokeStyle="shortdash"/>
+              ))}
+              {/* ④ 수신점 — 선이 어디서 어디로 이어졌는지(=왜 직선인지)를 눈으로 확인. 250점 초과면
+                     오버레이가 과해져 생략(그때는 좌측 요약의 간격 수치로 판단). */}
+              {points.length<=250 && points.map(p=>(
+                <CustomOverlayMap key={`fix-${p.id}`} position={{lat:p.lat,lng:p.lng}} yAnchor={0.5}>
+                  <div title={`#${p.idx} ${formatTs(p.ts)}`} style={{ width:6, height:6, borderRadius:"50%",
+                    background:"#fff", border:"1.5px solid #0066FF", boxShadow:"0 0 0 1px rgba(255,255,255,.9)" }} />
+                </CustomOverlayMap>
+              ))}
               {points.length>0&&<MapMarker position={{lat:points[0].lat,lng:points[0].lng}} title="출발"/>}
               {points.length>1&&<MapMarker position={{lat:points[points.length-1].lat,lng:points[points.length-1].lng}} title="도착"/>}
               {selected&&<MapMarker position={{lat:selected.lat,lng:selected.lng}}/>}
@@ -4196,22 +4290,43 @@ function HistoryTab({ companyId, vehicles, allowed }) {
             </div>
           </div>
         )}
-        {/* 범례 — 좌측 하단 */}
-        {selectedDispatchId && (showStopRadius || showStopMarkers) && (
+        {/* 범례 — 좌측 하단. 선(등록 경로/GPS 실측/신호 공백)과 정류장 표시를 함께 설명(2026-08-18).
+            🔴 선 종류를 설명하지 않으면 회색 밑선을 "잘못 그려진 경로"로 읽는다. */}
+        {selectedDispatchId && (points.length > 0 || showStopRadius || showStopMarkers) && (
           <div style={{
             position:"absolute", left:12, bottom:12, zIndex:5,
             background:"rgba(255,255,255,0.92)", backdropFilter:"blur(8px)", WebkitBackdropFilter:"blur(8px)",
             border:"1px solid var(--color-line)", borderRadius:8, padding:"7px 10px",
             boxShadow:"var(--shadow-soft)", fontSize:11, color:"var(--color-label-mute)",
-            display:"flex", gap:10, alignItems:"center",
+            display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", maxWidth:"min(560px, 70%)",
           }}>
-            <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
-              <span style={{width:9,height:9,borderRadius:"50%",background:"var(--color-positive)"}}/>통과
-            </span>
-            <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
-              <span style={{width:9,height:9,borderRadius:"50%",background:"#aaaaaa"}}/>미통과
-            </span>
-            <span style={{color:"var(--color-label-alt)"}}>· 반경 {arriveRadius}m</span>
+            {points.length > 0 && (
+              <>
+                <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
+                  <span style={{width:16,height:3,borderRadius:2,background:"#0066FF"}}/>GPS 실측
+                </span>
+                {track.gaps.length > 0 && (
+                  <span style={{display:"inline-flex",alignItems:"center",gap:4}} title={`${TRACK_GAP_SEC}초 넘게 수신이 끊긴 구간 — 이은 선은 추정입니다`}>
+                    <span style={{width:16,height:0,borderTop:"3px dashed #E8A33D"}}/>신호 공백
+                  </span>
+                )}
+                <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
+                  <span style={{width:16,height:5,borderRadius:3,background:"#8A94A6",opacity:0.55}}/>
+                  {drawnRoute.length >= 2 ? "등록 경로" : "등록 경로 없음"}
+                </span>
+              </>
+            )}
+            {(showStopRadius || showStopMarkers) && (
+              <>
+                <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
+                  <span style={{width:9,height:9,borderRadius:"50%",background:"var(--color-positive)"}}/>통과
+                </span>
+                <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
+                  <span style={{width:9,height:9,borderRadius:"50%",background:"#aaaaaa"}}/>미통과
+                </span>
+                <span style={{color:"var(--color-label-alt)"}}>· 반경 {arriveRadius}m</span>
+              </>
+            )}
           </div>
         )}
         {selected&&(

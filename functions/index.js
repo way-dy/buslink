@@ -2752,6 +2752,57 @@ function hhmmToMinutes(hhmm) {
   return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
 }
 
+/** busin 좌표 시각 문자열 → epoch ms(KST 해석). 못 구하면 null.
+ *  실제 형식: `"2026-08-18 오전 12:00:43"`(오전 12시 = 자정) · 날짜가 없으면 dateStr 로 보완.
+ *  🔴 초까지 살린다 — 운행 이력에 남길 `ts` 가 이 값이다(폴 시각이 아니라 **측정 시각**). */
+function parseBusinFixMs(timeStr, dateStr) {
+  const s = String(timeStr || "");
+  const dm = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  const dstr = dm ? `${dm[1]}-${dm[2]}-${dm[3]}` : String(dateStr || "");
+  const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dstr);
+  if (!d) return null;
+  let h = null, mi = null, sec = 0;
+  const k = s.match(/(오전|오후)\s*(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (k) {
+    h = parseInt(k[2], 10);
+    if (k[1] === "오전") { if (h === 12) h = 0; } else if (h !== 12) h += 12;
+    mi = parseInt(k[3], 10);
+    sec = k[4] ? parseInt(k[4], 10) : 0;
+  } else {
+    // 24시간제 fallback — 날짜 부분의 숫자를 시각으로 오독하지 않게 날짜를 떼고 찾는다.
+    const rest = dm ? s.slice(s.indexOf(dm[0]) + dm[0].length) : s;
+    const t = rest.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    if (!t) return null;
+    h = parseInt(t[1], 10); mi = parseInt(t[2], 10); sec = t[3] ? parseInt(t[3], 10) : 0;
+  }
+  if (!(h >= 0 && h < 24 && mi >= 0 && mi < 60 && sec >= 0 && sec < 60)) return null;
+  // KST(UTC+9) 로 해석
+  return Date.UTC(+d[1], +d[2] - 1, +d[3], h - 9, mi, sec);
+}
+
+/** gpsHistory 에 새로 적재할 좌표 행 고르기(순수).
+ *  - `lastFixMs` 이후 행만 — 이미 적재한 것을 다시 쓰지 않는다(같은 좌표 2배 적재 차단).
+ *  - 워터마크가 없으면(운행 시작 직후·gps 문서가 정리된 뒤) **최근 backfillMin 분** 만.
+ *    🔴 통째 backfill 하지 않는 이유 = 운행 창 밖(차고지 주차) 좌표까지 이력에 들어온다.
+ *  - 같은 초에 여러 행이 오면 하나만(문서 ID 가 초 단위라 어차피 덮어쓴다). */
+function selectNewFixRows(rows, lastFixMs, nowMs, backfillMin = 15) {
+  const floor = typeof lastFixMs === "number" && Number.isFinite(lastFixMs)
+    ? lastFixMs
+    : nowMs - backfillMin * 60 * 1000;
+  const seen = new Set();
+  const out = [];
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || typeof r.ms !== "number" || !Number.isFinite(r.ms)) continue;
+    if (r.ms <= floor) continue;
+    if (r.ms > nowMs + 60 * 1000) continue; // 미래 시각 행은 버린다(원천 오류)
+    const sec = Math.floor(r.ms / 1000);
+    if (seen.has(sec)) continue;
+    seen.add(sec);
+    out.push(r);
+  }
+  return out.sort((a, b) => a.ms - b.ms);
+}
+
 // ════════════════════════════════════════════════════════════════
 // 서버측 정류장 도착감지 유틸 (device 차량 — pollDeviceVehicleGps 에서 사용).
 // 모바일 lib/gps.js 와 동일한 100m 도착 반경·좌표 coercion 을 서버에 재현.
@@ -3094,21 +3145,55 @@ exports.pollDeviceVehicleGps = onSchedule(
             const coordMin = hhmmToMinutes(extractHHMM(latest.time));
             if (coordMin === null || (nowMin - coordMin) > 15) { skipped++; continue; }
 
+            // ── 운행 이력 적재 준비(2026-08-18) ────────────────────────────
+            // 예전엔 폴 때마다 **최신 1행만** `ts=폴 시각`으로 add 했다. 그 결과
+            //   ⓐ 원천(busin)이 2분에 한 번 주는데 폴은 1분이라 **같은 좌표가 2배로** 쌓이고
+            //     (prod 실측 2026-08-18: 45점 중 22개가 동일 좌표 재기록)
+            //   ⓑ 기록 시각이 **실제 측정 시각과 최대 1분 어긋나고**
+            //   ⓒ 폴이 밀리면 그 사이 원천 행이 **영영 유실**됐다(원천은 하루치를 다 준다).
+            // 이제 워터마크(gps 문서의 lastFixMs) 이후 행을 **측정 시각 그대로** 적재한다.
+            // ⚠ 밀도 자체는 원천이 정한다(2분) — 이 수정으로 직선이 사라지지는 않는다.
+            const gpsRef = db.collection("gps").doc(`${cid}_${vehicleId}`);
+            let lastFixMs = null;
+            try {
+              const prev = await gpsRef.get();
+              const v = prev.exists ? prev.data().lastFixMs : null;
+              if (typeof v === "number" && Number.isFinite(v)) lastFixMs = v;
+            } catch (_) { /* 못 읽으면 워터마크 없음으로 — 최근 15분만 적재 */ }
+            const nowMs = Date.now();
+            const rowsWithMs = rows
+              .map(r => ({ ...r, ms: parseBusinFixMs(r.time, today) }))
+              .filter(r => r.ms !== null);
+            const latestMs = rowsWithMs.length ? rowsWithMs[rowsWithMs.length - 1].ms : null;
+            const newRows = selectNewFixRows(rowsWithMs, lastFixMs, nowMs);
+
             // gps/{cid}_{vehicleId} — sendGPS(lib/gps.js) 와 동일 필드 + source:"device".
-            await db.collection("gps").doc(`${cid}_${vehicleId}`).set({
+            // 🔴 lastFixMs 는 **이 문서에만** 추가되는 워터마크 — 소비측(관제·승객·직원앱)은
+            //    안 읽는 옵셔널 필드라 표시 계약은 그대로다.
+            await gpsRef.set({
               lat: latest.lat, lng: latest.lng, speed: 0, accuracy: 0,
               companyId: cid, vehicleId, vehicleNo: veh.plateNo || "",
               driverId: disp.driverId, driverName: disp.driverName,
               routeId: disp.routeId, routeName: disp.routeName,
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
               source: "device",
+              ...(latestMs !== null ? { lastFixMs: latestMs } : {}),
             });
             // gpsHistory append — lib/gps.js 경로 그대로 미러(운행이력 유지).
-            await db
-              .collection("gpsHistory").doc(cid)
-              .collection(vehicleId).doc(today)
-              .collection("points")
-              .add({ lat: latest.lat, lng: latest.lng, speed: 0, ts: admin.firestore.FieldValue.serverTimestamp() });
+            // 문서 ID = 측정 시각(초). 워터마크를 잃어도 같은 행이 두 번 쌓이지 않는다(멱등).
+            if (newRows.length) {
+              const batch = db.batch();
+              const pcol = db.collection("gpsHistory").doc(cid)
+                .collection(vehicleId).doc(today).collection("points");
+              for (const r of newRows) {
+                batch.set(pcol.doc(`fix_${Math.floor(r.ms / 1000)}`), {
+                  lat: r.lat, lng: r.lng, speed: 0,
+                  ts: admin.firestore.Timestamp.fromMillis(r.ms),
+                  source: "device",
+                });
+              }
+              await batch.commit();
+            }
             written++;
 
             // ── 정류장 서버측 도착감지 (device 차량은 기사앱 없어 stopArrivals 미기록) ──
