@@ -25,6 +25,7 @@
 
 <img src="assets/partner/ops-map.png" style="max-width:78%;margin:2mm 0" alt="실시간 버스 위치 지도">
 
+- **`등교` · `하교` · `방과후`** — 노선 이름 옆 버튼입니다. 누르면 그 구분의 노선만 남고 아래 지도·노선도도 함께 좁혀집니다. 하교와 방과후하교처럼 시간대가 겹치는 노선을 갈라 볼 때 씁니다(다시 누르면 전체)
 - **`📍 실시간 버스 위치`** — 운행 중인 버스가 지도에 실시간 🚌 로 표시됩니다
 
 <img src="assets/partner/ops-strip.png" style="max-width:92%;margin:2mm 0" alt="차량 운행 현황 노선도">
