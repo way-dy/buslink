@@ -69,3 +69,23 @@ export function seatUsage(routes, passengers, boardings) {
   }
   return out;
 }
+
+/**
+ * 승객앱 홈 탭에 보여줄 노선 목록 (2026-08-18 배시현 개선요청).
+ *
+ * 규칙 = **즐겨찾기한 노선만**. 하나도 없으면 배정 노선 하나.
+ * 예전 규칙(`배정 ∪ 즐겨찾기`)은 가입 때 자동으로 잡힌 노선을 뺄 방법이 없어
+ * "즐겨찾기도 아닌데 홈에서 안 없어진다"는 신고가 됐다. 별을 눌러 고른 것만 홈에 둔다.
+ *
+ * 🔴 즐겨찾기가 비면 배정 노선으로 폴백 — 빼면 홈이 통째로 빈다(prod 251명 중 237명이 이 경우).
+ * ⚠ 반환 순서는 입력 `all` 순서를 그대로 따른다(호출부가 이미 정렬해 넘긴다).
+ */
+export function homeRouteList(all, opts) {
+  // 🔴 `= {}` 기본값은 undefined 에만 걸린다 — null 을 넘기면 구조분해가 던진다(격리 테스트가 잡았다).
+  const { assignedRouteId = null, favorites = [] } = opts || {};
+  const list = Array.isArray(all) ? all.filter(Boolean) : [];
+  const favs = Array.isArray(favorites) ? favorites.filter(Boolean) : [];
+  const favShown = list.filter(r => favs.includes(r.id));
+  if (favShown.length > 0) return favShown;
+  return assignedRouteId ? list.filter(r => r.id === assignedRouteId) : [];
+}

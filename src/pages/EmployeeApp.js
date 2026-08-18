@@ -17,7 +17,7 @@ import { computeRunEnded } from "../lib/runStatus";
 import { useWakeTick } from "../lib/useWakeTick";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
 import { forceReconnect } from "../lib/forceReconnect";
-import { compareRoutes, sortRoutes } from "../lib/routeOrder";
+import { compareRoutes, sortRoutes, homeRouteList } from "../lib/routeOrder";
 
 import { validateAndBoard, createPassengerToken, resolveStaticDispatch, validateAndBoardStatic } from "../lib/boarding";
 import { hashPin } from "../lib/partner";
@@ -748,6 +748,8 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
   const band = brandBand(branding);
   const [routes, setRoutes]         = useState([]);
   const [activeRouteId, setActiveRouteId] = useState(session.routeId || null);
+  // 첫 노선 로드에서 한 번만 활성 노선을 홈 목록 안으로 맞춘다(2026-08-18) — 아래 주석 참조.
+  const initialRouteBoundRef = useRef(false);
   const [stops, setStops]           = useState([]);
   const [myStopIdx, setMyStopIdx]   = useState(null);
   const [rawBuses, setRawBuses]     = useState([]);
@@ -833,12 +835,24 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
     getDocs(collection(db, 'companies', companyId, 'routes')).then(snap => {
       const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setAllRoutes(all);
-      const shown = all.filter(r => r.id === session.routeId || favorites.includes(r.id));
+      // 홈 노선 = **즐겨찾기**. 하나도 없으면 배정 노선(2026-08-18 배시현 개선요청).
+      // 예전엔 `배정 ∪ 즐겨찾기` 라 **가입 때 자동으로 잡힌 노선을 뺄 방법이 없었다** —
+      // 별을 눌러 고른 것만 홈에 두자는 요청. prod 실측 251명 중 즐겨찾기 보유 14명이고
+      // 그중 11명은 배정 노선을 이미 즐겨찾기에 넣어 둬 화면 변화 0, 237명은 즐겨찾기가
+      // 없어 기존과 동일(배정 1개).
+      const shown = homeRouteList(all, { assignedRouteId: session.routeId, favorites });
       // 미배정 폴백도 본인 거래처 노선만(타 거래처 노출 차단). partnerCode 미설정 직원은 전체(하위호환).
       const myPartner = session.partnerCode || null;
       const fallback = sortRoutes(myPartner ? all.filter(r => (r.partnerCode || null) === myPartner) : all).slice(0, 3);
       setRoutes(shown.length > 0 ? shown : fallback);
-      if (!activeRouteId && shown.length > 0) setActiveRouteId(shown[0].id);
+      // 🔴 첫 로드에서만 활성 노선을 목록 안으로 끌어온다. 매번 하면 "노선 변경"으로 고른
+      //    기준 노선이 즐겨찾기가 아닐 때 곧바로 첫 즐겨찾기로 튕겨 나간다.
+      if (!initialRouteBoundRef.current) {
+        initialRouteBoundRef.current = true;
+        if (shown.length > 0 && !shown.some(r => r.id === activeRouteId)) setActiveRouteId(shown[0].id);
+      } else if (!activeRouteId && shown.length > 0) {
+        setActiveRouteId(shown[0].id);
+      }
     });
   }, [companyId, session.routeId]);
 
@@ -961,6 +975,13 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
   const mainBus   = buses[0] || null;
   const myStop    = myStopIdx !== null ? stops[myStopIdx] : null;
   const activeRoute = routes.find(r => r.id === activeRouteId) || allRoutes.find(r => r.id === activeRouteId);
+  // 홈 칩 = 즐겨찾기 목록 + **지금 보고 있는 노선**. 노선 변경으로 고른 노선이 즐겨찾기가
+  // 아니어도 칩에는 보여야 한다(안 그러면 화면은 그 노선인데 아무 칩도 선택돼 있지 않다).
+  const homeRoutes = useMemo(() => {
+    if (!activeRouteId || routes.some(r => r.id === activeRouteId)) return routes;
+    const cur = allRoutes.find(r => r.id === activeRouteId);
+    return cur ? [cur, ...routes] : routes;
+  }, [routes, allRoutes, activeRouteId]);
 
   // ── 사전 경로(routePath) 우선, 없으면 stops 직선 폴백(하위호환 필수) ──
   // 노선 문서 routePath = [{lat,lng}, ...] (작업1에서 관리자가 그림). 유효 좌표 ≥2면 채택.
@@ -1265,10 +1286,10 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
             <span style={{ marginLeft: 'auto', fontSize: 10.5, color: band.fgMute, flexShrink: 0 }}>{timeSince(lastUpdate)} 갱신</span>
           )}
         </div>
-        {/* 노선 칩 (배정+즐겨찾기 복수일 때 — 빠른 전환, 영속 아님) */}
-        {routes.length > 1 && (
+        {/* 노선 칩 (즐겨찾기 + 지금 보는 노선이 복수일 때 — 빠른 전환, 영속 아님) */}
+        {homeRoutes.length > 1 && (
           <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginTop: 8, paddingBottom: 2 }}>
-            {routes.map(r => (
+            {homeRoutes.map(r => (
               // 밴드 위에 얹히므로 토큰 색이 아니라 밴드 대비색을 쓴다(흰 배경 전제였던 값을
               // 그대로 두면 컬러 밴드 위에서 대비가 무너진다).
               <button key={r.id} onClick={() => { setActiveRouteId(r.id); setMyStopIdx(null); }}
@@ -2431,11 +2452,14 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
                   {/* 실시간 버스 마커 — #4 노선 라인 정렬(yAnchor 0.5) */}
                   {modalBuses.map(b => b.lat && b.lng && (
                     <CustomOverlayMap key={b.id} position={{ lat:b.lat, lng:b.lng }} yAnchor={0.5}>
-                      <div style={{ background:"var(--color-bg)", border:"2px solid var(--color-primary)", borderRadius:"var(--radius-pill)", padding:"5px 11px", display:"flex", alignItems:"center", gap:5, boxShadow:"var(--shadow-float)" }}>
-                        <span style={{ display:"inline-flex", color:"var(--color-primary)" }}><Icon name="bus" size={14} stroke={2} /></span>
-                        <div>
-                          <div style={{ fontSize:11, fontWeight:800, color:"var(--color-primary)" }}>{b.vehicleNo||b.vehicleId}</div>
-                          <div style={{ fontSize:10, color:"var(--color-label-mute)" }}>{b.speed??0} km/h</div>
+                      {/* 2026-08-18 배시현 요청 "아이콘이 너무 크다" — 바텀시트 지도는 화면의 절반이라
+                          예전 크기(테두리 2px·패딩 5/11·글자 11/10)면 지도를 덮었다. 정보는 그대로 두고
+                          치수만 줄인다(차량이 2대 이상인 노선에서 번호가 유일한 구분자라 뺄 수 없다). */}
+                      <div style={{ background:"var(--color-bg)", border:"1.5px solid var(--color-primary)", borderRadius:"var(--radius-pill)", padding:"2px 7px", display:"flex", alignItems:"center", gap:4, boxShadow:"var(--shadow-emphasize)" }}>
+                        <span style={{ display:"inline-flex", color:"var(--color-primary)" }}><Icon name="bus" size={11} stroke={2} /></span>
+                        <div style={{ lineHeight:1.2 }}>
+                          <div style={{ fontSize:9.5, fontWeight:800, color:"var(--color-primary)" }}>{b.vehicleNo||b.vehicleId}</div>
+                          <div style={{ fontSize:8.5, color:"var(--color-label-mute)" }}>{b.speed??0} km/h</div>
                         </div>
                       </div>
                     </CustomOverlayMap>
