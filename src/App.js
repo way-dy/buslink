@@ -9,6 +9,7 @@ import PassengerApp from "./pages/PassengerApp";
 import BoardingApp from "./pages/BoardingApp";
 import PartnerApp from "./pages/PartnerApp";
 import EmployeeApp from "./pages/EmployeeApp";
+import SleepCheckApp from "./pages/SleepCheckApp";
 import LoadingScreen from "./components/LoadingScreen";
 import { resolveCompanyIdForAuth } from "./lib/companyResolver";
 
@@ -33,11 +34,15 @@ const hostApp = HOST_APP[host] || null;
 const pPartner  = path.startsWith("/partner");
 const pEmployee = path.startsWith("/p") && !pPartner;
 const pDriver   = path.startsWith("/driver");
-const pathSpecified = path.startsWith("/bus") || path.startsWith("/board")
+const pSleep    = path.startsWith("/sleep");
+const pathSpecified = path.startsWith("/bus") || path.startsWith("/board") || pSleep
   || pPartner || pEmployee || pDriver;
 
 const isPassengerRoute = path.startsWith("/bus");
 const isBoardingRoute  = path.startsWith("/board");
+// 슬리핑 차일드 확인(2026-08-18) — 차량 뒷좌석 QR. 익명·지도 불필요·한 화면.
+// 🔴 /board 와 **다른 경로**여야 한다: 같은 QR 로 두면 승객이 찍었을 때 탑승이 적재된다.
+const isSleepRoute     = pSleep;
 // 경로가 앱을 명시하면 경로 우선, 루트(미명시)면 호스트 매핑 적용.
 const isPartnerRoute   = pPartner  || (!pathSpecified && hostApp === "partner");
 const isEmployeeRoute  = pEmployee || (!pathSpecified && hostApp === "employee");
@@ -85,7 +90,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (isPassengerRoute || isBoardingRoute || isPartnerRoute || isEmployeeRoute) return;
+    if (isPassengerRoute || isBoardingRoute || isPartnerRoute || isEmployeeRoute || isSleepRoute) return;
     const unsub = onAuthStateChanged(auth, async (u) => {
       if (u) {
         const snap = await getDoc(doc(db, "users", u.uid));
@@ -121,6 +126,7 @@ function App() {
     <LoadingScreen message="버스가 출발 준비 중이에요" sub="노선 정보를 불러오고 있어요" />
   );
 
+  if (isSleepRoute)    return <SleepCheckApp />;
   if (isEmployeeRoute) return <EmployeeApp />;
   if (isPartnerRoute)  return <PartnerApp />;
   if (isBoardingRoute) return <BoardingApp />;

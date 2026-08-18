@@ -31,10 +31,13 @@ const _hostApp = _HOST_APP[_host] || null;
 const _pPartner  = _path.startsWith("/partner");
 const _pEmployee = _path.startsWith("/p") && !_pPartner;
 const _pDriver   = _path.startsWith("/driver");
-const _pathSpecified = _path.startsWith("/bus") || _path.startsWith("/board") || _pPartner || _pEmployee || _pDriver;
-// 익명 앱 = 승객(/bus)·탑승(/board)·협력사(/partner·partner.)·직원(/p·p.)  (App.js isXxxRoute 미러)
+const _pSleep    = _path.startsWith("/sleep");
+const _pathSpecified = _path.startsWith("/bus") || _path.startsWith("/board") || _pSleep || _pPartner || _pEmployee || _pDriver;
+// 익명 앱 = 승객(/bus)·탑승(/board)·슬리핑확인(/sleep)·협력사(/partner·partner.)·직원(/p·p.)  (App.js isXxxRoute 미러)
+// 🔴 /sleep 을 여기서 빼면 안 된다 — 기사가 **기사앱에 로그인한 그 폰**으로 뒷좌석 QR 을 찍는다.
+//    익명 로그인이 공유 IndexedDB 세션을 덮어써 기사 세션이 튕긴다(2026-07-09 결함과 같은 클래스).
 const _isAnonApp =
-  _path.startsWith("/bus") || _path.startsWith("/board") || _pPartner || _pEmployee ||
+  _path.startsWith("/bus") || _path.startsWith("/board") || _pSleep || _pPartner || _pEmployee ||
   (!_pathSpecified && (_hostApp === "partner" || _hostApp === "employee"));
 
 export const auth = initializeAuth(app, {

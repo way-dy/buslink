@@ -1189,6 +1189,104 @@ async function resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRout
   };
 }
 
+// ─── 슬리핑 차일드 확인 (2026-08-18 배시현 건의 `Eg8ZbQTMmPR6AAYo4fp0`) ────────
+// 통학·통근 버스에서 **차 안에 남은 사람이 없는지** 기사가 운행 끝에 확인했다는 기록.
+//
+// 🔴 설계의 핵심은 "버튼을 눌렀다"가 아니라 **"기사가 맨 뒷자리까지 갔다"** 는 것이다.
+//    그래서 확인 수단은 **차량 뒷좌석에 붙은 QR/NFC 태그**뿐이고, 기사앱 안에 "확인했음"
+//    버튼은 **일부러 만들지 않았다** — 앉은 자리에서 누르면 이 기능의 존재 이유가 사라진다.
+//
+// 입력 `{ companyId, vehicleId, via:"qr"|"nfc", nfcUid? }`.
+//  - QR: 뒷좌석 QR(`/sleep?c=&v=`) → 익명 진입이라 `request.auth` 존재만 확인한다
+//    (정적 QR `resolveStaticBoarding` 과 같은 판단 — 그 QR 은 차 안에만 있다).
+//  - NFC: 기사앱 NFC 탭 → 그 차량에 등록된 `vehicles/{id}.sleepNfcUid` 와 **일치할 때만** 인정.
+// 오늘 그 차량의 배차를 서버가 다시 해석하고(클라 값 불신) 그 배차 문서에 기록한다.
+// 🔴 **첫 확인만 남긴다**(멱등) — `stopArrivals` 와 같은 규칙. 두 번째 태깅은 alreadyChecked.
+const SLEEP_CHECK_FIELD = "sleepingCheck";
+exports.recordSleepingCheck = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
+  const { companyId, vehicleId, via, nfcUid } = request.data || {};
+  if (!companyId || typeof companyId !== "string") throw new HttpsError("invalid-argument", "companyId가 필요합니다");
+  if (!vehicleId || typeof vehicleId !== "string") throw new HttpsError("invalid-argument", "vehicleId가 필요합니다");
+  const mode = via === "nfc" ? "nfc" : "qr";
+
+  const db = admin.firestore();
+  const vehRef = db.collection("companies").doc(companyId).collection("vehicles").doc(vehicleId);
+
+  // NFC 는 **그 차량 태그**여야 한다 — 아무 태그(사원증 포함)나 통과하면 뒷자리까지 갈 이유가 없다.
+  let cleanUid = null;
+  if (mode === "nfc") {
+    cleanUid = normalizeNfcUidServer(nfcUid);
+    if (!cleanUid) throw new HttpsError("invalid-argument", "태그를 읽지 못했습니다");
+    const vSnap = await vehRef.get();
+    const registered = normalizeNfcUidServer(vSnap.exists ? (vSnap.data() || {}).sleepNfcUid : null);
+    if (!registered) throw new HttpsError("failed-precondition", "이 차량에 등록된 확인 태그가 없습니다");
+    if (registered !== cleanUid) throw new HttpsError("failed-precondition", "이 차량의 확인 태그가 아닙니다");
+  }
+
+  // 오늘 배차 해석(비면 failed-precondition) — 정적 QR 과 같은 헬퍼.
+  const { today, routeId, routeName, driverId, vehicleNo } =
+    await resolveStaticDispatchAdmin(db, companyId, vehicleId);
+
+  const listRef = db.collection("companies").doc(companyId)
+    .collection("dispatches").doc(today).collection("list");
+  // 그 차량의 오늘 배차 전부에 같은 확인을 남긴다(등교·하교 각 회차가 따로 끝나므로
+  // **지금 시각에 가장 가까운 회차 1건**만 — resolveStaticDispatchAdmin 이 이미 그걸 골랐다).
+  const dispSnap = await listRef.where("vehicleId", "==", vehicleId).get();
+  const target = dispSnap.docs.find(d => (d.data() || {}).routeId === routeId) || dispSnap.docs[0];
+  if (!target) throw new HttpsError("failed-precondition", "오늘 이 차량은 운행 배차가 없습니다");
+
+  const existing = (target.data() || {})[SLEEP_CHECK_FIELD];
+  if (existing && existing.checkedAt) {
+    return { ok: true, alreadyChecked: true, routeName, vehicleNo, dispatchDate: today };
+  }
+  await target.ref.update({
+    [SLEEP_CHECK_FIELD]: {
+      checkedAt: admin.firestore.FieldValue.serverTimestamp(),
+      via: mode,
+      byUid: request.auth.uid,
+      driverId: driverId || null,
+      ...(cleanUid ? { nfcUid: cleanUid } : {}),
+    },
+  });
+  console.log(`[슬리핑체크] cid=${companyId} veh=${vehicleId} disp=${target.id} via=${mode}`);
+  return { ok: true, alreadyChecked: false, routeName, vehicleNo, dispatchDate: today };
+});
+
+// registerSleepTag({ companyId, vehicleId, nfcUid }) — 차량 뒷좌석 NFC 태그 등록(기사·관리자).
+// 🔴 **다른 차량에 이미 등록된 태그는 거부** — 조용히 뺏으면 원 차량이 어느 날 갑자기
+//    "이 차량의 확인 태그가 아닙니다" 가 되고 추적이 안 된다(`registerNfcCard` 와 같은 규칙).
+exports.registerSleepTag = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
+  const { companyId, vehicleId, nfcUid } = request.data || {};
+  if (!companyId || !vehicleId) throw new HttpsError("invalid-argument", "차량 정보가 필요합니다");
+  const cleanUid = normalizeNfcUidServer(nfcUid);
+  if (!cleanUid || cleanUid.length < 8 || cleanUid.length % 2 !== 0) {
+    throw new HttpsError("invalid-argument", "태그를 다시 읽어주세요");
+  }
+  const db = admin.firestore();
+  const userSnap = await db.collection("users").doc(request.auth.uid).get();
+  const user = userSnap.exists ? (userSnap.data() || {}) : {};
+  if (!["driver", "admin", "superadmin"].includes(user.role)) {
+    throw new HttpsError("permission-denied", "기사 또는 관리자만 등록할 수 있습니다");
+  }
+  if (user.role !== "superadmin" && user.companyId !== companyId) {
+    throw new HttpsError("permission-denied", "다른 회사의 차량은 등록할 수 없습니다");
+  }
+  const vehCol = db.collection("companies").doc(companyId).collection("vehicles");
+  const dup = await vehCol.where("sleepNfcUid", "==", cleanUid).limit(2).get();
+  const other = dup.docs.find(d => d.id !== vehicleId);
+  if (other) {
+    const n = (other.data() || {}).plateNo || other.id;
+    throw new HttpsError("already-exists", `이미 ${n} 차량에 등록된 태그입니다`);
+  }
+  await vehCol.doc(vehicleId).update({
+    sleepNfcUid: cleanUid,
+    sleepNfcUidUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  return { ok: true, vehicleId, nfcUid: cleanUid };
+});
+
 // ─── 오늘 노선 도착 기록 조회(익명 화면 위임, 2026-08-18) ─────────────────
 // getRouteStopArrivals({ companyId, routeIds }) — 읽기 전용.
 //

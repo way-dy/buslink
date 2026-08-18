@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import QRCode from "qrcode";
 import { Map, MapMarker, Polyline, CustomOverlayMap, Circle } from "react-kakao-maps-sdk";
 import { db, auth } from "../firebase";
@@ -19,11 +19,12 @@ import { toLatLngPath } from "../lib/routeProgress";
 // 운행 이력 GPS 궤적 분해(2026-08-18) — 연속 구간/신호 공백/표본 간격 실측
 import { trackSegments, formatDuration, TRACK_GAP_SEC } from "../lib/gpsTrack";
 import { forceReconnect } from "../lib/forceReconnect";
+import { pendingSleepChecks, sleepCheckSummary, formatWaited } from "../lib/sleepingCheck";
 import { classifyRunSignals, STALE_SIGNAL_MIN } from "../lib/runSignals";
 import { forceEndRun } from "../lib/forceEndRun";
 import { createPartnerCode, getBoardingUrl } from "../lib/partner";
 // 정적(고정) QR — 차량별 인쇄용 URL 생성(2026-07-08 RQ#3)
-import { getStaticBoardingUrl } from "../lib/boarding";
+import { getStaticBoardingUrl, getSleepCheckUrl } from "../lib/boarding";
 import { formatNfcUid } from "../lib/nfc";
 import { sendNotice } from "../lib/notifications";
 import { compressImageFile } from "../lib/image";
@@ -841,6 +842,35 @@ function MapTab({ companyId, allowed, drivers }) {
     isAllAccess(allowed) ? true : (s.routeId ? allowMapRow(s.routeId) : false)
   );
 
+  // 🔴 노선도 뷰의 routeStops 는 `viewMode === "route"` 일 때만 채워진다 — 지도 뷰에서는
+  //    비어 있어 빈 차 확인 판정이 **조용히 0건**이 된다(신호 없음 통과와 같은 클래스).
+  //    그래서 종점 판정에 필요한 stops 만 뷰와 무관하게 1회씩 받아 둔다(getDocs·노선당 1회).
+  const [sleepStops, setSleepStops] = useState({});
+  useEffect(() => {
+    if (!companyId) return;
+    const ids = Array.from(new Set(todayDispatches.map(d => d.routeId).filter(Boolean)))
+      .filter(rid => !sleepStops[rid]);
+    if (ids.length === 0) return;
+    let alive = true;
+    Promise.all(ids.map(async rid => {
+      try {
+        const snap = await getDocs(query(collection(db, "companies", companyId, "routes", rid, "stops"), orderBy("order", "asc")));
+        return [rid, snap.docs.map(d => ({ id: d.id, ...d.data() }))];
+      } catch (_) { return [rid, []]; }
+    })).then(pairs => {
+      if (!alive) return;
+      setSleepStops(prev => { const next = { ...prev }; pairs.forEach(([rid, st]) => { next[rid] = st; }); return next; });
+    });
+    return () => { alive = false; };
+  }, [companyId, todayDispatches, sleepStops]);
+  const stopsForSleep = useMemo(() => ({ ...sleepStops, ...routeStops }), [sleepStops, routeStops]);
+  // ── 빈 차 확인(슬리핑 차일드) 미확인 목록(2026-08-18 건의 Eg8ZbQTMmPR6AAYo4fp0) ──
+  // 🔴 "미확인" 은 시계가 아니라 **종점 도착**이 있어야 성립한다(운행 전 배차를 빨갛게
+  //    쌓으면 그 목록은 곧 아무도 안 본다). 판정은 순수 모듈 lib/sleepingCheck.js.
+  //    routeStops 는 노선도 뷰가 이미 로드해 둔 것을 그대로 쓴다(신규 구독 0).
+  const sleepPending = pendingSleepChecks(visibleDispatches, stopsForSleep, Date.now());
+  const sleepSummary = sleepCheckSummary(visibleDispatches, stopsForSleep, Date.now());
+
   const handleForceEnd = async (sig) => {
     setForceBusy(sig.id);
     try {
@@ -1054,6 +1084,32 @@ function MapTab({ companyId, allowed, drivers }) {
           </div>
         )}
 
+        {/* 🛏 빈 차 확인(슬리핑 차일드, 2026-08-18 건의) — 종점 도착 뒤 10분이 지나도록
+            뒷좌석 QR/태그 확인이 없는 운행. 확인은 기사가 **차 뒤까지 가야** 찍힌다. */}
+        {(sleepPending.length > 0 || sleepSummary.total > 0) && (
+          <div style={{ borderTop:"1px solid var(--color-line)", padding:"10px 12px", background:"var(--color-bg-soft)" }}>
+            <div style={{ fontSize:12, fontWeight:700, color:"var(--color-label)", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+              <span>🛏 빈 차 확인</span>
+              <span style={{ fontSize:11, fontWeight:600, color: sleepPending.length ? "var(--color-destructive)" : "var(--color-positive)" }}>
+                {sleepPending.length ? `미확인 ${sleepPending.length}건` : `완료 ${sleepSummary.done}건`}
+              </span>
+            </div>
+            {sleepPending.length === 0 ? (
+              <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:6 }}>
+                {sleepSummary.waiting > 0 ? `확인 대기 ${sleepSummary.waiting}건 · ` : ""}운행 종료분 모두 확인되었습니다
+              </div>
+            ) : sleepPending.map(d => (
+              <div key={d.id} style={{ marginTop:8, padding:"8px 10px", background:"var(--color-bg)", border:"1px solid var(--color-destructive)", borderRadius:8 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:"var(--color-label)" }}>
+                  {d.vehicleNo || d.vehicleId || "차량"} · {d.routeName || d.routeId}
+                </div>
+                <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:2 }}>
+                  {d.driverName ? `${d.driverName} · ` : ""}종점 도착 뒤 {formatWaited(d.waitedMs)} 확인 없음
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         {/* 🧹 잔존 운행 신호(2026-07-28 개선요청) — 기사가 "운행 종료"를 못 누른 채 남은
             gps 문서. 직원·승객앱 노선 탭이 이 문서 존재만 세어 "운행중"을 계속 표시한다.
             지울지는 마지막 신호 경과시간을 보고 운영자가 판단(자동 삭제 안 함). */}
@@ -3477,6 +3533,9 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
   // 고정(정적) QR 생성/인쇄 모달 상태(2026-07-08 RQ#3). 모든 차량에 제공(관리자가 필요 차량 인쇄).
   const [qrVehicle, setQrVehicle] = useState(null);
   const [qrDataUrl, setQrDataUrl] = useState("");
+  // 슬리핑 차일드 확인용 뒷좌석 QR(2026-08-18) — 탑승 QR 과 **다른 경로**(/sleep)여야 한다.
+  // 같은 QR 로 두면 승객이 찍었을 때 탑승이 적재된다.
+  const [sleepQrDataUrl, setSleepQrDataUrl] = useState("");
 
   useEffect(() => {
     if (!qrVehicle) { setQrDataUrl(""); return; }
@@ -3485,22 +3544,33 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
     QRCode.toDataURL(url, { width: 280, margin: 1 })
       .then(d => { if (alive) setQrDataUrl(d); })
       .catch(() => { if (alive) setQrDataUrl(""); });
+    QRCode.toDataURL(getSleepCheckUrl({ companyId, vehicleId: qrVehicle.id }), { width: 280, margin: 1 })
+      .then(d => { if (alive) setSleepQrDataUrl(d); })
+      .catch(() => { if (alive) setSleepQrDataUrl(""); });
     return () => { alive = false; };
   }, [qrVehicle, companyId]);
 
   // 새 창에 인쇄용 최소 HTML(차량번호 + QR + URL) → 로드 시 자동 인쇄. 팝업 차단 시 안내.
-  const printQr = () => {
-    if (!qrDataUrl || !qrVehicle) return;
+  // kind="board"=탑승용(차량 입구) · kind="sleep"=빈 차 확인용(맨 뒷좌석).
+  const printQr = (kind = "board") => {
+    const isSleep = kind === "sleep";
+    const img = isSleep ? sleepQrDataUrl : qrDataUrl;
+    if (!img || !qrVehicle) return;
     const w = window.open("", "_blank");
     if (!w) { alert("팝업이 차단되었습니다. 브라우저 팝업 차단을 해제한 뒤 다시 시도하세요."); return; }
     const plate = qrVehicle.plateNo || qrVehicle.id;
-    const url = getStaticBoardingUrl({ companyId, vehicleId: qrVehicle.id });
+    const url = isSleep
+      ? getSleepCheckUrl({ companyId, vehicleId: qrVehicle.id })
+      : getStaticBoardingUrl({ companyId, vehicleId: qrVehicle.id });
+    const title = isSleep ? "빈 차 확인 QR" : "탑승 QR";
+    const sub = isSleep ? "맨 뒷좌석에 부착 · 운행 종료 후 스캔" : "차량에 부착 · 탑승 시 스캔";
     w.document.write(
-      '<!doctype html><html><head><meta charset="utf-8"><title>' + plate + ' 탑승 QR</title></head>'
+      '<!doctype html><html><head><meta charset="utf-8"><title>' + plate + ' ' + title + '</title></head>'
       + '<body onload="window.print()" style="margin:0;font-family:sans-serif;text-align:center;padding:40px">'
       + '<h1 style="font-size:30px;margin:0 0 8px">' + plate + '</h1>'
-      + '<div style="font-size:15px;color:#555;margin-bottom:28px">차량에 부착 · 탑승 시 스캔</div>'
-      + '<img src="' + qrDataUrl + '" style="width:340px;height:340px"/>'
+      + '<div style="font-size:20px;font-weight:700;margin-bottom:6px">' + title + '</div>'
+      + '<div style="font-size:15px;color:#555;margin-bottom:28px">' + sub + '</div>'
+      + '<img src="' + img + '" style="width:340px;height:340px"/>'
       + '<div style="font-size:12px;color:#888;margin-top:18px;word-break:break-all">' + url + '</div>'
       + '</body></html>'
     );
@@ -3668,8 +3738,22 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
             {getStaticBoardingUrl({companyId,vehicleId:qrVehicle.id})}
           </div>
           <div style={{display:"flex",gap:8,marginTop:16}}>
-            <button style={{...S.addBtn,flex:1,opacity:qrDataUrl?1:0.6}} onClick={printQr} disabled={!qrDataUrl}>🖨 인쇄</button>
+            <button style={{...S.addBtn,flex:1,opacity:qrDataUrl?1:0.6}} onClick={()=>printQr("board")} disabled={!qrDataUrl}>🖨 탑승 QR 인쇄</button>
             <button style={{...S.closeBtn,flex:1}} onClick={()=>setQrVehicle(null)}>닫기</button>
+          </div>
+          {/* 슬리핑 차일드 — 맨 뒷좌석 확인 QR(2026-08-18 건의). 탑승 QR 과 경로가 다르다. */}
+          <div style={{marginTop:18,paddingTop:16,borderTop:"1px solid var(--color-line)"}}>
+            <div style={{fontSize:13,fontWeight:800,color:"var(--color-label)"}}>빈 차 확인 QR (맨 뒷좌석)</div>
+            <div style={{fontSize:12,color:"var(--color-label-mute)",margin:"6px 0 10px",lineHeight:1.6}}>
+              운행이 끝나면 기사가 맨 뒷좌석까지 가서 이 QR을 스캔합니다. 확인 여부는 실시간 관제에서 보입니다.
+            </div>
+            <div style={{display:"flex",justifyContent:"center"}}>
+              {sleepQrDataUrl
+                ? <img src={sleepQrDataUrl} alt="빈 차 확인 QR" style={{width:180,height:180}}/>
+                : <div style={{width:180,height:180,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--color-label-mute)"}}>QR 생성 중…</div>}
+            </div>
+            <button style={{...S.addBtn,width:"100%",marginTop:12,opacity:sleepQrDataUrl?1:0.6}}
+              onClick={()=>printQr("sleep")} disabled={!sleepQrDataUrl}>🖨 빈 차 확인 QR 인쇄</button>
           </div>
         </div></div>
       )}

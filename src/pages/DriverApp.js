@@ -2500,7 +2500,9 @@ function DriverNfcTag({ companyId, driver, dispatch }) {
   const [count, setCount] = useState(null); // 서버 집계 탑승 인원(오늘·이 차량)
 
   // 등록 모드(2026-07-22) — 기존 사원증 재사용 현장은 UID 목록이 없어 기사가 대행 등록.
-  const [mode, setMode] = useState("board");     // "board"(탑승) | "register"(카드 등록)
+  // "board"(탑승) | "register"(카드 등록) | "sleep"(빈 차 확인 — 2026-08-18 슬리핑 차일드)
+  const [mode, setMode] = useState("board");
+  const [sleepMsg, setSleepMsg] = useState(null); // { ok:boolean, text:string }
   const [passengers, setPassengers] = useState([]);
   const [passLoading, setPassLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -2616,6 +2618,43 @@ function DriverNfcTag({ companyId, driver, dispatch }) {
     }
   };
 
+  // ── 빈 차 확인(슬리핑 차일드) — 맨 뒷좌석 태그 (2026-08-18 건의) ──
+  // 🔴 확인은 **그 차량에 등록된 태그**로만 인정한다(서버가 검사). 아무 태그나 되면
+  //    사원증으로 앉은 자리에서 눌러 버리고, 그러면 이 기능은 아무것도 보장하지 않는다.
+  // 태그가 아직 등록 안 됐으면 그 자리에서 등록한다(현장에서 붙이고 바로 쓰게).
+  const handleSleepTag = async (uid) => {
+    try {
+      const r = await httpsCallable(functions, "recordSleepingCheck")({
+        companyId, vehicleId, via: "nfc", nfcUid: uid,
+      });
+      const d = r.data || {};
+      setSleepMsg({ ok: true, text: d.alreadyChecked ? "이미 확인되었습니다" : "확인되었습니다" });
+      beep(true);
+      if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]);
+      setErrMsg("");
+    } catch (e) {
+      const msg = e?.message || String(e);
+      // 태그 미등록이면 등록 버튼을 띄운다(오류로 끝내면 기사가 할 수 있는 게 없다).
+      if (/등록된 확인 태그가 없습니다/.test(msg)) {
+        setSleepMsg({ ok: false, text: "이 차량에 등록된 확인 태그가 없습니다", uid });
+      } else {
+        setSleepMsg({ ok: false, text: msg });
+      }
+      beep(false);
+    }
+  };
+
+  // 뒷좌석 태그를 이 차량에 등록.
+  const registerSleepTag = async (uid) => {
+    try {
+      await httpsCallable(functions, "registerSleepTag")({ companyId, vehicleId, nfcUid: uid });
+      setSleepMsg({ ok: true, text: "확인 태그를 등록했습니다. 다시 태그해주세요." });
+      beep(true);
+    } catch (e) {
+      setSleepMsg({ ok: false, text: e?.message || String(e) });
+      beep(false);
+    }
+  };
   const handleTag = async (serial) => {
     const uid = normalizeNfcUid(serial);
     if (!uid) return;
@@ -2625,6 +2664,7 @@ function DriverNfcTag({ companyId, driver, dispatch }) {
     busyRef.current = true;
     try {
       if (mode === "register") { await handleRegisterTag(uid); return; }
+      if (mode === "sleep") { await handleSleepTag(uid); return; }
       const r = await boardByNfc({
         companyId, vehicleId, uid,
         selectedRouteId: dispatch?.routeId || null,
@@ -2694,9 +2734,9 @@ function DriverNfcTag({ companyId, driver, dispatch }) {
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, width: "100%" }}>
       {/* 모드 전환 — 탑승 처리 ↔ 카드 등록 */}
       <div style={{ display: "flex", gap: 6, width: "100%", maxWidth: 340 }}>
-        {[["board", "탑승 처리"], ["register", "카드 등록"]].map(([m, label]) => (
+        {[["board", "탑승 처리"], ["register", "카드 등록"], ["sleep", "빈 차 확인"]].map(([m, label]) => (
           <button key={m}
-            onClick={() => { setMode(m); setRegMsg(null); setErrMsg(""); }}
+            onClick={() => { setMode(m); setRegMsg(null); setSleepMsg(null); setErrMsg(""); }}
             style={{
               flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 13, fontWeight: 700,
               cursor: "pointer", fontFamily: "inherit",
@@ -2707,6 +2747,34 @@ function DriverNfcTag({ companyId, driver, dispatch }) {
         ))}
       </div>
 
+      {/* ─────────── 빈 차 확인 모드(슬리핑 차일드) ─────────── */}
+      {mode === "sleep" ? (
+        <>
+          <div style={{ fontSize: 12, color: "var(--color-label-mute)", textAlign: "center", lineHeight: 1.6 }}>
+            운행이 끝나면 <b>맨 뒷좌석까지 가서</b> 뒷좌석 태그를 대주세요.<br />
+            차 안에 남은 사람이 없다는 기록이 남습니다.
+          </div>
+          {sleepMsg && (
+            <div style={{
+              width: "100%", maxWidth: 340, padding: "12px 14px", borderRadius: 12, textAlign: "center",
+              fontSize: 14, fontWeight: 800, lineHeight: 1.5,
+              background: sleepMsg.ok ? "var(--color-positive-soft, #E7F7EF)" : "var(--color-destructive-soft, #FDECEC)",
+              color: sleepMsg.ok ? "var(--color-positive)" : "var(--color-destructive)",
+              border: `1px solid ${sleepMsg.ok ? "var(--color-positive)" : "var(--color-destructive)"}`,
+            }}>
+              {sleepMsg.text}
+              {sleepMsg.uid && (
+                <button onClick={() => registerSleepTag(sleepMsg.uid)}
+                  style={{
+                    display: "block", width: "100%", marginTop: 10, padding: "10px 0", borderRadius: 10,
+                    border: "none", background: "var(--color-primary)", color: "#fff",
+                    fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: "inherit",
+                  }}>이 태그를 이 차량에 등록</button>
+              )}
+            </div>
+          )}
+        </>
+      ) : null}
       {/* ─────────── 카드 등록 모드 ─────────── */}
       {mode === "register" ? (
         <>

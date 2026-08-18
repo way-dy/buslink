@@ -234,6 +234,14 @@ export function getStaticBoardingUrl({ companyId, vehicleId }) {
   return `${base}/board?c=${encodeURIComponent(companyId)}&v=${encodeURIComponent(vehicleId)}`;
 }
 
+// 슬리핑 차일드 — 맨 뒷좌석 확인 QR 주소(2026-08-18).
+// 🔴 탑승 QR(`/board`) 과 **반드시 다른 경로**다 — 같은 주소로 두면 승객이 뒷좌석 QR 을
+//    찍었을 때 탑승이 적재되고, 기사가 탑승 QR 을 찍으면 확인이 안 된다.
+export function getSleepCheckUrl({ companyId, vehicleId }) {
+  const base = window.location.origin;
+  return `${base}/sleep?c=${encodeURIComponent(companyId)}&v=${encodeURIComponent(vehicleId)}`;
+}
+
 // ─── 정적 QR — 오늘 배차 해석 ────────────────────────────
 // 차량ID만 있는 고정 QR 은 "오늘 이 차량이 어느 노선을 뛰는가"를 배차에서 읽어야 한다.
 // 탑승 기록(validateAndBoardStatic) 과 스캔 직후 확인 화면(직원앱 ScanTab) 이 함께 쓴다.
