@@ -91,14 +91,17 @@ function loadDb() {
       const next = el.nextElementSibling;
       if (next) badge = norm(next.textContent);
     });
-    // 버스 마커 = <span>🚌</span> + 형제 div(차량번호 / 속도·신호 지연)
+    // 버스 마커 = 버스 아이콘(svg) + 형제 div(차량번호 / 속도·신호 지연).
+    // ⚠ 2026-08-18 마커 축소로 이모지 🚌 → 벡터 아이콘으로 바뀌었다 — 이모지로 찾던 옛 선택자는
+    //   화면이 멀쩡한데 0개를 반환했다(하네스가 진짜 화면을 본다는 증거였다).
     const markers = [];
-    document.querySelectorAll("span").forEach((el) => {
-      if (norm(el.textContent) !== "🚌") return;
-      const info = el.nextElementSibling;
+    document.querySelectorAll("svg").forEach((svg) => {
+      const icon = svg.parentElement;
+      const info = icon && icon.nextElementSibling;
       if (!info) return;
       const lines = [...info.querySelectorAll("div")].map((d) => norm(d.textContent));
-      const r = el.getBoundingClientRect();
+      if (!lines.some((l) => /km\/h|신호 지연/.test(l))) return;
+      const r = (icon.parentElement || icon).getBoundingClientRect();
       markers.push({ no: lines[0] || "", sub: lines[1] || "", visible: r.width > 0 && r.height > 0 });
     });
     // 노선도 스트립에서 "운행 중" 으로 표시된 노선 수

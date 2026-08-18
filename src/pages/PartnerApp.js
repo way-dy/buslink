@@ -13,7 +13,7 @@ import { db, auth } from "../firebase";
 import { signInAnonymously } from "firebase/auth";
 import { collection, getDocs, doc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, limit } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { BusLinkLogo, Pill } from "../components/ui";
+import { BusLinkLogo, Pill, Icon } from "../components/ui";
 import InstallPrompt from "../components/InstallPrompt";
 import { applyAppManifest } from "../lib/pwaManifest";
 import { aggregateBoardingsByStop } from "../lib/stopMapping";
@@ -26,6 +26,8 @@ import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { gpsAgeMs } from "../lib/runStatus";
 // 오늘 도착 기록(노선도 통과 ✓) — 배차 읽기가 익명에 닫혀 있어 CF 위임으로 받는다.
 import { useRouteStopArrivals } from "../lib/useRouteStopArrivals";
+// 노선 구분(등교·하교·방과후) 필터 정본 — shift 만으론 방과후를 못 가른다(routeKind 주석).
+import { availableRouteKinds, filterRoutesByKind, routeKind } from "../lib/routeKind";
 import { useWakeTick } from "../lib/useWakeTick";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
 // 거래처 브랜딩(2026-07-16 회의 #5) — 메인 컬러 CSS 변수 덮어쓰기(포탈 진입 시 적용·이탈 시 복원).
@@ -1791,6 +1793,25 @@ function OperationsMode({ codeData, code, routes }) {
   // 노선 필터(노선 카드 클릭 시 토글). null=전체.
   const [routeFilter, setRouteFilter] = useState(null);
 
+  // 구분 필터(등교/하교/방과후 …) — 2026-08-18 배시현 요청.
+  // 🔴 하교와 방과후하교는 `shift` 가 똑같이 "하교" 라 데이터만으론 못 가른다(routeKind 주석 참조).
+  //    칩은 **이 거래처 노선에 실제로 있는 구분만** 그린다(거래처마다 어휘가 다르다).
+  const [kindFilter, setKindFilter] = useState(null);
+  const kindChips = useMemo(() => availableRouteKinds(myRoutesList), [myRoutesList]);
+  const visibleRoutes = useMemo(
+    () => filterRoutesByKind(myRoutesList, kindFilter),
+    [myRoutesList, kindFilter]
+  );
+  const kindRouteIds = useMemo(() => {
+    const s = new window.Set();
+    visibleRoutes.forEach(r => s.add(r.id));
+    return s;
+  }, [visibleRoutes]);
+  // 구분을 바꿨는데 고른 노선이 그 구분에 없으면 선택을 놓는다(빈 지도 방지).
+  useEffect(() => {
+    if (routeFilter && !kindRouteIds.has(routeFilter)) setRouteFilter(null);
+  }, [routeFilter, kindRouteIds]);
+
   // ── 노선별 stops lazy fetch(미설정 노선은 폴리라인 폴백용) ──
   const [stopsByRoute, setStopsByRoute] = useState({}); // { routeId: [{id,name,lat,lng,order}] }
   useEffect(() => {
@@ -1855,21 +1876,22 @@ function OperationsMode({ codeData, code, routes }) {
   });
 
   const filteredBuses = useMemo(() => (
-    routeFilter ? buses.filter(b => b.routeId === routeFilter) : buses
-  ), [buses, routeFilter]);
+    routeFilter ? buses.filter(b => b.routeId === routeFilter)
+                : buses.filter(b => kindRouteIds.has(b.routeId))
+  ), [buses, routeFilter, kindRouteIds]);
 
   // 지도 중심 — 첫 버스/첫 정류장/한국 기본
   const mapCenter = useMemo(() => {
     if (filteredBuses[0] && filteredBuses[0].lat && filteredBuses[0].lng) {
       return { lat: filteredBuses[0].lat, lng: filteredBuses[0].lng };
     }
-    for (const r of myRoutesList) {
+    for (const r of visibleRoutes) {
       if (routeFilter && r.id !== routeFilter) continue;
       const ss = stopsByRoute[r.id];
       if (ss && ss.length > 0) return { lat: ss[0].lat, lng: ss[0].lng };
     }
     return { lat: 37.3894, lng: 126.9522 };
-  }, [filteredBuses, myRoutesList, stopsByRoute, routeFilter]);
+  }, [filteredBuses, visibleRoutes, stopsByRoute, routeFilter]);
 
   // ── 오늘 탑승 현황 ─────────────────────────────────
   // boardings/{today}/list where partnerCode==code. partnerCode 인덱스는 없으나
@@ -1942,7 +1964,7 @@ function OperationsMode({ codeData, code, routes }) {
   // 지도 폴리라인 path 산출 — routePath 우선, 없으면 stops 직선 폴백.
   const routePolylines = useMemo(() => {
     const out = [];
-    myRoutesList.forEach(r => {
+    visibleRoutes.forEach(r => {
       if (routeFilter && r.id !== routeFilter) return;
       let path = r.routePath;
       if (!path || path.length < 2) {
@@ -1952,7 +1974,7 @@ function OperationsMode({ codeData, code, routes }) {
       if (path && path.length >= 2) out.push({ routeId: r.id, path });
     });
     return out;
-  }, [myRoutesList, stopsByRoute, routeFilter]);
+  }, [visibleRoutes, stopsByRoute, routeFilter]);
 
   // 지도 컨테이너 ref — 0px init 방어용
   const mapKeyRef = useRef(0);
@@ -2012,7 +2034,7 @@ function OperationsMode({ codeData, code, routes }) {
       const s = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
       return 2 * R * Math.asin(Math.sqrt(s));
     };
-    return myRoutesList
+    return visibleRoutes
       .filter(r => !routeFilter || r.id === routeFilter)
       .map(r => {
         const stops = (stopsByRoute[r.id] || []).map(s => ({ id: s.id, name: s.name || "", ll: toLL(s) }));
@@ -2032,7 +2054,7 @@ function OperationsMode({ codeData, code, routes }) {
         return { id: r.id, name: r.name, stops, passed, busAt };
       })
       .filter(r => r.stops.length >= 2);
-  }, [myRoutesList, routeFilter, stopsByRoute, arrivalsByRoute, filteredBuses]);
+  }, [visibleRoutes, routeFilter, stopsByRoute, arrivalsByRoute, filteredBuses]);
 
   const noticeTitleLen = noticeTitle.trim().length;
   const noticeBodyLen = noticeBody.trim().length;
@@ -2082,8 +2104,22 @@ function OperationsMode({ codeData, code, routes }) {
       <div style={{ background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 10, overflow: "hidden" }}>
         <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--color-line-soft)", fontSize: 12, fontWeight: 700, color: "var(--color-label)", display: "flex", alignItems: "center", gap: 8 }}>
           <span>🛣 자사 노선</span>
-          {routeFilter && (
-            <button onClick={() => setRouteFilter(null)} style={{
+          {/* 구분 칩(등교·하교·방과후 …) — 이 거래처 노선에 실제로 있는 구분만.
+              하교와 방과후하교가 같은 시간대에 겹쳐 혼선을 준다는 요청(2026-08-18)의 답이다. */}
+          {kindChips.map(k => {
+            const on = kindFilter === k;
+            return (
+              <button key={k} onClick={() => setKindFilter(on ? null : k)} style={{
+                fontSize: 11, fontWeight: on ? 800 : 600, padding: "3px 10px", borderRadius: 999,
+                border: `1px solid ${on ? "var(--color-primary)" : "var(--color-line)"}`,
+                background: on ? "var(--color-primary-soft)" : "var(--color-bg-soft)",
+                color: on ? "var(--color-primary-deep)" : "var(--color-label-mute)",
+                cursor: "pointer", fontFamily: "inherit"
+              }}>{k}</button>
+            );
+          })}
+          {(routeFilter || kindFilter) && (
+            <button onClick={() => { setRouteFilter(null); setKindFilter(null); }} style={{
               fontSize: 10, padding: "2px 8px", borderRadius: 999, border: "1px solid var(--color-line)",
               background: "var(--color-bg-soft)", color: "var(--color-label-mute)", cursor: "pointer", fontFamily: "inherit"
             }}>전체 보기</button>
@@ -2091,7 +2127,7 @@ function OperationsMode({ codeData, code, routes }) {
         </div>
         {passengersLoading ? (
           <div style={{ padding: 20, textAlign: "center", color: "var(--color-label-mute)", fontSize: 12 }}>로딩 중...</div>
-        ) : myRoutesList.length === 0 ? (
+        ) : visibleRoutes.length === 0 ? (
           <div style={{ padding: 24, textAlign: "center", color: "var(--color-label-mute)", fontSize: 13 }}>
             표시할 노선이 없습니다
             <div style={{ fontSize: 11, color: "var(--color-label-alt)", marginTop: 4 }}>
@@ -2100,7 +2136,7 @@ function OperationsMode({ codeData, code, routes }) {
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8, padding: 12 }}>
-            {myRoutesList.map(r => {
+            {visibleRoutes.map(r => {
               const active = routeFilter === r.id;
               return (
                 <div key={r.id} onClick={() => setRouteFilter(active ? null : r.id)}
@@ -2167,7 +2203,11 @@ function OperationsMode({ codeData, code, routes }) {
                   }}
                 />
               ))}
-              {/* 버스 마커 — 차량번호·노선명·속도. 신호가 5분 넘게 끊기면 회색(관리자 관제와 같은 잣대). */}
+              {/* 버스 마커 — 차량번호·노선명·속도. 신호가 5분 넘게 끊기면 회색(관리자 관제와 같은 잣대).
+                  🔴 치수는 승객앱 노선 지도(2026-08-18 "아이콘이 너무 크다")와 같은 값으로 맞춘다 —
+                     테두리 1.5px·패딩 2/7·글자 9.5/8.5·아이콘 11. 노선이 29개면 마커가 겹쳐
+                     예전 크기(2px·5/10·11/9·이모지 16)로는 지도를 덮는다.
+                  🔴 차량번호는 빼지 말 것 — 한 노선에 2대가 뜨면 그게 유일한 구분자다. */}
               {filteredBuses.map(b => {
                 if (!b.lat || !b.lng) return null;
                 const stale = gpsAgeMs(b.updatedAt) >= MARKER_STALE_MS;
@@ -2183,19 +2223,22 @@ function OperationsMode({ codeData, code, routes }) {
                       }} />
                     )}
                     <div style={{
-                      position: "relative", background: "#fff",
-                      border: `2px solid ${tone}`, borderRadius: 999,
-                      padding: "5px 10px", display: "flex", alignItems: "center", gap: 6,
-                      boxShadow: "0 4px 12px rgba(0,102,255,0.3)",
+                      position: "relative", background: "var(--color-bg)",
+                      border: `1.5px solid ${tone}`, borderRadius: 999,
+                      padding: "2px 7px", display: "flex", alignItems: "center", gap: 4,
+                      boxShadow: "var(--shadow-emphasize)",
                     }}>
-                      <span style={{ fontSize: 16 }}>🚌</span>
-                      <div>
-                        <div style={{ fontSize: 11, fontWeight: 800, color: "var(--color-label)" }}>
+                      <span style={{ display: "inline-flex", color: tone }}><Icon name="bus" size={11} stroke={2} /></span>
+                      <div style={{ lineHeight: 1.2 }} title={b.routeName || ""}>
+                        <div style={{ fontSize: 9.5, fontWeight: 800, color: tone }}>
                           {b.vehicleNo || b.vehicleId || "차량"}
                         </div>
-                        <div style={{ fontSize: 9, fontWeight: 600, color: "var(--color-label-mute)" }}>
+                        <div style={{ fontSize: 8.5, color: "var(--color-label-mute)" }}>
                           {stale ? "신호 지연" : `${Math.round(b.speed || 0)} km/h`}
-                          {b.routeName ? ` · ${b.routeName}` : ""}
+                          {/* 🔴 노선명 전문을 붙이면 마커가 190px 까지 벌어진다(채드윅 이름이 44자).
+                              구분(등교·하교·방과후)만 붙인다 — 이 요청이 가르고 싶어 한 축이 그것이고,
+                              전체 이름은 마우스를 올리면 나온다. */}
+                          {routeKind({ name: b.routeName }) ? ` · ${routeKind({ name: b.routeName })}` : ""}
                         </div>
                       </div>
                     </div>
