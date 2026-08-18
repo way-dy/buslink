@@ -41,12 +41,27 @@ export default function SleepCheckApp() {
     signInAnonymously(auth).then(() => setReady(true)).catch(() => setReady(true));
   }, []);
 
+  // 확인 위치를 함께 보낸다 — **막기 위해서가 아니라 드러내기 위해서**(2026-08-18 way 지적).
+  // QR 은 사진으로 복제되므로 차 안 도용은 못 막는다. 대신 종점에서 먼 곳에서 찍힌 확인이
+  // 관제에 드러나게 한다. 🔴 권한 거부·실내 오차로 정상 확인이 막히면 안 되므로
+  //    **위치를 못 얻어도 그대로 진행**한다(서버도 거부하지 않는다).
+  const getPos = () => new Promise(resolve => {
+    if (!navigator.geolocation) return resolve(null);
+    const done = (v) => resolve(v);
+    navigator.geolocation.getCurrentPosition(
+      pos => done({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => done(null),
+      { enableHighAccuracy: true, timeout: 6000, maximumAge: 30000 }
+    );
+  });
+
   const submit = useCallback(async () => {
     if (busy) return;
     setBusy(true); setErr("");
     try {
+      const pos = await getPos();
       const call = httpsCallable(functions, "recordSleepingCheck");
-      const res = await call({ companyId, vehicleId, via: "qr" });
+      const res = await call({ companyId, vehicleId, via: "qr", ...(pos || {}) });
       setDone(res.data || {});
     } catch (e) {
       // 오늘 배차가 없거나(운행 전) 통신 실패 — 기사에게 그대로 보여 준다.

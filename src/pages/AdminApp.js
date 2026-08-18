@@ -19,7 +19,7 @@ import { toLatLngPath } from "../lib/routeProgress";
 // 운행 이력 GPS 궤적 분해(2026-08-18) — 연속 구간/신호 공백/표본 간격 실측
 import { trackSegments, formatDuration, TRACK_GAP_SEC } from "../lib/gpsTrack";
 import { forceReconnect } from "../lib/forceReconnect";
-import { pendingSleepChecks, sleepCheckSummary, formatWaited } from "../lib/sleepingCheck";
+import { pendingSleepChecks, sleepCheckSummary, formatWaited, sleepCheckAudit, sleepAuditLabel } from "../lib/sleepingCheck";
 import { classifyRunSignals, STALE_SIGNAL_MIN } from "../lib/runSignals";
 import { forceEndRun } from "../lib/forceEndRun";
 import { createPartnerCode, getBoardingUrl } from "../lib/partner";
@@ -870,6 +870,11 @@ function MapTab({ companyId, allowed, drivers }) {
   //    routeStops 는 노선도 뷰가 이미 로드해 둔 것을 그대로 쓴다(신규 구독 0).
   const sleepPending = pendingSleepChecks(visibleDispatches, stopsForSleep, Date.now());
   const sleepSummary = sleepCheckSummary(visibleDispatches, stopsForSleep, Date.now());
+  // 🔴 확인은 됐지만 미심쩍은 건(먼 곳·도착 직후 즉시) — QR 은 사진으로 복제되므로
+  //    막는 대신 드러낸다(2026-08-18 way 지적). NFC 확인은 여기 안 걸린다.
+  const sleepSuspicious = visibleDispatches
+    .map(d => ({ d, a: sleepCheckAudit(d) }))
+    .filter(x => x.a.suspicious);
 
   const handleForceEnd = async (sig) => {
     setForceBusy(sig.id);
@@ -1094,6 +1099,16 @@ function MapTab({ companyId, allowed, drivers }) {
                 {sleepPending.length ? `미확인 ${sleepPending.length}건` : `완료 ${sleepSummary.done}건`}
               </span>
             </div>
+            {sleepSuspicious.length > 0 && (
+              <div style={{ marginTop:8, padding:"8px 10px", background:"var(--color-bg)", border:"1px solid var(--color-cautionary)", borderRadius:8 }}>
+                <div style={{ fontSize:11, fontWeight:800, color:"var(--color-cautionary)" }}>확인 방식 점검 {sleepSuspicious.length}건</div>
+                {sleepSuspicious.slice(0, 4).map(({ d, a }) => (
+                  <div key={d.id} style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:3 }}>
+                    {d.vehicleNo || d.vehicleId} · {sleepAuditLabel(a.reasons)}
+                  </div>
+                ))}
+              </div>
+            )}
             {sleepPending.length === 0 ? (
               <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:6 }}>
                 {sleepSummary.waiting > 0 ? `확인 대기 ${sleepSummary.waiting}건 · ` : ""}운행 종료분 모두 확인되었습니다

@@ -1203,9 +1203,24 @@ async function resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRout
 // 오늘 그 차량의 배차를 서버가 다시 해석하고(클라 값 불신) 그 배차 문서에 기록한다.
 // 🔴 **첫 확인만 남긴다**(멱등) — `stopArrivals` 와 같은 규칙. 두 번째 태깅은 alreadyChecked.
 const SLEEP_CHECK_FIELD = "sleepingCheck";
+// 🔴 **QR 은 사진으로 복제된다** (2026-08-18 way 지적). 종이에 인쇄한 QR 로 "그 자리에
+//    있었다"를 증명하는 건 원리적으로 불가능하다 — 기사가 한 번 찍어 두면 앉은 자리에서
+//    사진을 스캔할 수 있다. 실질 방어는 **NFC 태그**뿐이다(폰으로 임의 UID 를 흉내 낼 수
+//    없어 물리적 접촉이 강제된다). 그래서 QR 은 없애지 않되 **차 밖 도용**을 막고
+//    **도용 흔적이 드러나게** 한다:
+//      ① 운행 시간창 밖이면 거부      → 차고지·전날·다음날 미리 찍기 차단
+//      ② 확인 위치를 함께 기록        → 종점에서 먼 곳에서 찍으면 관제에 드러난다
+//      ③ 종점 도착 후 경과초를 기록   → 매번 3초면 사람 눈에 띈다
+//    🔴 ②를 **거부 사유로 쓰지 않는다** — 폰 GPS 권한 거부·실내 오차로 정상 확인이
+//       막히면 기능 자체가 죽는다(실내 지오펜스는 사무실이 아니라 폰이 약한 고리다).
+//       막지 말고 드러내라.
+//    🔴 종점 도착을 **필수 조건으로 걸지 않는다** — prod 실측 최근 7일 120건 중 종점
+//       도착 기록은 71% 뿐이다(GPS 공백). 필수로 걸면 정상 운행 29% 가 확인 불가가 된다.
+const SLEEP_CHECK_WINDOW_GRACE_MIN = 30; // 운행 시간창 종료 뒤 확인을 받아 주는 여유
+const SLEEP_CHECK_NEAR_M = 300;          // 종점(또는 차량) 기준 "가까움" 판정 — 기록용
 exports.recordSleepingCheck = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
-  const { companyId, vehicleId, via, nfcUid } = request.data || {};
+  const { companyId, vehicleId, via, nfcUid, lat, lng } = request.data || {};
   if (!companyId || typeof companyId !== "string") throw new HttpsError("invalid-argument", "companyId가 필요합니다");
   if (!vehicleId || typeof vehicleId !== "string") throw new HttpsError("invalid-argument", "vehicleId가 필요합니다");
   const mode = via === "nfc" ? "nfc" : "qr";
@@ -1228,29 +1243,80 @@ exports.recordSleepingCheck = onCall(async (request) => {
   const { today, routeId, routeName, driverId, vehicleNo } =
     await resolveStaticDispatchAdmin(db, companyId, vehicleId);
 
+  // ── 가드 ① 운행 시간창 ──────────────────────────────────────────
+  // 폴러(pollDeviceVehicleGps)와 **같은 창**을 쓰되 확인은 운행 뒤에 하는 일이라 뒤로만 여유를 더 준다.
+  const coSnap = await db.collection("companies").doc(companyId).get();
+  const winOpts = normalizeGpsWindowOpts(coSnap.exists ? (coSnap.data() || {}) : {});
+  const meta = await loadRouteMeta(db, companyId, routeId, {});
+  const win = computeGpsWindow(meta, winOpts);
+  const nowHM = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
+  const nowMin = hhmmToMinutes(nowHM);
+  if (win && nowMin !== null) {
+    const relaxed = { startMin: win.startMin, endMin: (win.endMin + SLEEP_CHECK_WINDOW_GRACE_MIN) % 1440 };
+    if (!gpsWindowContains(relaxed, nowMin)) {
+      throw new HttpsError("failed-precondition",
+        `지금은 이 노선의 운행 시간이 아닙니다\n운행이 끝난 직후에 확인해주세요`);
+    }
+  }
+
   const listRef = db.collection("companies").doc(companyId)
     .collection("dispatches").doc(today).collection("list");
-  // 그 차량의 오늘 배차 전부에 같은 확인을 남긴다(등교·하교 각 회차가 따로 끝나므로
-  // **지금 시각에 가장 가까운 회차 1건**만 — resolveStaticDispatchAdmin 이 이미 그걸 골랐다).
   const dispSnap = await listRef.where("vehicleId", "==", vehicleId).get();
   const target = dispSnap.docs.find(d => (d.data() || {}).routeId === routeId) || dispSnap.docs[0];
   if (!target) throw new HttpsError("failed-precondition", "오늘 이 차량은 운행 배차가 없습니다");
 
-  const existing = (target.data() || {})[SLEEP_CHECK_FIELD];
+  const tdata = target.data() || {};
+  const existing = tdata[SLEEP_CHECK_FIELD];
   if (existing && existing.checkedAt) {
     return { ok: true, alreadyChecked: true, routeName, vehicleNo, dispatchDate: today };
   }
+
+  // ── 가드 ② 위치(기록 전용·거부하지 않는다) ──────────────────────
+  // 기준점 = 차량 GPS(있으면) → 없으면 **종점 정류장**. device 차량은 운행이 끝나면 폴러가
+  // gps 문서를 지우므로(2026-07-16) 확인 시점엔 대개 없다 — 그래서 종점이 기본 기준이다.
+  let distanceM = null, refKind = null;
+  const phone = (typeof lat === "number" && typeof lng === "number" && isFinite(lat) && isFinite(lng))
+    ? { lat, lng } : null;
+  if (phone) {
+    let ref = null;
+    try {
+      const g = await db.collection("gps").doc(`${companyId}_${vehicleId}`).get();
+      const gv = g.exists ? (g.data() || {}) : null;
+      if (gv && typeof gv.lat === "number" && typeof gv.lng === "number") { ref = { lat: gv.lat, lng: gv.lng }; refKind = "vehicle"; }
+    } catch (_) { /* gps 없음 = 정상(운행 종료) */ }
+    if (!ref && meta && meta.stops && meta.stops.length) {
+      const last = meta.stops[meta.stops.length - 1];
+      ref = { lat: last.lat, lng: last.lng }; refKind = "terminal";
+    }
+    if (ref) distanceM = Math.round(distMeters(phone.lat, phone.lng, ref.lat, ref.lng));
+  }
+
+  // ── 가드 ③ 종점 도착 후 경과 ────────────────────────────────────
+  let afterTerminalSec = null;
+  if (meta && meta.stops && meta.stops.length) {
+    const lastId = meta.stops[meta.stops.length - 1].id;
+    const rec = (tdata.stopArrivals || {})[lastId];
+    const at = rec && rec.actualAt;
+    const ms = at && typeof at.toMillis === "function" ? at.toMillis() : null;
+    if (ms) afterTerminalSec = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  }
+
   await target.ref.update({
     [SLEEP_CHECK_FIELD]: {
       checkedAt: admin.firestore.FieldValue.serverTimestamp(),
       via: mode,
       byUid: request.auth.uid,
       driverId: driverId || null,
+      // 감사용 — 막지 않고 드러낸다.
+      distanceM: distanceM,                    // null = 위치 미제공(권한 거부 등)
+      distanceRef: refKind,                    // "vehicle" | "terminal" | null
+      nearOk: distanceM == null ? null : distanceM <= SLEEP_CHECK_NEAR_M,
+      afterTerminalSec: afterTerminalSec,      // null = 종점 도착 기록 없음
       ...(cleanUid ? { nfcUid: cleanUid } : {}),
     },
   });
-  console.log(`[슬리핑체크] cid=${companyId} veh=${vehicleId} disp=${target.id} via=${mode}`);
-  return { ok: true, alreadyChecked: false, routeName, vehicleNo, dispatchDate: today };
+  console.log(`[슬리핑체크] cid=${companyId} veh=${vehicleId} disp=${target.id} via=${mode} dist=${distanceM} after=${afterTerminalSec}`);
+  return { ok: true, alreadyChecked: false, routeName, vehicleNo, dispatchDate: today, distanceM, nearOk: distanceM == null ? null : distanceM <= SLEEP_CHECK_NEAR_M };
 });
 
 // registerSleepTag({ companyId, vehicleId, nfcUid }) — 차량 뒷좌석 NFC 태그 등록(기사·관리자).

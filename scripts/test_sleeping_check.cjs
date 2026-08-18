@@ -16,7 +16,7 @@ function load() {
   const src = fs.readFileSync(path.join(ROOT, "src/lib/sleepingCheck.js"), "utf8")
     .replace(/^export const /gm, "const ").replace(/^export function /gm, "function ");
   const ctx = { console }; vm.createContext(ctx);
-  vm.runInContext(src + "\n;this.__m={SLEEP_CHECK_GRACE_MS,toMs,sleepCheckedAt,terminalArrivalMs,sleepCheckState,pendingSleepChecks,sleepCheckSummary,formatWaited};", ctx);
+  vm.runInContext(src + "\n;this.__m={SLEEP_CHECK_GRACE_MS,SLEEP_CHECK_FAST_SEC,toMs,sleepCheckedAt,terminalArrivalMs,sleepCheckState,pendingSleepChecks,sleepCheckSummary,formatWaited,sleepCheckAudit,sleepAuditLabel};", ctx);
   return ctx.__m;
 }
 
@@ -77,11 +77,36 @@ ok("40분", M.formatWaited(40 * MIN) === "40분째", M.formatWaited(40 * MIN));
 ok("1시간 5분", M.formatWaited(65 * MIN) === "1시간 5분째", M.formatWaited(65 * MIN));
 ok("음수·0 은 빈 문자열", M.formatWaited(0) === "" && M.formatWaited(-1) === "");
 
+console.log("\n[4.5] 🔴 QR 도용 감사(2026-08-18 way 지적 — 사진으로 복제된다)");
+const chk = (extra) => ({ sleepingCheck: { checkedAt: ts(NOW), via: "qr", ...extra } });
+ok("종점에서 먼 곳에서 찍히면 의심", M.sleepCheckAudit(chk({ nearOk: false, distanceM: 4200 })).suspicious);
+ok("가까우면 정상", M.sleepCheckAudit(chk({ nearOk: true, distanceM: 40 })).suspicious === false);
+ok("종점 도착 5초 만에 찍히면 의심(걸어갈 시간이 없다)",
+  M.sleepCheckAudit(chk({ nearOk: true, distanceM: 30, afterTerminalSec: 5 })).suspicious);
+ok("40초 뒤는 정상", M.sleepCheckAudit(chk({ nearOk: true, distanceM: 30, afterTerminalSec: 40 })).suspicious === false);
+ok("🔴 위치 없음만으로는 의심 아님(권한 거부·실내가 흔하다)",
+  M.sleepCheckAudit(chk({ nearOk: null, distanceM: null })).suspicious === false,
+  JSON.stringify(M.sleepCheckAudit(chk({ nearOk: null, distanceM: null }))));
+ok("위치 없음도 사유로는 남는다(관제에서 보이게)",
+  M.sleepCheckAudit(chk({ nearOk: null, distanceM: null })).reasons.includes("noPlace"));
+ok("🔴 NFC 는 위치로 의심하지 않는다(물리적 접촉이 강제된다)",
+  M.sleepCheckAudit({ sleepingCheck: { checkedAt: ts(NOW), via: "nfc", nearOk: false, distanceM: 9000 } }).suspicious === false);
+ok("NFC 라도 도착 직후 즉시는 의심",
+  M.sleepCheckAudit({ sleepingCheck: { checkedAt: ts(NOW), via: "nfc", afterTerminalSec: 3 } }).suspicious);
+ok("확인 기록이 없으면 의심 아님", M.sleepCheckAudit({}).suspicious === false);
+ok("사유 라벨", M.sleepAuditLabel(["far", "tooFast"]) === "종점에서 먼 곳 · 도착 직후 즉시",
+  M.sleepAuditLabel(["far", "tooFast"]));
 console.log("\n[5] 소스 가드");
 const cf = fs.readFileSync(path.join(ROOT, "functions/index.js"), "utf8");
 ok("서버가 첫 확인만 남긴다(멱등)", /alreadyChecked: true/.test(cf));
 ok("NFC 는 그 차량 등록 태그와 일치해야 한다", /이 차량의 확인 태그가 아닙니다/.test(cf));
 ok("태그 중복 등록 거부", /이미 \$\{n\} 차량에 등록된 태그입니다/.test(cf));
+ok("🔴 운행 시간창 밖 확인은 거부(차고지·전날 미리 찍기 차단)", /지금은 이 노선의 운행 시간이 아닙니다/.test(cf));
+ok("🔴 위치는 기록만 — 거부 사유로 쓰지 않는다", /nearOk: distanceM == null \? null :/.test(cf) && !/nearOk === false\) throw/.test(cf));
+ok("🔴 종점 도착을 필수 조건으로 걸지 않았다(실측 71%)", !/종점 도착 기록이 없습니다/.test(cf));
+ok("확인 위치 기준은 차량 GPS → 없으면 종점 정류장", /refKind = \"terminal\"/.test(cf));
+const sc = fs.readFileSync(path.join(ROOT, "src/pages/SleepCheckApp.js"), "utf8");
+ok("🔴 위치를 못 얻어도 확인은 진행된다", /getCurrentPosition/.test(sc) && /\.\.\.\(pos \|\| \{\}\)/.test(sc));
 const app = fs.readFileSync(path.join(ROOT, "src/App.js"), "utf8");
 ok("🔴 /sleep 은 /board 와 다른 경로다(승객이 찍어도 탑승이 안 생긴다)", /pSleep\s*=\s*path\.startsWith\("\/sleep"\)/.test(app));
 const fb = fs.readFileSync(path.join(ROOT, "src/firebase.js"), "utf8");

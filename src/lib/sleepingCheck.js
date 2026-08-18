@@ -71,6 +71,39 @@ export function pendingSleepChecks(dispatches, stopsByRoute, now = Date.now(), g
   return out.sort((a, b) => b.waitedMs - a.waitedMs);
 }
 
+// 🔴 **QR 은 사진으로 복제된다**(2026-08-18 way 지적). 종이 QR 로 "그 자리에 있었다"를
+//    증명하는 건 원리적으로 불가능하다 — 실질 방어는 NFC 태그뿐이다. 그래서 QR 확인은
+//    **막지 말고 드러낸다**: 아래 판정이 관제에 "확인은 됐지만 미심쩍다"를 띄운다.
+//    ⚠ 이건 고발이 아니라 **눈에 띄게 하기**다 — 자동으로 무효화하지 않는다.
+//       (위치는 권한 거부·실내 오차로 빌 수 있고, 그걸로 확인을 무효화하면 기능이 죽는다)
+export const SLEEP_CHECK_FAST_SEC = 20; // 종점 도착 후 이보다 빨리 찍히면 "걸어갈 시간이 없었다"
+
+/**
+ * 확인 기록이 미심쩍은가 — { suspicious, reasons[] }.
+ *  - far      : 종점(또는 차량)에서 300m 넘게 떨어진 곳에서 찍힘(서버가 nearOk=false 로 기록)
+ *  - noPlace  : 위치를 못 받음(권한 거부·실내) — 단독으로는 약한 신호
+ *  - tooFast  : 종점 도착 20초 안에 찍힘(맨 뒤까지 걸어갈 수 없는 시간)
+ * 🔴 NFC 확인은 물리적 접촉이 강제되므로 위치 신호로 의심하지 않는다.
+ */
+export function sleepCheckAudit(dispatch) {
+  const c = dispatch && dispatch.sleepingCheck;
+  if (!c || !c.checkedAt) return { suspicious: false, reasons: [] };
+  const reasons = [];
+  if (c.via !== "nfc") {
+    if (c.nearOk === false) reasons.push("far");
+    else if (c.nearOk == null && c.distanceM == null) reasons.push("noPlace");
+  }
+  if (typeof c.afterTerminalSec === "number" && c.afterTerminalSec < SLEEP_CHECK_FAST_SEC) reasons.push("tooFast");
+  // 위치 없음(noPlace) 하나만으로는 의심으로 올리지 않는다 — 실내·권한 거부가 흔하다.
+  const strong = reasons.some(r => r === "far" || r === "tooFast");
+  return { suspicious: strong, reasons };
+}
+
+export function sleepAuditLabel(reasons) {
+  if (!reasons || reasons.length === 0) return "";
+  const m = { far: "종점에서 먼 곳", noPlace: "위치 미확인", tooFast: "도착 직후 즉시" };
+  return reasons.map(r => m[r] || r).join(" · ");
+}
 /** 오늘 확인 현황 요약 — 종점 도착한 배차 기준(운행 전은 모수에서 뺀다). */
 export function sleepCheckSummary(dispatches, stopsByRoute, now = Date.now(), graceMs = SLEEP_CHECK_GRACE_MS) {
   let done = 0, late = 0, waiting = 0;
