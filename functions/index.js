@@ -1189,6 +1189,81 @@ async function resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRout
   };
 }
 
+// ─── 오늘 노선 도착 기록 조회(익명 화면 위임, 2026-08-18) ─────────────────
+// getRouteStopArrivals({ companyId, routeIds }) — 읽기 전용.
+//
+// 🔴 왜 CF 인가: `dispatches/{date}/list` 의 read 규칙은 `isAdmin || isDriverOf` 인데
+//    이 데이터를 쓰는 화면(승객앱 `/bus`·직원앱 `/p`·협력사 포털)은 전부 **익명 인증**이라
+//    클라이언트 쿼리가 통째로 거부된다. 거부는 에러 없이 빈 결과로 흡수되어
+//    **정류장 '실제 도착시각'·'직전 정류장 도착' 인앱 알림·'운행 종료' 표기·협력사
+//    노선도의 통과(✓) 가 전부 조용히 죽어 있었다**(2026-08-18 실측).
+//    rules 를 익명에 열면 회사 전체 배차(기사명·차량번호·배차표)가 열리므로,
+//    `resolveStaticBoarding`(2026-07-13) 선례대로 **필요한 값만** 서버가 돌려준다.
+//
+// 🔴 돌려주는 것은 도착 기록뿐 — 기사명·차량번호·배차 ID 는 포함하지 않는다(최소 노출).
+// 병합 규칙은 **기존 클라이언트와 글자 그대로 같다**: 같은 노선 배차가 여럿이면
+// 정류장마다 **가장 이른 actualAt**(먼저 도착한 차량 우선). 바꾸면 표시가 달라진다.
+// ⚠ 순환(왕복) 노선에서 첫 바퀴 시각이 굳는 기존 한계도 그대로다(issues.md `[미해결]`).
+//
+// 반환: { date, routes: { [routeId]: { count: number, arrivals: { [stopId]: ms } } } }
+//   count = 오늘 그 노선 배차 건수(0 이면 운행 없음 — `computeRunEnded` 의 hasTodayDispatch).
+const STOP_ARRIVALS_MAX_ROUTES = 40; // 협력사 포털 최대 노선 수(채드윅 29) 여유분
+exports.getRouteStopArrivals = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
+
+  const { companyId, routeIds } = request.data || {};
+  if (!companyId || typeof companyId !== "string") {
+    throw new HttpsError("invalid-argument", "companyId가 필요합니다");
+  }
+  const ids = [...new Set(
+    (Array.isArray(routeIds) ? routeIds : [routeIds])
+      .filter((r) => typeof r === "string" && r.trim())
+      .map((r) => r.trim())
+  )];
+  if (ids.length === 0) throw new HttpsError("invalid-argument", "routeIds가 필요합니다");
+  if (ids.length > STOP_ARRIVALS_MAX_ROUTES) {
+    throw new HttpsError("invalid-argument", `노선은 한 번에 ${STOP_ARRIVALS_MAX_ROUTES}개까지 조회합니다`);
+  }
+
+  const db = admin.firestore();
+  const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
+  const routes = {};
+  ids.forEach((rid) => { routes[rid] = { count: 0, arrivals: {} }; });
+
+  // routeId 동등 필터(단일필드=자동 인덱스). `in` 은 10개씩 끊는다 —
+  // 🔴 그날 배차 전체를 읽어 클라 필터하면 승객 한 명이 45문서를 읽는다(폴링과 곱해진다).
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += 10) chunks.push(ids.slice(i, i + 10));
+
+  for (const chunk of chunks) {
+    const snap = await db
+      .collection("companies").doc(companyId)
+      .collection("dispatches").doc(date)
+      .collection("list")
+      .where("routeId", "in", chunk)
+      .get();
+    snap.docs.forEach((d) => {
+      const v = d.data() || {};
+      const bucket = routes[v.routeId];
+      if (!bucket) return;
+      bucket.count += 1;
+      const sa = v.stopArrivals || {};
+      Object.entries(sa).forEach(([stopId, rec]) => {
+        const at = rec && rec.actualAt;
+        const ms = at && typeof at.toMillis === "function"
+          ? at.toMillis()
+          : (typeof at === "number" ? at : null);
+        if (ms == null) return;
+        if (bucket.arrivals[stopId] == null || ms < bucket.arrivals[stopId]) {
+          bucket.arrivals[stopId] = ms;
+        }
+      });
+    });
+  }
+
+  return { date, routes };
+});
+
 // resolveStaticBoarding({ companyId, vehicleId, selectedRouteId? }) — 읽기 전용(확인 화면 프리뷰용).
 // 반환: { today, routeId, routeName, driverId, vehicleNo }.
 exports.resolveStaticBoarding = onCall(async (request) => {

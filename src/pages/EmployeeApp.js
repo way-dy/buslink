@@ -14,6 +14,7 @@ import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom, toLatLng
 import { computeStopEstimates, formatDelayLabel, formatPassengerEta, describeEtaSource } from "../lib/stopSchedule";
 import { useSmoothedEta } from "../lib/useSmoothedEta";
 import { computeRunEnded } from "../lib/runStatus";
+import { useOneRouteStopArrivals } from "../lib/useRouteStopArrivals";
 import { useWakeTick } from "../lib/useWakeTick";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
 import { forceReconnect } from "../lib/forceReconnect";
@@ -943,34 +944,18 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, activeRouteId, wakeTick, recoverTick, manualTick]);
 
-  // ── 오늘 노선 dispatch 구독(stopArrivals 실 도착시각 수신) ────────
-  // 활성 노선의 오늘 dispatch 1건(여러개면 첫 건) — driver 측이 도착 감지 시
-  // stopArrivals.{stopId} = { actualAt, plannedAt, delaySec } 업데이트.
-  // 미설정 노선/dispatch 없음=빈객체→ 폴백 동작(stopSchedule.js 가 처리).
-  const [todayDispatch, setTodayDispatch] = useState(null);
-  useEffect(() => {
-    if (!companyId || !activeRouteId) { setTodayDispatch(null); return; }
-    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
-    const q = query(
-      collection(db, 'companies', companyId, 'dispatches', today, 'list'),
-      where('routeId', '==', activeRouteId)
-    );
-    return onSnapshot(q, snap => {
-      if (snap.empty) { setTodayDispatch(null); return; }
-      // 같은 노선 dispatch 여러건이어도 stopArrivals 병합 — '먼저 도착한' 차량 우선.
-      const merged = {};
-      snap.docs.forEach(d => {
-        const sa = d.data().stopArrivals || {};
-        Object.entries(sa).forEach(([sid, v]) => {
-          const at = v?.actualAt?.toMillis ? v.actualAt.toMillis() : (typeof v?.actualAt === 'number' ? v.actualAt : null);
-          if (at == null) return;
-          if (merged[sid] == null || at < merged[sid]) merged[sid] = at;
-        });
-      });
-      setTodayDispatch({ stopArrivals: merged });
-    }, () => setTodayDispatch(null));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId, activeRouteId, wakeTick, recoverTick, manualTick]);
+  // ── 오늘 노선 도착 기록(stopArrivals 실 도착시각) ────────────────
+  // 🔴 예전엔 `dispatches` 를 직접 onSnapshot 했는데 그 컬렉션 read 는 admin/기사 전용이라
+  //    익명인 이 화면에서는 **언제나 거부**됐다(빈 결과로 흡수). 그 탓에 실제 도착시각·
+  //    '직전 정류장 도착' 인앱 알림·'운행 종료' 표기가 조용히 죽어 있었다(2026-08-18).
+  //    서버 위임 CF `getRouteStopArrivals`(정본 훅 = src/lib/useRouteStopArrivals.js).
+  //    병합 규칙(같은 노선 여러 배차 → 정류장마다 가장 이른 도착)은 서버가 그대로 한다.
+  const { todayDispatch } = useOneRouteStopArrivals({
+    companyId,
+    routeId: activeRouteId,
+    active: rawBuses.length > 0, // 버스가 달릴 때만 갱신(도착 기록은 그때만 는다)
+    tick: wakeTick + recoverTick + manualTick,
+  });
 
   const mainBus   = buses[0] || null;
   const myStop    = myStopIdx !== null ? stops[myStopIdx] : null;
@@ -2034,29 +2019,14 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
     });
   }, [stopModal, companyId, wakeTick]);
 
-  // 선택 노선 오늘 dispatch stopArrivals 구독 — 모달 정류장 목록 계획·예상 시간 표시용.
-  const [modalDispatch, setModalDispatch] = useState(null);
-  useEffect(() => {
-    if (!stopModal || !companyId) { setModalDispatch(null); return; }
-    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
-    const q = query(
-      collection(db, "companies", companyId, "dispatches", today, "list"),
-      where("routeId", "==", stopModal.id)
-    );
-    return onSnapshot(q, snap => {
-      if (snap.empty) { setModalDispatch(null); return; }
-      const merged = {};
-      snap.docs.forEach(d => {
-        const sa = d.data().stopArrivals || {};
-        Object.entries(sa).forEach(([sid, v]) => {
-          const at = v?.actualAt?.toMillis ? v.actualAt.toMillis() : (typeof v?.actualAt === 'number' ? v.actualAt : null);
-          if (at == null) return;
-          if (merged[sid] == null || at < merged[sid]) merged[sid] = at;
-        });
-      });
-      setModalDispatch({ stopArrivals: merged });
-    }, () => setModalDispatch(null));
-  }, [stopModal, companyId, wakeTick]);
+  // 선택 노선 오늘 도착 기록 — 모달 정류장 목록 계획·예상 시간 표시용.
+  // 홈 탭과 같은 이유로 서버 위임(위 주석 참조) — `dispatches` 직접 읽기는 익명에 닫혀 있다.
+  const { todayDispatch: modalDispatch } = useOneRouteStopArrivals({
+    companyId,
+    routeId: stopModal ? stopModal.id : null,
+    active: modalBuses.length > 0,
+    tick: wakeTick,
+  });
 
   // 모달 지도에 그릴 경로 — 관리자가 그린 routePath 가 있으면 그것, 없으면 정류장 직선.
   // (routePath 미설정 노선은 예전처럼 직선으로 보이는 게 맞다 = 하위호환 폴백)

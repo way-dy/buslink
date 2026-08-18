@@ -30,7 +30,7 @@
 - `users`: 본인 또는 superadmin만 read, write는 superadmin.
 - `companies/**`: read는 인증 사용자, write는 해당 회사 admin.
 - `drivers`: 기사 본인은 `status/uid/startedAt/endedAt`만 update.
-- `dispatches/{date}/list/{id}`: admin 전체 write. **기사 본인 dispatch 의 `stopArrivals` 필드만 update 가능**(`drivers/{dispatch.driverId}.uid == request.auth.uid` 검증·affectedKeys hasOnly `[stopArrivals]`. 운행 중 정류장 100m 진입 시 클라가 update). 멱등은 클라가 첫도착만 write로 가드(서버 룰은 필드 범위만 강제).
+- `dispatches/{date}/list/{id}`: **read = `isAdmin || isDriverOf`(익명 불가)**. 🔴 익명 화면(승객앱 `/bus`·직원앱 `/p`·협력사 포털)은 이 컬렉션을 **직접 읽을 수 없다** — 2026-08-18 까지 세 화면이 직접 구독하다 거부를 빈 값으로 흡수해 도착시각·노선도 ✓ 가 조용히 죽어 있었다. 필요한 값은 CF `getRouteStopArrivals`(도착 기록만) 로 받는다. **여기에 새 소비자를 붙이려면 rules 를 열지 말고 서버 위임을 늘릴 것.** admin 전체 write. **기사 본인 dispatch 의 `stopArrivals` 필드만 update 가능**(`drivers/{dispatch.driverId}.uid == request.auth.uid` 검증·affectedKeys hasOnly `[stopArrivals]`. 운행 중 정류장 100m 진입 시 클라가 update). 멱등은 클라가 첫도착만 write로 가드(서버 룰은 필드 범위만 강제).
 - `boardingTokens`/`partnerCodes`: read 공개(`true`), 소각/생성은 인증 사용자.
 - `nfcRejects/{date}/list/{id}`(2026-07-22): read=`isAdmin(companyId)`, **write=`false`**(CF Admin SDK 전용 — 클라 위조 부정승차 기록 차단). `companies/**` 는 catch-all 이 없어 하위 컬렉션마다 명시 블록 필수.
 - `boardings/{date}/list/{id}`: read·create = `isAuth()`(2026-05-26 완화 — 협력사 포털 통계 view 위해 admin→isAuth), update/delete는 admin. ⚠ BoardingApp·EmployeeApp·PassengerApp·PartnerApp·DriverApp 모든 진입점이 `signInAnonymously` 호출 필요(인증 누락 시 silent create 차단 → 통계 결측, 2026-05-26 BoardingApp 결함 사례 참조).

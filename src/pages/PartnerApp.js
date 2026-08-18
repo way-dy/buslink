@@ -24,6 +24,8 @@ import { Map as KakaoMap, MapMarker, Polyline, CustomOverlayMap } from "react-ka
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 // gps 문서 경과 시간 — 정본은 src/lib/runStatus.js(AdminApp·직원앱과 같은 판정).
 import { gpsAgeMs } from "../lib/runStatus";
+// 오늘 도착 기록(노선도 통과 ✓) — 배차 읽기가 익명에 닫혀 있어 CF 위임으로 받는다.
+import { useRouteStopArrivals } from "../lib/useRouteStopArrivals";
 import { useWakeTick } from "../lib/useWakeTick";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
 // 거래처 브랜딩(2026-07-16 회의 #5) — 메인 컬러 CSS 변수 덮어쓰기(포탈 진입 시 적용·이탈 시 복원).
@@ -1812,32 +1814,6 @@ function OperationsMode({ codeData, code, routes }) {
     });
   }, [companyId, myRoutesList, stopsByRoute]);
 
-  // ── 오늘 dispatches(routeId in myRouteIds) ─────────────
-  // 🔴 이 구독은 **권한상 익명 사용자에게 열려 있지 않다**(2026-08-18 실측 permission-denied).
-  //    `dispatches/{date}/list` read 규칙 = `isAdmin || isDriverOf` 인데 협력사 포털은
-  //    익명 인증이라 언제나 거부된다 → 여기서는 항상 빈 배열이 된다.
-  //    🔴 그래서 **지도의 버스는 이 구독에 의존하면 안 된다**(의존하던 것이 "관제가 안 된다"의 근인).
-  //    관리자 실시간 관제와 같은 방식으로 gps 문서의 routeId 로 직접 거른다(아래).
-  //    남겨 둔 이유 = 노선도의 '통과 정류장(✓)' 은 배차의 stopArrivals 가 유일한 출처라,
-  //    서버 위임(onCall) 통로가 생기면 이 자리에 그대로 붙는다.
-  const [todayDispatches, setTodayDispatches] = useState([]); // [{id, routeId, vehicleId, vehicleNo, driverName, ...}]
-  useEffect(() => {
-    if (!companyId) return;
-    return onSnapshot(
-      collection(db, "companies", companyId, "dispatches", todayStr, "list"),
-      snap => {
-        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        // 우리 routeId만
-        setTodayDispatches(list.filter(d => myRouteIds.has(d.routeId)));
-      },
-      err => {
-        console.warn("[OperationsMode] dispatches 구독 오류:", err.message);
-        setTodayDispatches([]);
-      }
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId, todayStr, myRouteIds, wakeTick, recoverTick]);
-
   // ── GPS 구독 — 우리 회사 + 우리 노선 한정 ─────────────
   // gps 컬렉션은 top-level, doc id = `{companyId}_{vehicleId}`. 문서에 routeId 가 실려 있다
   // (모바일 sendGPS·서버 폴러 pollDeviceVehicleGps 양쪽 모두 기록).
@@ -1862,10 +1838,22 @@ function OperationsMode({ codeData, code, routes }) {
   }, [companyId, myRouteIds, wakeTick, recoverTick]);
   const buses = useAnimatedPositions(rawBuses);
 
-  // 노선 필터 적용된 dispatches/buses
-  const filteredDispatches = useMemo(() => (
-    routeFilter ? todayDispatches.filter(d => d.routeId === routeFilter) : todayDispatches
-  ), [todayDispatches, routeFilter]);
+  // ── 오늘 도착 기록(노선도 통과 ✓) ─────────────────────
+  // 🔴 `dispatches` 직접 읽기는 **익명에 닫혀 있다**(read = isAdmin || isDriverOf). 예전엔
+  //    이 화면이 그 컬렉션을 구독하다 거부를 빈 배열로 흡수해 ✓ 가 하나도 안 찍혔다.
+  //    서버 위임 CF `getRouteStopArrivals`(정본 훅 = src/lib/useRouteStopArrivals.js).
+  //    노선이 29개까지 가므로 **한 번에 묶어** 부른다(노선당 1회 호출 금지).
+  const arrivalRouteIds = useMemo(
+    () => (routeFilter ? [routeFilter] : myRoutesList.map(r => r.id)),
+    [routeFilter, myRoutesList]
+  );
+  const { byRoute: arrivalsByRoute } = useRouteStopArrivals({
+    companyId,
+    routeIds: arrivalRouteIds,
+    active: rawBuses.length > 0, // 버스가 달릴 때만 갱신
+    tick: wakeTick + recoverTick,
+  });
+
   const filteredBuses = useMemo(() => (
     routeFilter ? buses.filter(b => b.routeId === routeFilter) : buses
   ), [buses, routeFilter]);
@@ -2028,11 +2016,8 @@ function OperationsMode({ codeData, code, routes }) {
       .filter(r => !routeFilter || r.id === routeFilter)
       .map(r => {
         const stops = (stopsByRoute[r.id] || []).map(s => ({ id: s.id, name: s.name || "", ll: toLL(s) }));
-        // 이 노선 배차들의 실측 도착(stopArrivals) 합집합 = 통과 정류장
-        const passed = new window.Set();
-        filteredDispatches.filter(d => d.routeId === r.id).forEach(d => {
-          Object.keys(d.stopArrivals || {}).forEach(sid => passed.add(sid));
-        });
+        // 이 노선의 실측 도착(stopArrivals) = 통과 정류장. 서버가 이미 배차들을 병합해 준다.
+        const passed = new window.Set(Object.keys((arrivalsByRoute[r.id] || {}).arrivals || {}));
         // 이 노선 버스 → 가장 가까운 정류장 인덱스
         const busAt = new window.Map(); // stopIdx -> [vehicleNo...]
         filteredBuses.filter(b => b.routeId === r.id && b.lat && b.lng).forEach(b => {
@@ -2047,7 +2032,7 @@ function OperationsMode({ codeData, code, routes }) {
         return { id: r.id, name: r.name, stops, passed, busAt };
       })
       .filter(r => r.stops.length >= 2);
-  }, [myRoutesList, routeFilter, stopsByRoute, filteredDispatches, filteredBuses]);
+  }, [myRoutesList, routeFilter, stopsByRoute, arrivalsByRoute, filteredBuses]);
 
   const noticeTitleLen = noticeTitle.trim().length;
   const noticeBodyLen = noticeBody.trim().length;

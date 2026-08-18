@@ -16,6 +16,7 @@ import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 import { resolveCompanyIdForAnon } from "../lib/companyResolver";
 import { useExitConfirm } from "../lib/useExitConfirm";
 import { sortRoutes } from "../lib/routeOrder";
+import { useOneRouteStopArrivals } from "../lib/useRouteStopArrivals";
 
 // ── 경로 진행 판정 임계값 (작업2, 2026-05-18 — EmployeeApp과 동일 정책) ──
 const OFF_ROUTE_M = 70;       // 버스 투영 수직거리 초과 시 경로 이탈로 보고 직전 진행 유지
@@ -175,31 +176,17 @@ export default function PassengerApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, routeId, ready, wakeTick, recoverTick, manualTick]);
 
-  // 오늘 dispatch stopArrivals 구독(routeId 한정) — 정류장 리스트 계획·예상 시간 표시용.
-  const [todayDispatch, setTodayDispatch] = useState(null);
-  useEffect(() => {
-    if (!ready || !routeId) { setTodayDispatch(null); return; }
-    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
-    const q = query(
-      collection(db, "companies", companyId, "dispatches", today, "list"),
-      where("routeId", "==", routeId)
-    );
-    return onSnapshot(q, snap => {
-      if (snap.empty) { setTodayDispatch(null); return; }
-      const merged = {};
-      snap.docs.forEach(d => {
-        const sa = d.data().stopArrivals || {};
-        Object.entries(sa).forEach(([sid, v]) => {
-          const at = v?.actualAt?.toMillis ? v.actualAt.toMillis() : (typeof v?.actualAt === 'number' ? v.actualAt : null);
-          if (at == null) return;
-          if (merged[sid] == null || at < merged[sid]) merged[sid] = at;
-        });
-      });
-      setTodayDispatch({ stopArrivals: merged });
-    }, () => setTodayDispatch(null));
-    // (manualTick: 노선 새로고침 버튼 재구독)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId, routeId, ready, wakeTick, recoverTick, manualTick]);
+  // 오늘 dispatch stopArrivals — 정류장 리스트 계획·예상 시간 표시용.
+  // 🔴 예전엔 `dispatches` 를 직접 onSnapshot 했는데 그 컬렉션 read 는 admin/기사 전용이라
+  //    익명인 이 화면에서는 **언제나 거부**됐다(빈 결과로 흡수 → 실제 도착시각이 안 뜸).
+  //    서버 위임 CF `getRouteStopArrivals` 로 받는다(정본 훅 = src/lib/useRouteStopArrivals.js).
+  //    폴링은 이 노선에 버스가 실제로 달릴 때만(`active`).
+  const { todayDispatch } = useOneRouteStopArrivals({
+    companyId,
+    routeId: ready ? routeId : null,
+    active: rawBuses.length > 0,
+    tick: wakeTick + recoverTick + manualTick,
+  });
 
   const timeSince = (date) => {
     if (!date) return "";
