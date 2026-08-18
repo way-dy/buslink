@@ -22,10 +22,16 @@ import { aggregateBoardingsByStop } from "../lib/stopMapping";
 // 이 파일 내에서 `new Map()` 쓸 일 있으면 반드시 `new window.Map()`(issues.md `[패턴]`).
 import { Map as KakaoMap, MapMarker, Polyline, CustomOverlayMap } from "react-kakao-maps-sdk";
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
+// gps 문서 경과 시간 — 정본은 src/lib/runStatus.js(AdminApp·직원앱과 같은 판정).
+import { gpsAgeMs } from "../lib/runStatus";
 import { useWakeTick } from "../lib/useWakeTick";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
 // 거래처 브랜딩(2026-07-16 회의 #5) — 메인 컬러 CSS 변수 덮어쓰기(포탈 진입 시 적용·이탈 시 복원).
 import { applyPartnerBranding, clearPartnerBranding } from "../lib/partnerBranding";
+
+// 버스 마커 "신호 지연" 임계 — 관리자 실시간 관제 MARKER_STALE_MS 와 같은 값(5분).
+// 🔴 60초(GPS 신선도)로 낮추지 말 것: 단말 차량은 서버 폴러가 1분 주기라 매 분 깜빡인다.
+const MARKER_STALE_MS = 5 * 60 * 1000;
 
 const STEPS = { CODE:"code", MAIN:"main", DONE:"done", MANAGE:"manage" };
 const REG_MODES = { FILE:"file", SINGLE:"single", MULTI:"multi", NFC:"nfc" };
@@ -1807,6 +1813,13 @@ function OperationsMode({ codeData, code, routes }) {
   }, [companyId, myRoutesList, stopsByRoute]);
 
   // ── 오늘 dispatches(routeId in myRouteIds) ─────────────
+  // 🔴 이 구독은 **권한상 익명 사용자에게 열려 있지 않다**(2026-08-18 실측 permission-denied).
+  //    `dispatches/{date}/list` read 규칙 = `isAdmin || isDriverOf` 인데 협력사 포털은
+  //    익명 인증이라 언제나 거부된다 → 여기서는 항상 빈 배열이 된다.
+  //    🔴 그래서 **지도의 버스는 이 구독에 의존하면 안 된다**(의존하던 것이 "관제가 안 된다"의 근인).
+  //    관리자 실시간 관제와 같은 방식으로 gps 문서의 routeId 로 직접 거른다(아래).
+  //    남겨 둔 이유 = 노선도의 '통과 정류장(✓)' 은 배차의 stopArrivals 가 유일한 출처라,
+  //    서버 위임(onCall) 통로가 생기면 이 자리에 그대로 붙는다.
   const [todayDispatches, setTodayDispatches] = useState([]); // [{id, routeId, vehicleId, vehicleNo, driverName, ...}]
   useEffect(() => {
     if (!companyId) return;
@@ -1825,16 +1838,11 @@ function OperationsMode({ codeData, code, routes }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, todayStr, myRouteIds, wakeTick, recoverTick]);
 
-  // 우리 노선의 vehicleId 집합
-  const myVehicleIds = useMemo(() => {
-    const s = new window.Set();
-    todayDispatches.forEach(d => { if (d.vehicleId) s.add(d.vehicleId); });
-    return s;
-  }, [todayDispatches]);
-
-  // ── GPS 구독 — 우리 회사 + 우리 vehicleId 한정 ────────
-  // gps 컬렉션은 top-level, doc id = `{companyId}_{vehicleId}`.
-  // companyId 동등 필터 1개로 자사 차량만 받고 vehicleId in 필터는 클라이언트(노선 dispatch와 정합).
+  // ── GPS 구독 — 우리 회사 + 우리 노선 한정 ─────────────
+  // gps 컬렉션은 top-level, doc id = `{companyId}_{vehicleId}`. 문서에 routeId 가 실려 있다
+  // (모바일 sendGPS·서버 폴러 pollDeviceVehicleGps 양쪽 모두 기록).
+  // 🔴 **배차가 아니라 routeId 로 거른다** — 관리자 실시간 관제(MapTab `allowMapRow(v.routeId)`)와
+  //    같은 축. 배차로 거르면 배차 읽기 권한이 없는 이 화면에서는 항상 0대가 된다.
   const [rawBuses, setRawBuses] = useState([]);
   useEffect(() => {
     if (!companyId) return;
@@ -1842,8 +1850,8 @@ function OperationsMode({ codeData, code, routes }) {
       query(collection(db, "gps"), where("companyId", "==", companyId)),
       snap => {
         const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        // 우리 vehicleId만(노선 dispatch에 묶인 차량만 표시)
-        setRawBuses(list.filter(b => myVehicleIds.has(b.vehicleId)));
+        // 우리 노선의 차량만
+        setRawBuses(list.filter(b => b.routeId && myRouteIds.has(b.routeId)));
       },
       err => {
         console.warn("[OperationsMode] gps 구독 오류:", err.message);
@@ -1851,21 +1859,16 @@ function OperationsMode({ codeData, code, routes }) {
       }
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId, myVehicleIds, wakeTick, recoverTick]);
+  }, [companyId, myRouteIds, wakeTick, recoverTick]);
   const buses = useAnimatedPositions(rawBuses);
 
   // 노선 필터 적용된 dispatches/buses
   const filteredDispatches = useMemo(() => (
     routeFilter ? todayDispatches.filter(d => d.routeId === routeFilter) : todayDispatches
   ), [todayDispatches, routeFilter]);
-  const filteredVehicleIds = useMemo(() => {
-    const s = new window.Set();
-    filteredDispatches.forEach(d => { if (d.vehicleId) s.add(d.vehicleId); });
-    return s;
-  }, [filteredDispatches]);
   const filteredBuses = useMemo(() => (
-    buses.filter(b => filteredVehicleIds.has(b.vehicleId))
-  ), [buses, filteredVehicleIds]);
+    routeFilter ? buses.filter(b => b.routeId === routeFilter) : buses
+  ), [buses, routeFilter]);
 
   // 지도 중심 — 첫 버스/첫 정류장/한국 기본
   const mapCenter = useMemo(() => {
@@ -1962,13 +1965,6 @@ function OperationsMode({ codeData, code, routes }) {
     });
     return out;
   }, [myRoutesList, stopsByRoute, routeFilter]);
-
-  // dispatchById — 버스 마커 라벨용
-  const dispatchByVehicleId = useMemo(() => {
-    const m = new window.Map();
-    filteredDispatches.forEach(d => { if (d.vehicleId) m.set(d.vehicleId, d); });
-    return m;
-  }, [filteredDispatches]);
 
   // 지도 컨테이너 ref — 0px init 방어용
   const mapKeyRef = useRef(0);
@@ -2162,7 +2158,7 @@ function OperationsMode({ codeData, code, routes }) {
         <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--color-line-soft)", fontSize: 12, fontWeight: 700, color: "var(--color-label)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span>📍 실시간 버스 위치</span>
           <span style={{ fontSize: 11, fontWeight: 600, color: filteredBuses.length > 0 ? "var(--color-positive)" : "var(--color-label-mute)" }}>
-            {filteredBuses.length > 0 ? `${filteredBuses.length}대 운행 중` : (todayDispatches.length === 0 ? "오늘 배차 없음" : "운행 대기")}
+            {filteredBuses.length > 0 ? `${filteredBuses.length}대 운행 중` : "운행 중인 차량 없음"}
           </span>
         </div>
         {myRoutesList.length === 0 ? (
@@ -2186,43 +2182,51 @@ function OperationsMode({ codeData, code, routes }) {
                   }}
                 />
               ))}
-              {/* 버스 마커 */}
-              {filteredBuses.map(b => b.lat && b.lng && (
+              {/* 버스 마커 — 차량번호·노선명·속도. 신호가 5분 넘게 끊기면 회색(관리자 관제와 같은 잣대). */}
+              {filteredBuses.map(b => {
+                if (!b.lat || !b.lng) return null;
+                const stale = gpsAgeMs(b.updatedAt) >= MARKER_STALE_MS;
+                const tone = stale ? "var(--color-label-alt)" : "var(--color-primary)";
+                return (
                 <CustomOverlayMap key={b.id} position={{ lat: b.lat, lng: b.lng }} yAnchor={1.5}>
                   <div style={{ position: "relative", display: "inline-block" }}>
-                    <span style={{
-                      position: "absolute", inset: -2, borderRadius: 999,
-                      background: "var(--color-primary)", opacity: 0.4,
-                      animation: "buspulse 2s ease-out infinite", pointerEvents: "none"
-                    }} />
+                    {!stale && (
+                      <span style={{
+                        position: "absolute", inset: -2, borderRadius: 999,
+                        background: "var(--color-primary)", opacity: 0.4,
+                        animation: "buspulse 2s ease-out infinite", pointerEvents: "none"
+                      }} />
+                    )}
                     <div style={{
                       position: "relative", background: "#fff",
-                      border: "2px solid var(--color-primary)", borderRadius: 999,
+                      border: `2px solid ${tone}`, borderRadius: 999,
                       padding: "5px 10px", display: "flex", alignItems: "center", gap: 6,
                       boxShadow: "0 4px 12px rgba(0,102,255,0.3)",
                     }}>
                       <span style={{ fontSize: 16 }}>🚌</span>
                       <div>
                         <div style={{ fontSize: 11, fontWeight: 800, color: "var(--color-label)" }}>
-                          {b.vehicleNo || (dispatchByVehicleId.get(b.vehicleId)?.vehicleNo) || b.vehicleId || "차량"}
+                          {b.vehicleNo || b.vehicleId || "차량"}
                         </div>
                         <div style={{ fontSize: 9, fontWeight: 600, color: "var(--color-label-mute)" }}>
-                          {Math.round(b.speed || 0)} km/h
+                          {stale ? "신호 지연" : `${Math.round(b.speed || 0)} km/h`}
+                          {b.routeName ? ` · ${b.routeName}` : ""}
                         </div>
                       </div>
                     </div>
                   </div>
                 </CustomOverlayMap>
-              ))}
+                );
+              })}
             </KakaoMap>
-            {filteredBuses.length === 0 && todayDispatches.length > 0 && (
+            {filteredBuses.length === 0 && (
               <div style={{
                 position: "absolute", top: 8, left: 8, right: 8,
                 background: "rgba(255,255,255,0.95)", border: "1px solid var(--color-line)",
                 borderRadius: 8, padding: "6px 10px", fontSize: 11, fontWeight: 600,
                 color: "var(--color-label-mute)", textAlign: "center", pointerEvents: "none"
               }}>
-                ⓘ 배차 {todayDispatches.length}건 — GPS 신호 대기 중
+                ⓘ 운행이 시작되면 이 지도에 버스가 표시됩니다
               </div>
             )}
           </div>
