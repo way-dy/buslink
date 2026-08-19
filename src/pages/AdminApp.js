@@ -12,7 +12,7 @@ import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { compareRoutes, seatUsage } from "../lib/routeOrder";
 // 배차 일정 수정 후 남는 펼침 배차 정리(2026-08-12) — 순수 판정, 서버 shouldExpand 미러
 import {
-  PRUNE_LOOKAHEAD_DAYS, todayKST, upcomingDates, selectPrunableDispatches,
+  PRUNE_LOOKAHEAD_DAYS, todayKST, upcomingDates, selectPrunableDispatches, selectUpdatableDispatches,
 } from "../lib/dispatchSchedule";
 import { sendGPS } from "../lib/gps";
 import { toLatLngPath } from "../lib/routeProgress";
@@ -733,6 +733,10 @@ function MapTab({ companyId, allowed, drivers }) {
   const [forceBusy, setForceBusy] = useState(null);
   const [forceDone, setForceDone] = useState({});
   const vehiclesAll = useAnimatedPositions(rawVehicles);
+  // 거래처(협력사) 필터(2026-08-20 광연 요청) — 배차 관리 등 타 탭과 같은 드롭다운을 관제에도.
+  // 🔴 gps/dispatch 문서엔 partnerCode 가 없다 → 판정은 **노선의 partnerCode**(routePartnerOf) 하나로만 한다.
+  //    (제한 admin 게이팅 allowMapRow 과 같은 축 — 두 축이 어긋나면 "권한은 있는데 안 보임"이 생긴다)
+  const [partnerCode, setPartnerCode] = useState("전체");
 
   // 노선 새로고침(#2) — 기사 GPS 껐다 켜진 뒤 관제 화면에 위치 미반영 시 수동 재연결·재구독.
   const handleRefresh = async () => {
@@ -813,8 +817,11 @@ function MapTab({ companyId, allowed, drivers }) {
   // isAllAccess 면 기존 동작 그대로(회귀 0). gps/dispatch 의 routeId → routes.partnerCode 매핑.
   const routePartnerOf = (rid) => routes.find(r => r.id === rid)?.partnerCode;
   const allowMapRow = (rid) => isAllAccess(allowed) || partnerCodeAllowed(allowed, routePartnerOf(rid));
-  const vehicles = isAllAccess(allowed) ? vehiclesAll : vehiclesAll.filter(v => allowMapRow(v.routeId));
-  const visibleDispatches = isAllAccess(allowed) ? todayDispatches : todayDispatches.filter(d => allowMapRow(d.routeId));
+  // 거래처 필터. "전체" = 그대로(회귀 0). 특정 거래처 선택 시 **노선을 모르는 신호는 제외** —
+  // 소속을 못 밝히는 차량을 남겨 두면 그 거래처 화면이 아니게 된다.
+  const partnerOk = (rid) => partnerCode === "전체" || (!!rid && routePartnerOf(rid) === partnerCode);
+  const vehicles = vehiclesAll.filter(v => allowMapRow(v.routeId) && partnerOk(v.routeId));
+  const visibleDispatches = todayDispatches.filter(d => allowMapRow(d.routeId) && partnerOk(d.routeId));
 
   // 운행중(좌표 유효) 차량만 카운트 — 실데이터 기반(가짜 KPI 미도입)
   const liveCount = vehicles.filter(v => v.lat && v.lng).length;
@@ -824,9 +831,13 @@ function MapTab({ companyId, allowed, drivers }) {
   // 제한 admin 게이팅: isAllAccess 아니면 오늘 보이는 배차(visibleDispatches) 의 driverId 집합에 든 기사만(타 협력사 기사 노출 차단).
   const liveSet = new Set(rawVehicles.filter(v => v.lat && v.lng && isGpsFresh(v.updatedAt)).map(v => v.vehicleId));
   const visibleDriverIds = isAllAccess(allowed) ? null : new Set(visibleDispatches.map(d => d.driverId).filter(Boolean));
+  // 기사 문서엔 partnerCode 가 없다 → 거래처 필터는 **오늘 그 거래처 배차에 잡힌 기사**로만 좁힌다.
+  // (배차가 없는 기사는 소속을 알 수 없으니 특정 거래처 화면에서 뺀다 — 차량 필터와 같은 원칙)
+  const partnerDriverIds = partnerCode === "전체" ? null : new Set(visibleDispatches.map(d => d.driverId).filter(Boolean));
   const noGpsRunning = (drivers || []).filter(d =>
     d.status === "운행중" && !liveSet.has(d.vehicleId) &&
-    (isAllAccess(allowed) || visibleDriverIds.has(d.id))
+    (isAllAccess(allowed) || visibleDriverIds.has(d.id)) &&
+    (!partnerDriverIds || partnerDriverIds.has(d.id))
   );
 
   // ── 잔존 운행 신호 정리(2026-07-28 개선요청 cv4XzFYLUdUfzqBEuDQw) ─────────────
@@ -838,8 +849,10 @@ function MapTab({ companyId, allowed, drivers }) {
   const { staleSignals } = classifyRunSignals({ gpsDocs: rawVehicles, drivers: drivers || [], now: Date.now() });
   // 제한 admin 게이팅 = 지도 차량과 동일 기준(allowMapRow). 노선을 알 수 없는 신호는
   // 전체권한 admin 에게만(타 협력사 신호를 임의로 지우는 일 차단).
+  // 거래처 필터도 같은 축(노선 partnerCode). 노선 미상 신호는 "전체"에서만 보인다.
   const visibleStaleSignals = staleSignals.filter(s =>
-    isAllAccess(allowed) ? true : (s.routeId ? allowMapRow(s.routeId) : false)
+    (isAllAccess(allowed) ? true : (s.routeId ? allowMapRow(s.routeId) : false)) &&
+    (partnerCode === "전체" ? true : (s.routeId ? partnerOk(s.routeId) : false))
   );
 
   // 🔴 노선도 뷰의 routeStops 는 `viewMode === "route"` 일 때만 채워진다 — 지도 뷰에서는
@@ -986,6 +999,16 @@ function MapTab({ companyId, allowed, drivers }) {
           onChange={e => { if (e.target.value) setSelectedDate(e.target.value); }}
           style={MS.dateInput}
           title="조회 날짜 (과거 데이터는 노선도 뷰만 가능)"/>
+        {/* 거래처 필터 — 배차 관리 등과 같은 컴포넌트·같은 라벨(2026-08-20 광연 요청).
+            선택 변경 시 선택 차량 해제: 필터에서 빠진 차량의 상세 패널이 남아 있으면
+            "안 보이는 차량을 보고 있는" 상태가 된다. */}
+        <div style={MS.topPartner}>
+          <span style={{ fontSize:11, fontWeight:600, color:"var(--color-label-alt)", flexShrink:0 }}>거래처</span>
+          <PartnerFilter companyId={companyId} value={partnerCode}
+            onChange={(c) => { setPartnerCode(c); setSelected(null); }}
+            allowedCodes={allowed}
+            style={{ background:"var(--color-bg-soft)", padding:"5px 9px", fontWeight:600, minWidth:104, maxWidth:150 }} />
+        </div>
         {isPastDate ? (
           <span style={MS.pastBadge}>📅 과거 데이터</span>
         ) : (
@@ -1019,7 +1042,11 @@ function MapTab({ companyId, allowed, drivers }) {
         </div>
         <div style={MS.railBody}>
           {vehicles.length === 0 ? (
-            <div style={MS.empty}>운행 중인 차량 없음</div>
+            /* 필터 때문에 빈 것인지 실제로 없는 것인지 화면에서 구분되게 한다 */
+            <div style={MS.empty}>
+              운행 중인 차량 없음
+              {partnerCode !== "전체" && <div style={{ fontSize:11, marginTop:6 }}>거래처 필터가 걸려 있습니다</div>}
+            </div>
           ) : vehicles.map(v => {
             const on = selected?.id === v.id;
             return (
@@ -1528,6 +1555,7 @@ const MS = {
   viewBtn:{ padding:"5px 11px", fontSize:12, fontWeight:700, fontFamily:"inherit", border:"none", background:"transparent", color:"var(--color-label-mute)", borderRadius:6, cursor:"pointer", transition:"all .12s" },
   viewBtnOn:{ background:"var(--color-bg)", color:"var(--color-primary)", boxShadow:"0 1px 3px rgba(0,0,0,.08)" },
   dateInput:{ marginLeft:8, padding:"5px 9px", fontSize:12, fontWeight:600, fontFamily:"inherit", color:"var(--color-label)", background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:8, outline:"none", cursor:"pointer" },
+  topPartner:{ marginLeft:8, display:"flex", alignItems:"center", gap:6, minWidth:0 },
   pastBadge:{ marginLeft:"auto", display:"inline-flex", alignItems:"center", gap:6, fontSize:12, fontWeight:700, color:"var(--color-cautionary)", background:"#FFF1E0", border:"1px solid #FFE0C2", padding:"5px 11px", borderRadius:999 },
   routeWrap:{ position:"absolute", top:76, left:12, right:12, bottom:12, overflowY:"auto", zIndex:5, padding:"4px 4px 12px", background:"var(--color-bg-soft)", borderRadius:14 },
   routeGrid:{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(360px, 1fr))", gap:14 },
@@ -1672,7 +1700,11 @@ function DispatchTab({ companyId, vehicles, drivers, allowed, currentUserUid }) 
     try {
       if (editItem && editOriginalDate) {
         // ★ 수정: 원본 날짜 기준으로 업데이트 (날짜 이동 후 수정 시 엉뚱한 날짜에 잘못된 문서 생성 방지)
-        await updateDoc(doc(db, "companies", companyId, "dispatches", editOriginalDate, "list", editItem.id), { ...form, date: editOriginalDate });
+        // 펼침 배차를 손으로 고쳤으면 표시를 남긴다(2026-08-20) — 나중에 일정을 저장할 때
+        // 그날 수정분을 일정 값으로 되씌우지 않기 위한 유일한 단서다(@lib/dispatchSchedule.js).
+        const patch = { ...form, date: editOriginalDate };
+        if (editItem.source === "schedule") patch.manualOverride = true;
+        await updateDoc(doc(db, "companies", companyId, "dispatches", editOriginalDate, "list", editItem.id), patch);
       } else {
         // 신규: 현재 선택된 날짜에 추가
         const ref = collection(db, "companies", companyId, "dispatches", date, "list");
@@ -1933,6 +1965,47 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
   // 그래서 시작일을 미래로 밀거나 요일을 줄이거나 비활성으로 바꾸면 **이미 만들어진 배차가 남아**
   // 그날 아침 단말 차량 위치가 승객앱에 뜬다(2026-08-12 신고). 변경 직후 그 잔여분을 세어
   // 운영자에게 확인받고 지운다. 🔴 과거 배차·수동 배차·운행 흔적 있는 배차는 대상에서 뺀다.
+  // 일정 값이 바뀐 뒤에도 여전히 대상인 날짜의 배차를 일정에 맞춘다. 운행 흔적이 있거나
+  // 그날만 손으로 고쳐 둔 배차는 대상에서 빠진다(판정은 순수 모듈).
+  const syncScheduleDispatches = async (scheduleId, nextSchedule, dispatchesByDay, today) => {
+    const { updatable, keptManual, keptWithTrace } = selectUpdatableDispatches({
+      scheduleId, schedule: nextSchedule, dispatchesByDay, today,
+    });
+    if (updatable.length === 0) return;
+    const FIELD_LABEL = { driverId:"기사", driverName:"기사", routeId:"노선", routeName:"노선", vehicleId:"차량", vehicleNo:"차량", departTime:"출발시각" };
+    // 같은 대상의 id/이름 쌍(vehicleId+vehicleNo 등)은 한 줄로 — 운영자에겐 "차량" 하나다.
+    const summarize = (changes) => {
+      const seen = new Set();
+      return changes.filter(c => {
+        const k = FIELD_LABEL[c.field] || c.field;
+        if (seen.has(k)) return false;
+        if (c.field === "vehicleId" || c.field === "driverId" || c.field === "routeId") return false;
+        seen.add(k); return true;
+      }).map(c => `${FIELD_LABEL[c.field] || c.field} ${c.from || "–"}→${c.to || "–"}`).join(", ");
+    };
+    const preview = updatable.slice(0, 8).map(u => `· ${u.day} ${u.departTime} ${u.routeName} (${summarize(u.changes)})`).join("\n");
+    const more = updatable.length > 8 ? `\n… 외 ${updatable.length - 8}건` : "";
+    const keptNote = [
+      keptManual.length > 0 ? `그날만 따로 고쳐 두신 ${keptManual.length}건` : "",
+      keptWithTrace.length > 0 ? `이미 운행 기록이 있는 ${keptWithTrace.length}건` : "",
+    ].filter(Boolean).join(" · ");
+    if (!window.confirm(
+      `이미 만들어진 앞으로의 배차 ${updatable.length}건이 바뀐 내용과 다릅니다.\n같이 바꿀까요?\n\n${preview}${more}` +
+      (keptNote ? `\n\n※ ${keptNote}은 그대로 둡니다.` : "") +
+      `\n\n바꾸지 않으면 그날 배차는 예전 내용 그대로 나옵니다.`
+    )) return;
+    let done = 0;
+    for (const u of updatable) {
+      try {
+        await updateDoc(doc(db, "companies", companyId, "dispatches", u.day, "list", u.id), u.patch);
+        done++;
+      } catch (e) { /* 개별 실패는 아래 합계로 알린다 */ }
+    }
+    alert(done === updatable.length
+      ? `배차 ${done}건을 바꿨습니다.`
+      : `배차 ${done}/${updatable.length}건을 바꿨습니다. 남은 건은 배차 관리 탭에서 확인해주세요.`);
+  };
+
   const pruneScheduleDispatches = async (scheduleId, nextSchedule) => {
     const today = todayKST();
     const days = upcomingDates(today, PRUNE_LOOKAHEAD_DAYS);
@@ -1944,6 +2017,12 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
       ));
       dispatchesByDay[day] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     }
+    // ① 값이 어긋난 배차 맞추기(2026-08-20 개선요청 mXPK2Y19LvONbgJTMgar).
+    //    CF 는 exists() 면 skip 하므로 일정을 고쳐도 **이미 펼쳐진 날짜는 옛 값**이다. 정리(②)만
+    //    있고 이게 없으면 운영자가 그날 배차를 손으로 고쳐도 다음 날짜에 옛 값이 또 나온다.
+    await syncScheduleDispatches(scheduleId, nextSchedule, dispatchesByDay, today);
+
+    // ② 조건에서 빠진 날짜의 배차 정리
     const { prunable, keptWithTrace } = selectPrunableDispatches({
       scheduleId, schedule: nextSchedule, dispatchesByDay, today,
     });

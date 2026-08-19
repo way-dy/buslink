@@ -223,5 +223,86 @@ ok("클라 미러에 Firebase import 가 없다", !/from ["']firebase/.test(lib)
 const fn = fs.readFileSync(path.join(root, "functions/index.js"), "utf8");
 ok("서버 shouldExpand 가 그대로 있다(미러 대상 존재)", /function shouldExpand\(schedule, day\)/.test(fn));
 
+console.log("\n── ⑨ 일정 값 변경 → 이미 펼쳐진 배차 맞추기(2026-08-20 mXPK2Y19LvONbgJTMgar) ──");
+// 신고 재현: 하교 일정의 차량을 바꿨는데 그 전에 펼쳐진 8/21·8/24 배차가 옛 차량을 들고 있었다.
+const SCHED_V2 = {
+  active: true, weekdays: [1, 2, 3, 4, 5], startDate: "2026-08-18", endDate: null,
+  excludeHolidays: true, excludeDates: [],
+  driverId: "drv1", driverName: "최재성", routeId: "rt1", routeName: "[강남1] 하교",
+  vehicleId: "veh_new", vehicleNo: "경기78바2032", departTime: "15:50",
+};
+const oldRow = (day, extra) => ({
+  id: `${SID}_${day}`, source: "schedule", scheduleId: SID,
+  driverId: "drv1", driverName: "최재성", routeId: "rt1", routeName: "[강남1] 하교",
+  vehicleId: "veh_old", vehicleNo: "서울72바7026", departTime: "15:50", ...(extra || {}),
+});
+const SYNC_DAYS = ["2026-08-11", "2026-08-12", "2026-08-13", "2026-08-14", "2026-08-17", "2026-08-18"];
+const syncByDay = {};
+SYNC_DAYS.forEach(d => { syncByDay[d] = [oldRow(d)]; });
+
+// 🔴 신호 유무 — 대상이 0건이면 규칙이 옳아서인지 입력이 빈 것인지 알 수 없다.
+const u1 = C.selectUpdatableDispatches({ scheduleId: SID, schedule: SCHED_V2, dispatchesByDay: syncByDay, today: TODAY });
+ok("신고 상황에서 실제로 대상이 잡힌다(신호 유무)", u1.updatable.length > 0, u1.updatable.length);
+ok("오늘 이전은 손대지 않는다", u1.updatable.every(u => u.day >= TODAY), u1.updatable.map(u => u.day));
+ok("차량만 바뀐 것으로 잡는다",
+  u1.updatable.every(u => u.patch.vehicleNo === "경기78바2032" && u.patch.vehicleId === "veh_new"
+    && !("driverName" in u.patch) && !("departTime" in u.patch)),
+  u1.updatable[0] && u1.updatable[0].patch);
+
+// 값이 같으면 아무것도 안 한다(회귀 0 — 매 저장마다 확인창이 뜨면 운영자가 확인을 안 읽게 된다)
+const sameByDay = {};
+SYNC_DAYS.forEach(d => { sameByDay[d] = [oldRow(d)]; });
+ok("🔴 값이 같으면 대상 0건",
+  C.selectUpdatableDispatches({
+    scheduleId: SID,
+    schedule: { ...SCHED_V2, vehicleId: "veh_old", vehicleNo: "서울72바7026" },
+    dispatchesByDay: sameByDay, today: TODAY,
+  }).updatable.length === 0);
+
+// 보호 대상 3종 — 수동수정 / 운행흔적 / 수동배차
+const guardByDay = {
+  "2026-08-18": [oldRow("2026-08-18", { manualOverride: true })],
+  "2026-08-19": [oldRow("2026-08-19", { stopArrivals: { s1: { actualAt: "2026-08-19T00:00:00Z" } } })],
+  "2026-08-20": [{ id: "random_manual", vehicleNo: "서울72바7026", routeName: "손배차" }],
+};
+const u2 = C.selectUpdatableDispatches({ scheduleId: SID, schedule: SCHED_V2, dispatchesByDay: guardByDay, today: "2026-08-18" });
+ok("🔴 그날만 손으로 고친 배차는 덮어쓰지 않는다",
+  u2.updatable.length === 0 && u2.keptManual.length === 1, { u: u2.updatable.length, m: u2.keptManual.length });
+ok("🔴 운행 흔적이 있으면 덮어쓰지 않는다", u2.keptWithTrace.length === 1, u2.keptWithTrace.length);
+ok("🔴 수동 배차(랜덤 id)는 아예 대상이 아니다",
+  !u2.updatable.concat(u2.keptManual, u2.keptWithTrace).some(r => r.id === "random_manual"));
+ok("🔴 흔적 + 수동수정이 겹치면 흔적이 이긴다(기록 우선)",
+  C.selectUpdatableDispatches({
+    scheduleId: SID, schedule: SCHED_V2,
+    dispatchesByDay: { "2026-08-19": [oldRow("2026-08-19", { manualOverride: true, stopArrivals: { s1: {} } })] },
+    today: "2026-08-18",
+  }).keptWithTrace.length === 1);
+
+// 대상에서 빠진 날짜는 prune 몫 — 두 함수가 같은 배차를 동시에 집으면 안 된다
+const droppedSched = { ...SCHED_V2, weekdays: [6] };
+const u3 = C.selectUpdatableDispatches({ scheduleId: SID, schedule: droppedSched, dispatchesByDay: syncByDay, today: TODAY });
+const p3 = C.selectPrunableDispatches({ scheduleId: SID, schedule: droppedSched, dispatchesByDay: syncByDay, today: TODAY });
+ok("🔴 요일에서 빠진 날짜는 갱신이 아니라 정리 대상(둘이 안 겹친다)",
+  u3.updatable.length === 0 && p3.prunable.length > 0, { u: u3.updatable.length, p: p3.prunable.length });
+
+ok("일정이 없으면(삭제) 갱신 대상 0건",
+  C.selectUpdatableDispatches({ scheduleId: SID, schedule: null, dispatchesByDay: syncByDay, today: TODAY }).updatable.length === 0);
+ok("today 없으면 아무것도 고르지 않는다",
+  C.selectUpdatableDispatches({ scheduleId: SID, schedule: SCHED_V2, dispatchesByDay: syncByDay, today: null }).updatable.length === 0);
+ok("빈 입력에서 throw 하지 않는다",
+  C.selectUpdatableDispatches({ scheduleId: SID, schedule: SCHED_V2, dispatchesByDay: {}, today: TODAY }).updatable.length === 0);
+ok("배차 고유 필드는 동기화 목록에 없다(date·scheduleId·source·stopArrivals)",
+  ["date", "scheduleId", "source", "stopArrivals", "createdAt", "manualOverride"].every(f => !C.SCHEDULE_SYNCED_FIELDS.includes(f)),
+  C.SCHEDULE_SYNCED_FIELDS);
+
+console.log("\n── ⑩ 소스 회귀 가드(갱신 경로) ──");
+ok("AdminApp 이 syncScheduleDispatches 를 정의한다", /const syncScheduleDispatches = async/.test(admin));
+ok("정리 경로에서 갱신을 함께 부른다", /await syncScheduleDispatches\(/.test(admin));
+ok("갱신 전 사용자 확인을 받는다", /window\.confirm\([\s\S]{0,400}같이 바꿀까요/.test(admin));
+ok("🔴 갱신은 dispatches/{day}/list 문서 단위 updateDoc",
+  /updateDoc\(doc\(db, "companies", companyId, "dispatches", u\.day, "list", u\.id\), u\.patch\)/.test(admin));
+ok("🔴 펼침 배차를 손으로 고치면 manualOverride 를 남긴다",
+  /editItem\.source === "schedule"\) patch\.manualOverride = true/.test(admin));
+
 console.log(`\n${fail === 0 ? "✅ 전부 통과" : "❌ 실패 있음"} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

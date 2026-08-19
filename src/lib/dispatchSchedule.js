@@ -102,6 +102,66 @@ export function hasRunTrace(dispatch) {
  *   prunable      — 지워도 되는 것(날짜 오름차순)
  *   keptWithTrace — 조건은 안 맞지만 운행 흔적이 있어 남기는 것
  */
+/**
+ * 일정이 펼침 배차에 물려주는 필드. 여기 없는 것(date·scheduleId·source·stopArrivals 등)은
+ * 배차 고유값이라 절대 덮어쓰지 않는다.
+ */
+export const SCHEDULE_SYNCED_FIELDS = [
+  "driverId", "driverName", "routeId", "routeName", "vehicleId", "vehicleNo", "departTime",
+];
+
+/**
+ * 그 배차가 **그날 하루만 손으로 고친 것**인지.
+ * CF 펼침은 만들기만 하고 지우지 않는 대신 일별 수동 수정을 보존한다 — 그 약속을 깨지 않으려면
+ * 일정 값을 되씌우기 전에 이 표시를 봐야 한다. 표시가 붙기 전(2026-08-20 이전)에 고친 배차는
+ * 구분할 방법이 없어 일정 값으로 맞춰진다(일정이 정본이라는 기본 규칙 쪽으로 넘어간다).
+ */
+export function isManuallyOverridden(dispatch) {
+  return !!dispatch && dispatch.manualOverride === true;
+}
+
+/**
+ * 일정이 바뀐 뒤에도 **여전히 펼침 대상인** 날짜에서, 배차 값이 일정과 어긋난 것을 고른다.
+ *
+ * 배경(2026-08-20 배시현 개선요청 `mXPK2Y19LvONbgJTMgar` "배차차량을 바꿔도 다음날 다시 돌아옵니다"):
+ *   CF 는 `exists()` 면 skip 하므로 **일정을 고쳐도 이미 펼쳐진 날짜는 옛 값 그대로** 남는다.
+ *   운영자가 그날 배차를 손으로 고쳐도 다음 날짜에 또 옛 값이 나와 "매일 바꾸는데 돌아온다"가 된다
+ *   (prod 실측: 차량을 8/18 에 바꿨는데 8/21·8/24 배차가 옛 차량을 들고 있었다).
+ *   `selectPrunableDispatches` 는 **대상에서 빠진 날짜**만 다루므로 이 함수가 나머지 절반이다.
+ *
+ * @returns {{updatable: Array, keptManual: Array, keptWithTrace: Array}}
+ *   updatable    — 일정 값으로 맞출 것. `{day, id, routeName, departTime, changes:[{field,from,to}], patch}`
+ *   keptManual   — 그날만 손으로 고쳐 둔 것(건드리지 않음)
+ *   keptWithTrace— 이미 운행 흔적이 남은 것(건드리지 않음)
+ */
+export function selectUpdatableDispatches({ scheduleId, schedule, dispatchesByDay, today }) {
+  const updatable = [];
+  const keptManual = [];
+  const keptWithTrace = [];
+  if (!schedule) return { updatable, keptManual, keptWithTrace };
+  const days = Object.keys(dispatchesByDay || {}).sort();
+  for (const day of days) {
+    // 과거는 기록이다 — 일정이 바뀌어도 지난 배차는 그날 실제 운행 계획으로 남긴다.
+    if (!today || day < today) continue;
+    if (!isExpandTarget(schedule, day)) continue; // 빠진 날짜는 prune 쪽 몫
+    for (const d of dispatchesByDay[day] || []) {
+      if (!isExpandedArtifact(d, scheduleId, day)) continue;
+      const changes = SCHEDULE_SYNCED_FIELDS
+        .map(f => ({ field: f, from: d[f] ?? "", to: schedule[f] ?? "" }))
+        .filter(c => c.from !== c.to);
+      if (changes.length === 0) continue;
+      const row = { day, id: d.id, routeName: d.routeName || "", departTime: d.departTime || "", changes };
+      // 🔴 순서가 곧 정책이다 — 운행 흔적이 먼저다. 그날 차가 이미 다녔으면 손으로 고쳤든
+      //    아니든 기록이라 덮어쓰지 않는다.
+      if (hasRunTrace(d)) { keptWithTrace.push(row); continue; }
+      if (isManuallyOverridden(d)) { keptManual.push(row); continue; }
+      row.patch = Object.fromEntries(changes.map(c => [c.field, c.to]));
+      updatable.push(row);
+    }
+  }
+  return { updatable, keptManual, keptWithTrace };
+}
+
 export function selectPrunableDispatches({ scheduleId, schedule, dispatchesByDay, today }) {
   const prunable = [];
   const keptWithTrace = [];
