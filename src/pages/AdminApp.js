@@ -737,6 +737,9 @@ function MapTab({ companyId, allowed, drivers }) {
   // 🔴 gps/dispatch 문서엔 partnerCode 가 없다 → 판정은 **노선의 partnerCode**(routePartnerOf) 하나로만 한다.
   //    (제한 admin 게이팅 allowMapRow 과 같은 축 — 두 축이 어긋나면 "권한은 있는데 안 보임"이 생긴다)
   const [partnerCode, setPartnerCode] = useState("전체");
+  // 거래처를 고르면 그 차량들이 화면에 담기게 카메라를 옮긴다(2026-08-20 way 요청).
+  const mapObjRef = useRef(null);
+  const camPartnerRef = useRef("전체");
 
   // 노선 새로고침(#2) — 기사 GPS 껐다 켜진 뒤 관제 화면에 위치 미반영 시 수동 재연결·재구독.
   const handleRefresh = async () => {
@@ -822,6 +825,38 @@ function MapTab({ companyId, allowed, drivers }) {
   const partnerOk = (rid) => partnerCode === "전체" || (!!rid && routePartnerOf(rid) === partnerCode);
   const vehicles = vehiclesAll.filter(v => allowMapRow(v.routeId) && partnerOk(v.routeId));
   const visibleDispatches = todayDispatches.filter(d => allowMapRow(d.routeId) && partnerOk(d.routeId));
+
+  // ── 거래처 선택 → 그 차량 밀집지역으로 카메라 이동(2026-08-20 way 요청) ──────────────
+  // 🔴 스냅샷마다 다시 맞추지 말 것 — "매 갱신마다 강제 재센터"는 2026-06-23 에 고친 결함이다
+  //    (사용자 패닝·선택이 5초마다 풀린다). 그래서 **선택이 바뀐 순간에만 한 번** 잡고,
+  //    그때 좌표가 아직 없으면 들어오는 첫 렌더에서 한 번 잡은 뒤 ref 로 잠근다.
+  // 🔴 여백은 컨테이너보다 클 수 없다 — 좌 레일과 상단바가 지도를 **덮고** 있어 그만큼 비켜
+  //    줘야 하지만, 좁은 화면에서 그대로 빼면 담을 공간이 0 이 되어 카카오가 최대 축소로 튄다
+  //    (callcenter 2026-08-20 같은 결함). 축의 45% 상한 + 네 변 모두 명시.
+  const fitToVehicles = (m, pts) => {
+    if (!m || !window.kakao?.maps || pts.length === 0) return;
+    const el = typeof m.getNode === "function" ? m.getNode() : null;
+    const W = el?.clientWidth || 0, H = el?.clientHeight || 0;
+    const first = new window.kakao.maps.LatLng(pts[0].lat, pts[0].lng);
+    if (W < 120 || H < 120) { m.setCenter(first); return; }   // 아직 레이아웃 전 — 한 점으로만
+    const cap = (v, axis) => Math.max(20, Math.min(v, Math.round(axis * 0.45)));
+    const rail = Math.min(280, W * 0.32) + 24;                // 좌 레일이 덮는 폭
+    const b = new window.kakao.maps.LatLngBounds();
+    pts.forEach(p => b.extend(new window.kakao.maps.LatLng(p.lat, p.lng)));
+    m.setBounds(b, cap(76, H), cap(40, W), cap(40, H), cap(rail, W));
+    // 한 대뿐이거나 모여 있으면 과하게 확대돼 주변이 안 보인다 — 최소 축척을 둔다.
+    if (m.getLevel() < 4) m.setLevel(4);
+  };
+  useEffect(() => {
+    if (viewMode !== "map") return;
+    if (partnerCode === camPartnerRef.current) return;   // 같은 선택이면 카메라 고정
+    const pts = vehicles.filter(v => v.lat && v.lng);
+    if (pts.length === 0) return;                        // 좌표 들어오면 그때 잡는다
+    camPartnerRef.current = partnerCode;
+    fitToVehicles(mapObjRef.current, pts);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [partnerCode, vehicles, viewMode]);
+
 
   // 운행중(좌표 유효) 차량만 카운트 — 실데이터 기반(가짜 KPI 미도입)
   const liveCount = vehicles.filter(v => v.lat && v.lng).length;
@@ -919,7 +954,7 @@ function MapTab({ companyId, allowed, drivers }) {
     <div style={MS.wrap}>
       {/* 지도 뷰 — 노선도 모드에선 숨김(컴포넌트 마운트 유지로 카카오 SDK 재로딩 회피) */}
       <div style={{ position:"absolute", inset:0, visibility: viewMode === "map" ? "visible" : "hidden" }}>
-        <Map center={center} style={MS.map} level={7}>
+        <Map center={center} style={MS.map} level={7} onCreate={m => { mapObjRef.current = m; }}>
           {/* 선택 차량 있으면 그 차량만 표시(클릭 후 그 차량만 보기), 없으면 전체(2026-06-23) */}
           {/* 차량 마커 — 기본 핀 대신 버스 아이콘 + 간략 정보 칩(2026-08-18 way 요청).
               승객앱(EmployeeApp) 버스 마커와 같은 시각 언어(원형 primary + 흰 테두리 + buspulse).
