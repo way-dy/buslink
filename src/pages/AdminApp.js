@@ -49,6 +49,8 @@ import { resolveAllowed, isAllAccess, partnerCodeAllowed, SEAT_MODES, SEAT_MODE_
 import { isValidHexColor, mixHex } from "../lib/partnerBranding";
 // 문의 게시판(2026-08-06 미팅) — 거래처별 dycs CS 위젯 매핑.
 import { resolveInquiryConfig, isValidTenantId, buildInquiryPreviewUrl } from "../lib/inquiry";
+import { isValidHomepageUrl, resolveHomepageConfig } from "../lib/homepage";
+import { resolveTagSoundConfig } from "../lib/tagSound";
 import { normalizeWindowOpts, WINDOW_PRE_MIN_DEFAULT, WINDOW_POST_MIN_DEFAULT } from "../lib/routeWindow";
 // 탭 단위 에러 경계 — 자식 throw 시 흰 화면 방지 + 에러 메시지 가시화
 import { ErrorBoundary } from "../components/ErrorBoundary";
@@ -4935,6 +4937,10 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
   const [pInqOn, setPInqOn] = useState(false);
   const [pInqTenant, setPInqTenant] = useState("");
   const [pInqToken, setPInqToken] = useState("");
+  // 2026-08-25 미팅 — 홈페이지 연결 + 태깅 소리 강제
+  const [pHomeOn, setPHomeOn] = useState(false);
+  const [pHomeUrl, setPHomeUrl] = useState("");
+  const [pSoundForced, setPSoundForced] = useState(false);
   const [pColor, setPColor] = useState("");        // "" = 기본 테마
   const [pLogo, setPLogo] = useState(null);         // data URI | null
   const [pLogoHeight, setPLogoHeight] = useState(28);
@@ -5017,6 +5023,11 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
     setPInqOn(inq.enabled === true);
     setPInqTenant(typeof inq.tenantId === "string" ? inq.tenantId : "");
     setPInqToken(typeof inq.token === "string" ? inq.token : "");
+    // 문의와 같은 이유로 **원문 그대로** 싣는다(정규화한 값만 보이면 잘못 넣은 주소를 못 고친다).
+    const hp = (code.homepage && typeof code.homepage === "object") ? code.homepage : {};
+    setPHomeOn(hp.enabled === true);
+    setPHomeUrl(typeof hp.url === "string" ? hp.url : "");
+    setPSoundForced(resolveTagSoundConfig(code).forced);
   };
 
   // 로고 파일 — 투명 PNG 보존 위해 재압축 없이 data URI 로 그대로 저장(200KB 제한·Firestore 1MB doc 여유).
@@ -5048,6 +5059,15 @@ ${chk.missing.slice(0,8).join(", ")}
     if (pInqOn && !isValidTenantId(inqTenant)) {
       return alert("문의 게시판을 켜려면 dycs 거래처 ID를 입력해야 합니다.\n\n영문·숫자·- _ 만 사용합니다 (예: snu, hanwha).\ndycs 상담원 콘솔 → 설정 → 거래처 관리에서 확인하세요.");
     }
+    // 🔴 주소 없이 홈페이지를 켜면 승객에게 죽은 버튼이 열린다 — 저장 단계에서 막는다.
+    const homeUrl = pHomeUrl.trim();
+    if (pHomeOn && !isValidHomepageUrl(homeUrl)) {
+      return alert("홈페이지 탭을 켜려면 주소를 입력해야 합니다.\n\nhttp:// 또는 https:// 로 시작하는 전체 주소를 넣으세요.");
+    }
+    // 홈페이지 탭은 문의 탭 자리를 **대체**한다(2026-08-25 way 결정). 문의 유입이 끊기므로 확인받는다.
+    if (pHomeOn && pInqOn && !window.confirm(
+      "홈페이지 탭은 '문의' 탭을 대체합니다.\n\n이 거래처 승객은 앱에서 문의를 접수할 수 없게 되고,\n고객CS시스템(dycs)으로 들어오던 문의가 끊깁니다.\n\n그대로 저장할까요?"
+    )) return;
     setPLoading(true);
     try {
       await updateDoc(doc(db, "partnerCodes", portalEditTarget.id), {
@@ -5057,6 +5077,13 @@ ${chk.missing.slice(0,8).join(", ")}
           enabled: pInqOn,
           tenantId: inqTenant || null,
           token: pInqToken.trim() || null,
+        },
+        homepage: {
+          enabled: pHomeOn,
+          url: homeUrl || null,
+        },
+        tagSound: {
+          forced: pSoundForced,
         },
         branding: {
           primaryColor: pColor || null,
@@ -5171,6 +5198,12 @@ ${chk.missing.slice(0,8).join(", ")}
                       {resolveInquiryConfig(c).enabled && (
                         <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#E9F0FF", color: "#1B4FD6", border: "1px solid #C9DAFF", fontWeight: 700 }}>
                           💬 문의 {resolveInquiryConfig(c).tenantId}
+                        </span>
+                      )}
+                      {/* 홈페이지 연결 배지 — 켠 거래처만. 이게 켜져 있으면 문의 탭은 없다(대체). 2026-08-25 */}
+                      {resolveHomepageConfig(c).enabled && (
+                        <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#FFF3DC", color: "#8A5200", border: "1px solid #FFDFA8", fontWeight: 700 }}>
+                          🌐 홈페이지
                         </span>
                       )}
                     </div>
@@ -5380,6 +5413,38 @@ ${chk.missing.slice(0,8).join(", ")}
             ⓘ 켜면 승객 앱(설정 왼쪽)에 '문의' 탭이 생기고, 눌렀을 때 고객문의·분실물 접수 화면이 앱 안에서 열립니다.<br />
             거래처 ID 는 <b>고객CS시스템(dycs)의 거래처 ID</b> 입니다 — 버스링크 업체코드와 다르며, 자동으로 이어지지 않습니다.
             잘못 넣으면 다른 거래처로 문의가 접수되니 <b>열어보기</b>로 확인한 뒤 저장하세요.
+          </div>
+
+          {/* ── 홈페이지 연결 (2026-08-25 미팅) — 승객앱 하단 '홈페이지' 탭 ── */}
+          <label style={{ ...S.label, marginTop: 12 }}>홈페이지 연결</label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-label)", cursor: "pointer", marginBottom: 6 }}>
+            <input type="checkbox" checked={pHomeOn} onChange={e => setPHomeOn(e.target.checked)} />
+            승객 앱 하단에 '홈페이지' 탭 표시 <b>(문의 탭 대체)</b>
+          </label>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <input style={{ ...S.input, flex: "1 1 300px", marginBottom: 0 }} placeholder="https://... (전체 주소)"
+              value={pHomeUrl} onChange={e => setPHomeUrl(e.target.value.trim())} />
+            <button style={{ ...S.editBtn, padding: "8px 12px", fontSize: 11, opacity: isValidHomepageUrl(pHomeUrl) ? 1 : 0.45 }}
+              disabled={!isValidHomepageUrl(pHomeUrl)}
+              onClick={() => window.open(pHomeUrl.trim(), "_blank", "noopener")}>
+              열어보기
+            </button>
+          </div>
+          <div style={{ marginTop: 6, background: "#FFF6E5", border: "1px solid #FFE0A3", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#7A4B00", lineHeight: 1.6 }}>
+            ⓘ 켜면 '문의' 탭 <b>대신</b> '홈페이지' 탭이 생기고, 눌러서 여는 버튼이 나옵니다(새 창).<br />
+            🔴 홈페이지는 <b>앱 안에 끼워 넣을 수 없습니다</b> — 대부분의 사이트(구글 사이트 포함)가 외부 임베드를 막습니다.<br />
+            🔴 켜는 순간 이 거래처의 <b>앱 내 문의 접수가 사라집니다</b>. 문의·전화는 홈페이지에서 받으세요.
+          </div>
+
+          {/* ── QR 태깅 소리 (2026-08-25 미팅) ── */}
+          <label style={{ ...S.label, marginTop: 12 }}>QR 태깅 소리</label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-label)", cursor: "pointer" }}>
+            <input type="checkbox" checked={pSoundForced} onChange={e => setPSoundForced(e.target.checked)} />
+            항상 소리 나게 (승객이 끌 수 없음)
+          </label>
+          <div style={{ marginTop: 6, background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#003A99", lineHeight: 1.6 }}>
+            ⓘ 확인음은 <b>기본으로 켜져 있고</b> 승객이 설정에서 끌 수 있습니다. 이 항목을 켜면 끄지 못합니다.<br />
+            ⚠ 휴대폰이 <b>무음 모드</b>이거나 미디어 볼륨이 0이면 소리는 나지 않습니다(웹이 넘을 수 없는 벽입니다). 진동은 항상 울립니다.
           </div>
 
           <label style={{ ...S.label, marginTop: 12 }}>메인 컬러 (선택 — 비우면 기본 테마)</label>

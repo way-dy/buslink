@@ -35,6 +35,8 @@ import { resolveCompanyIdForAnon } from "../lib/companyResolver";
 import { applyPartnerBranding, clearPartnerBranding, fetchPartnerCodeData, logoHeightOf, brandBand } from "../lib/partnerBranding";
 // 문의 게시판(2026-08-06 미팅) — dycs CS 위젯 연동. 거래처별 opt-in.
 import { resolveInquiryConfig, buildInquiryUrl } from "../lib/inquiry";
+import { resolveHomepageConfig, homepageDisplayHost } from "../lib/homepage";
+import { resolveTagSoundConfig, applyTagSoundPolicy, clearTagSoundPolicy, unlockTagSound, playTagBeep, isTagSoundOn, setTagSoundOn, isTagSoundForced } from "../lib/tagSound";
 import { useExitConfirm } from "../lib/useExitConfirm";
 
 // ── 경로 진행 판정 임계값 (작업2, 2026-05-18) ──
@@ -257,11 +259,19 @@ const TABS = [
 // 설정 앞에 끼워 넣는다(설정은 늘 맨 끝이 관례).
 const INQUIRY_TAB = { id: "inquiry", icon: "chat", label: "문의" };
 
-function visibleTabsFor(inquiryOn) {
-  if (!inquiryOn) return TABS;
+// 홈페이지 탭(2026-08-25 미팅) — 문의 탭과 **같은 자리**를 쓴다.
+// way 결정: "문의를 홈페이지로 한 다음에 전화를 하더라도 그냥 거기서 해라"(별도 전화 버튼 없음).
+// 그래서 홈페이지를 켠 거래처는 문의 탭이 **홈페이지 탭으로 대체**된다 — 둘을 나란히 두면
+// 승객이 어디로 문의해야 하는지 갈린다.
+// ⚠ 대체되는 순간 그 거래처의 dycs 문의 위젯 유입은 끊긴다(켜기 전 확인 필요).
+const HOMEPAGE_TAB = { id: "homepage", icon: "globe", label: "홈페이지" };
+
+function visibleTabsFor(inquiryOn, homepageOn) {
+  const extra = homepageOn ? HOMEPAGE_TAB : (inquiryOn ? INQUIRY_TAB : null);
+  if (!extra) return TABS;
   const at = TABS.findIndex(t => t.id === "settings");
   const i = at < 0 ? TABS.length : at;
-  return [...TABS.slice(0, i), INQUIRY_TAB, ...TABS.slice(i)];
+  return [...TABS.slice(0, i), extra, ...TABS.slice(i)];
 }
 
 // ════════════════════════════════════════════════════════
@@ -448,18 +458,27 @@ export default function EmployeeApp() {
   //   읽기는 한 번(`fetchPartnerCodeData`)만 하고 각 헬퍼가 필요한 필드만 뽑는다.
   const [branding, setBranding] = useState(null);
   const [inquiry, setInquiry] = useState(null); // {enabled,tenantId,token} | null(=미조회/거래처 없음)
+  const [homepage, setHomepage] = useState(null); // {enabled,url} | null (2026-08-25)
   useEffect(() => {
     let cancelled = false;
     const pc = session?.partnerCode;
-    if (!pc) { clearPartnerBranding(); setBranding(null); setInquiry(null); return; }
+    if (!pc) {
+      clearPartnerBranding(); clearTagSoundPolicy();
+      setBranding(null); setInquiry(null); setHomepage(null);
+      return;
+    }
     fetchPartnerCodeData(pc).then(d => {
       if (cancelled) return;
       const b = d ? (d.branding || null) : null;
       setBranding(b);
       applyPartnerBranding(b);
       setInquiry(resolveInquiryConfig(d)); // 부재·모르는 값 = 꺼짐(회귀 0)
+      setHomepage(resolveHomepageConfig(d));
+      // 태깅 소리 강제 여부(2026-08-25). 프롭으로 여러 겹 내려보내지 않는 이유 =
+      // 거래처 문서를 읽는 곳이 여기 한 군데뿐이고, 브랜딩(applyPartnerBranding)이 이미 같은 패턴.
+      applyTagSoundPolicy(resolveTagSoundConfig(d));
     });
-    return () => { cancelled = true; clearPartnerBranding(); };
+    return () => { cancelled = true; clearPartnerBranding(); clearTagSoundPolicy(); };
   }, [session?.partnerCode]);
 
   // 배너 높이 실측 — 공지가 바뀌거나(문구 길이 변동) 화면이 회전해도 따라간다.
@@ -486,10 +505,21 @@ export default function EmployeeApp() {
   // 문의 탭은 켠 거래처에만 보인다. 켜 둔 상태에서 관리자가 끄면(재접속 시) 홈으로 되돌린다
   // — 안 그러면 빈 탭에 갇힌다(탭 목록에서는 이미 사라진 뒤라 돌아올 버튼이 없다).
   const inquiryOn = !!(inquiry && inquiry.enabled);
-  const visibleTabs = useMemo(() => visibleTabsFor(inquiryOn), [inquiryOn]);
+  const homepageOn = !!(homepage && homepage.enabled);
+  const visibleTabs = useMemo(() => visibleTabsFor(inquiryOn, homepageOn), [inquiryOn, homepageOn]);
   useEffect(() => {
-    if (tab === "inquiry" && !inquiryOn) setTab("home");
-  }, [tab, inquiryOn]);
+    // 홈페이지가 켜지면 문의 탭은 사라진다 — 문의 탭에 있던 사람도 홈으로 되돌린다.
+    if (tab === "inquiry" && (!inquiryOn || homepageOn)) setTab("home");
+    if (tab === "homepage" && !homepageOn) setTab("home");
+  }, [tab, inquiryOn, homepageOn]);
+
+  // 태깅 소리 잠금 해제 — 브라우저는 사용자 제스처 없이 만든 오디오를 정지 상태로 둔다.
+  // 이걸 안 걸면 **첫 태깅에서만 소리가 안 나는** 증상이 된다. 한 번 성공하면 뗀다.
+  useEffect(() => {
+    const on = () => { unlockTagSound(); window.removeEventListener("pointerdown", on); };
+    window.addEventListener("pointerdown", on);
+    return () => window.removeEventListener("pointerdown", on);
+  }, []);
 
   if (!ready) return (
     <div style={S.fullCenter}>
@@ -570,6 +600,7 @@ export default function EmployeeApp() {
         {tab === "notices"  && <NoticesTab notices={notices} unreadCount={unreadCount} />}
         {tab === "scan"     && <ScanTab companyId={companyId} session={session} />}
         {tab === "inquiry"  && <InquiryTab config={inquiry} partnerName={session?.partnerName || null} />}
+        {tab === "homepage" && <HomepageTab config={homepage} partnerName={session?.partnerName || null} />}
         {tab === "settings" && <SettingsTab companyId={companyId} session={session} onLogout={handleLogout} onGoHome={() => setTab("home")} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />}
 
         {/* ── 도움말 버튼 (2026-08-10) ─────────────────────────────
@@ -2782,6 +2813,7 @@ function ScanTabPassengerQR({ companyId, session }) {
         if (d.used) {
           setStep("success");
           if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]);
+          playTagBeep();   // 2026-08-25 미팅 — 진동만으로는 탄 줄 모른다는 신고
         }
       }, () => {});
       tokenUnsubRef.current = unsub;
@@ -3042,6 +3074,7 @@ function ScanTabDriverQR({ companyId, session }) {
         setAlreadyBoarded(false);
       }
       if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]);
+      playTagBeep();   // 2026-08-25 미팅 — 진동만으로는 탄 줄 모른다는 신고
       setStep("success");
     } catch (e) { setErrMsg(e.message); setStep("error"); }
   };
@@ -3171,6 +3204,55 @@ function ScanTabDriverQR({ companyId, session }) {
 //    dycs 위젯은 X-Frame-Options/CSP frame-ancestors 를 안 보낸다(2026-08-06 실측).
 // 🔴 그래도 **탈출구는 항상 둔다** — 임베드가 막히거나(회사 보안 프록시) 느릴 때
 //    "새 창에서 열기"가 없으면 승객은 빈 화면만 보고 문의를 포기한다.
+// ─── 홈페이지 탭 (2026-08-25 미팅) ─────────────────────────
+// 🔴 **iframe 으로 감싸지 않는다** — 신촌세브란스 사이트(Google Sites)가 `X-Frame-Options: DENY`
+//    를 주므로 임베드하면 빈 화면이 된다(실측). 그래서 "여는 버튼" 화면이다.
+// 탭을 누르자마자 자동으로 새 창을 열지 않는 이유 = 돌아왔을 때 아무것도 없는 탭이 남고,
+//    팝업 차단에 걸리면 사용자는 아무 일도 안 일어난 것으로 본다. 누를 것을 눈에 보이게 둔다.
+function HomepageTab({ config, partnerName }) {
+  const url = config && config.enabled ? config.url : null;
+  if (!url) return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: 24 }}>
+      <Icon name="globe" size={34} />
+      <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-label)" }}>홈페이지가 준비 중입니다</div>
+      <div style={{ fontSize: 12, color: "var(--color-label-mute)", textAlign: "center", lineHeight: 1.6 }}>
+        담당자에게 문의하세요
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, padding: "24px 22px", background: "var(--color-bg-alt)" }}>
+      <div style={{
+        width: 62, height: 62, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
+        background: "var(--color-primary-soft)", color: "var(--color-primary)",
+      }}>
+        <Icon name="globe" size={30} stroke={1.6} />
+      </div>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 17, fontWeight: 800, color: "var(--color-label)", letterSpacing: "-0.02em" }}>
+          {partnerName || "홈페이지"}
+        </div>
+        <div style={{ fontSize: 12.5, color: "var(--color-label-mute)", marginTop: 6, lineHeight: 1.6, wordBreak: "keep-all" }}>
+          공지·문의·연락처를 홈페이지에서 확인하실 수 있습니다.
+        </div>
+      </div>
+      <a href={url} target="_blank" rel="noopener noreferrer"
+        style={{
+          marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+          width: "100%", maxWidth: 300, padding: "14px 18px", borderRadius: "var(--radius-12)",
+          background: "var(--color-primary)", color: "#fff", fontSize: 15, fontWeight: 800,
+          textDecoration: "none", boxShadow: "var(--shadow-emphasize)",
+        }}>
+        홈페이지 열기
+      </a>
+      <div style={{ fontSize: 11, color: "var(--color-label-alt)", textAlign: "center", wordBreak: "break-all", lineHeight: 1.5 }}>
+        {homepageDisplayHost(url)}
+      </div>
+    </div>
+  );
+}
+
 function InquiryTab({ config, partnerName }) {
   const url = useMemo(() => buildInquiryUrl(config), [config]);
   const [loaded, setLoaded] = useState(false);
@@ -3238,6 +3320,58 @@ function InquiryTab({ config, partnerName }) {
           onLoad={() => setLoaded(true)}
           style={{ width: "100%", height: "100%", border: "none", display: "block", background: "transparent" }}
         />
+      </div>
+    </div>
+  );
+}
+
+// ─── 태깅 소리 설정 (2026-08-25 미팅) ──────────────────────
+// 기본 ON. 거래처가 '강제'를 켜 두면 개인이 끌 수 없고 그 이유를 화면에 적는다
+// (끄는 버튼이 눌리지도 않는데 이유가 없으면 고장으로 읽힌다).
+function TagSoundCard() {
+  const forced = isTagSoundForced();
+  const [on, setOn] = useState(() => isTagSoundOn());
+  const toggle = () => {
+    if (forced) return;
+    const next = !on;
+    setTagSoundOn(next);
+    setOn(next);
+    if (next) playTagBeep();   // 켠 순간 들려준다 — 안 들리면 기기 무음 상태라는 뜻
+  };
+  return (
+    <div style={{ background: "var(--color-bg)", borderRadius: "var(--radius-16)", padding: "16px 18px", border: "1px solid var(--color-line)", boxShadow: "var(--shadow-emphasize)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 14, fontWeight: 700, color: "var(--color-label)", marginBottom: 4 }}>
+        <Icon name="bell" size={16} stroke={1.9} /> 태깅 소리
+      </div>
+      <div style={{ fontSize: 11.5, color: "var(--color-label-alt)", lineHeight: 1.5, marginBottom: 12 }}>
+        탑승이 기록되면 짧은 확인음이 납니다(진동은 소리와 무관하게 항상 울립니다).
+      </div>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+        padding: "11px 12px", borderRadius: "var(--radius-12)",
+        background: on ? "#E6F7EB" : "var(--color-bg-soft)",
+        border: `1px solid ${on ? "#A7E2BB" : "var(--color-line)"}`,
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: on ? "#007A29" : "var(--color-label-mute)" }}>
+            {on ? "확인음 켜짐" : "확인음 꺼짐"}
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--color-label-mute)", marginTop: 2, lineHeight: 1.45, wordBreak: "keep-all" }}>
+            {forced
+              ? "회사 정책으로 항상 켜져 있습니다"
+              : "휴대폰이 무음이면 소리가 나지 않습니다"}
+          </div>
+        </div>
+        <button onClick={toggle} disabled={forced}
+          style={{
+            flexShrink: 0, borderRadius: "var(--radius-8)", padding: "8px 12px", fontSize: 12, fontWeight: 700,
+            fontFamily: "inherit", cursor: forced ? "not-allowed" : "pointer", opacity: forced ? 0.45 : 1,
+            background: on ? "var(--color-bg)" : "var(--color-primary)",
+            color: on ? "var(--color-label-mute)" : "#fff",
+            border: on ? "1px solid var(--color-line)" : "none",
+          }}>
+          {forced ? "고정" : (on ? "끄기" : "켜기")}
+        </button>
       </div>
     </div>
   );
@@ -3479,6 +3613,9 @@ function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate }
             </div>
           )}
         </div>
+
+        {/* 🔊 태깅 소리 카드 (2026-08-25 미팅 — 신촌세브란스 요청) */}
+        <TagSoundCard />
 
         {/* 🔔 알림 진단 카드 (2026-05-21) — 권한·토큰 자가 점검·재발급 */}
         <div style={{ background: "var(--color-bg)", borderRadius: "var(--radius-16)", padding: "16px 18px", border: "1px solid var(--color-line)", boxShadow: "var(--shadow-emphasize)" }}>

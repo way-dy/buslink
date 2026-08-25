@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { validateAndBoard, validateAndBoardStatic } from "../lib/boarding";
 import { passengerLogin, passengerResume, passengerMigrate } from "../lib/passengerAuth";
+import { unlockTagSound, playTagBeep } from "../lib/tagSound";
 import { auth } from "../firebase";
 import { signInAnonymously } from "firebase/auth";
 import { Icon } from "../components/ui";
@@ -94,7 +95,9 @@ export default function BoardingApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 오디오 잠금 해제 — 버튼을 누르는 순간이 곧 사용자 제스처다(첫 태깅 무음 방지).
   const handleBoard = async () => {
+    unlockTagSound();
     // 기억된 사람이면 입력 없이 진행, 아니면 사번+PIN 을 다 받아야 한다.
     const useEmpNo = remembered ? remembered.empNo : empNo.trim();
     const useName  = remembered ? (remembered.name || "") : name;
@@ -123,8 +126,11 @@ export default function BoardingApp() {
         : await validateAndBoard({ tokenId, empNo: useEmpNo, name: useName });
       setResult(res);
       setStep(STEPS.SUCCESS);
-      // 진동 피드백 (모바일)
+      // 진동 + 확인음 (2026-08-25 미팅). 🔴 앱 밖 경로라 거래처 강제 설정을 모른다 —
+      // 여기서는 개인 설정(기본 켜짐)만 따른다. 강제로 켜야 하는 거래처도 기본이 켜짐이라
+      // 실제로 안 나는 경우는 승객이 앱에서 일부러 끈 때뿐이다.
       if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]);
+      playTagBeep();
     } catch (e) {
       // 기억해 둔 사람으로 본인 확인이 깨지면(앱에서 PIN 을 바꿨거나 명부에서 빠짐)
       // 그 값을 붙들고 있으면 **영원히 실패**한다 → 지우고 다시 입력받는다.

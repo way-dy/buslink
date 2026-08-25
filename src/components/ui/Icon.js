@@ -18,6 +18,8 @@ const SOLID_PATHS = {
   // 2026-08-10 승객앱 이모지 제거용 — 채움형이 필요한 것들(즐겨찾기·운행중 점 등)
   star: <path d="M12 3.2l2.6 5.3 5.8.85-4.2 4.1 1 5.8-5.2-2.73-5.2 2.73 1-5.8-4.2-4.1 5.8-.85z"/>,
   dot: <circle cx="12" cy="12" r="5"/>,
+  // 홈페이지 탭(2026-08-25). 선택 시 채움 — 없으면 stroke 로 폴백되어 선택 상태가 덜 읽힌다.
+  globe: <><circle cx="12" cy="12" r="9"/><path d="M3 12h18" stroke="#fff" strokeWidth="1.4"/><path d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" stroke="#fff" strokeWidth="1.4" fill="none"/></>,
 };
 
 export function Icon({ name, size = 18, stroke = 1.7, solid = false }) {
