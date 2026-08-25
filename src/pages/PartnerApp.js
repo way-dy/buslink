@@ -114,7 +114,13 @@ export default function PartnerApp() {
   };
 
   const handleDone = (res) => { setResult(res); setStep(STEPS.DONE); };
-  const reset = () => { setStep(STEPS.CODE); setCode(""); setCodeData(null); setResult(null); setError(""); setRegMode(REG_MODES.FILE); };
+  // 🔴 "추가 등록하기" 는 **업체코드 인증을 유지**한 채 등록 화면으로만 돌아간다(2026-08-26 게시판
+  //    HesnB7nD). 종전에는 step 을 CODE 로 되돌리며 code·codeData 까지 비워, 방금 인증한 담당자가
+  //    한 명 더 넣을 때마다 업체코드를 다시 치고 노선까지 다시 받아야 했다.
+  //    ⚠ `result` 는 반드시 비운다 — 평문 비밀번호는 저장하지 않으므로 이 화면을 벗어나면 못 본다는
+  //      위 안내와 한 몸이다(그 값을 들고 다니면 안내가 거짓말이 된다).
+  //    ⚠ `regMode` 도 유지한다 — 개별로 넣던 사람을 파일 업로드로 되돌리지 않는다.
+  const registerMore = () => { setResult(null); setError(""); setStep(STEPS.MAIN); };
 
   return (
     <div style={S.wrap}>
@@ -275,7 +281,7 @@ export default function PartnerApp() {
                 신규 등록된 승객이 없어 발급된 비밀번호가 없습니다
               </div>
             )}
-            <button style={S.btnSecondary} onClick={reset}>추가 등록하기</button>
+            <button style={S.btnSecondary} onClick={registerMore}>추가 등록하기</button>
           </div>
         )}
       </div>

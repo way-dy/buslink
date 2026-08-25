@@ -6558,8 +6558,13 @@ function SleepCheckTab({ companyId, allowed }) {
   };
 
   return (
-    <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+    // 🔴 이 탭만 스크롤러가 없었다(2026-08-26 게시판 h7M7X60g). 바깥 `S.content` 가
+    //    `overflow:hidden` 이라 **탭이 자기 스크롤러를 갖는 게 이 화면의 규약**인데
+    //    (`S.panel` + 본문 `flex:1/overflowY:auto` — 부정승차·개선요청 탭이 그 형태),
+    //    여기만 맨 `<div>` 라 화면 높이를 넘는 행은 아예 닿을 수가 없었다.
+    //    대상 노선 29개 중 화면에 들어오는 13행만 보이던 게 그 때문이다.
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12, flexShrink: 0 }}>
         <h2 style={{ margin: 0, fontSize: 18 }}>🛏 빈 차 확인 현황</h2>
         <input type="date" value={date} onChange={e => setDate(e.target.value)} style={{ ...S.input, width: "auto", padding: "8px 12px", fontSize: 13 }} />
         <button style={S.editBtn} onClick={() => setDate(todayStr())}>오늘</button>
@@ -6569,7 +6574,7 @@ function SleepCheckTab({ companyId, allowed }) {
       </div>
 
       {/* 대상 노선 안내 — 아직 안 정했으면 지금 보이는 게 추천이라는 걸 분명히 한다. */}
-      <div style={{ padding: "10px 12px", marginBottom: 12, borderRadius: 8, fontSize: 12, lineHeight: 1.6,
+      <div style={{ padding: "10px 12px", marginBottom: 12, borderRadius: 8, fontSize: 12, lineHeight: 1.6, flexShrink: 0,
         background: pinned ? "var(--color-bg-soft)" : "#FFF4E5", color: pinned ? "var(--color-label-mute)" : "#8A4B00",
         border: `1px solid ${pinned ? "var(--color-line)" : "#F0C79A"}` }}>
         {pinned ? (
@@ -6587,11 +6592,17 @@ function SleepCheckTab({ companyId, allowed }) {
           이 날짜에 대상 노선 배차가 없습니다.
         </div>
       ) : (
-        <div style={{ overflowX: "auto" }}>
+        // 세로도 스크롤한다 — 이 컨테이너가 이 탭의 유일한 스크롤러다.
+        // ⚠ 열 머리글은 이 표에서만 sticky 로 붙인다(`S.th` 는 전 탭 공용이라 손대지 않는다).
+        //   29행을 내리는 동안 "확인 시각"이 어느 열인지 사라지면 스크롤을 넣은 뜻이 없다.
+        <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
           <table style={S.table}>
             <thead><tr>
-              <th style={S.th}>상태</th><th style={S.th}>노선</th><th style={S.th}>차량</th><th style={S.th}>기사</th>
-              <th style={S.th}>확인 시각</th><th style={S.th}>확인 위치</th><th style={S.th}>방식</th><th style={S.th}>점검</th>
+              {["상태", "노선", "차량", "기사", "확인 시각", "확인 위치", "방식", "점검"].map(h => (
+                // ⚠ 색은 `S.th` 그대로 둔다(다른 표와 달라 보이면 안 된다). borderCollapse:collapse 표는
+                //   sticky 로 띄우면 아래 테두리가 같이 안 따라와 행이 머리글에 붙어 보인다 → inset 그림자로 그린다.
+                <th key={h} style={{ ...S.th, position: "sticky", top: 0, zIndex: 1, boxShadow: "inset 0 -1px 0 var(--color-line)" }}>{h}</th>
+              ))}
             </tr></thead>
             <tbody>
               {rows.map(({ d, state, checkedAtMs, waitedMs, audit }) => {
