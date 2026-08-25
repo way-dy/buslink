@@ -1570,7 +1570,7 @@ async function mintPassengerSession(db, companyId, snap, reuseToken) {
 
 // passengerLogin({ companyId, empNo, pin }) — 사번+PIN 대조 후 승객 신원 발급.
 // 반환: { token, resumeToken, passenger }.
-exports.passengerLogin = onCall(async (request) => {
+exports.passengerLogin = onCall({ invoker: "public" }, async (request) => {
   const { companyId, empNo, pin } = request.data || {};
   if (!companyId || typeof companyId !== "string") {
     throw new HttpsError("invalid-argument", "companyId가 필요합니다");
@@ -1598,7 +1598,7 @@ exports.passengerLogin = onCall(async (request) => {
 
 // passengerResume({ companyId, resumeToken }) — 기기에 보관한 승계표로 세션 재발급.
 // 명부를 다시 읽으므로 **퇴사·비활성 처리는 다음 부팅에 즉시 반영**된다.
-exports.passengerResume = onCall(async (request) => {
+exports.passengerResume = onCall({ invoker: "public" }, async (request) => {
   const { companyId, resumeToken } = request.data || {};
   if (!companyId || !resumeToken || typeof resumeToken !== "string") {
     throw new HttpsError("invalid-argument", "다시 로그인해주세요");
@@ -1631,7 +1631,7 @@ exports.passengerResume = onCall(async (request) => {
 // passengerLogout({ companyId, resumeToken }) — 승계표를 서버에서 없앤다.
 // 기기 localStorage 만 지우면 그 값이 어딘가에 복사돼 있을 때 계속 살아 있다. 공용 폰에서
 // 로그아웃하는 상황이 실제 용례라 서버에서도 끊는다. 실패해도 클라는 로그아웃을 진행한다.
-exports.passengerLogout = onCall(async (request) => {
+exports.passengerLogout = onCall({ invoker: "public" }, async (request) => {
   const { companyId, resumeToken } = request.data || {};
   if (!companyId || !resumeToken) return { ok: true };
   await admin.firestore()
@@ -1647,7 +1647,7 @@ exports.passengerLogout = onCall(async (request) => {
 // lastLoginAt 보유). 증거로 받는 `pinHash` 는 지금도 익명 누구나 명부에서 읽을 수 있으므로
 // 이 통로가 **새로 여는 구멍은 없다** — 다만 P4(명부 닫기) 전에 반드시 사라져야 한다.
 // 그래서 하드 만료일을 박아 둔다. 만료 후에는 그냥 PIN 을 다시 받는다.
-exports.passengerMigrate = onCall(async (request) => {
+exports.passengerMigrate = onCall({ invoker: "public" }, async (request) => {
   const { companyId, empNo, pinHash } = request.data || {};
   if (!companyId || !empNo || !pinHash) {
     throw new HttpsError("invalid-argument", "다시 로그인해주세요");
@@ -1670,7 +1670,7 @@ exports.passengerMigrate = onCall(async (request) => {
 // 첫 설정(pinInitial=true)은 현재 PIN 을 다시 묻지 않는다 — 방금 그 값으로 로그인해 왔다.
 // 공용 계정(pinLocked)은 거부: 여러 명이 같은 계정을 쓰므로 한 사람이 바꾸면 전원이 막힌다
 // (2026-07-21 사고).
-exports.passengerSetPin = onCall(async (request) => {
+exports.passengerSetPin = onCall({ invoker: "public" }, async (request) => {
   const claims = (request.auth && request.auth.token) || {};
   if (claims.role !== "passenger" || !claims.companyId || !claims.empNo) {
     throw new HttpsError("unauthenticated", "다시 로그인해주세요");
