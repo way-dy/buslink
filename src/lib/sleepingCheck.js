@@ -123,3 +123,87 @@ export function formatWaited(ms) {
   const h = Math.floor(m / 60);
   return `${h}시간 ${m % 60}분째`;
 }
+
+// ─── 운용 대상 노선(2026-08-25 미팅) ──────────────────────────────────────────
+// 🔴 **모든 노선에 걸면 안 된다**(배시현: "등교 차들은 사실 할 필요가 없거든요.
+//    마지막 운행이 아니기 때문에"). way 결정: "슬리핑 차일드 운용하는 노선 선택이
+//    있어야 되겠네. 그러면 그 노선만 떠서 그 노선만 보면 되잖아."
+// 지정은 노선 문서의 `sleepCheckEnabled` 한 필드로 한다(신규 컬렉션·설정 화면 0).
+export function isSleepCheckRoute(route) {
+  return !!(route && route.sleepCheckEnabled);
+}
+
+/**
+ * 현황에 올릴 노선 = 지정된 노선. **하나도 안 정했으면 마지막 운행 성격 노선으로 폴백**한다.
+ * 🔴 폴백이 없으면 도입 첫날 화면이 비어 "기능이 없다"로 읽힌다(opt-in + 시드 0건 함정).
+ *    폴백은 어디까지나 추천이므로 호출부가 `pinned:false` 를 보고 안내 문구를 띄운다.
+ * 마지막 운행 판정 = 하교/방과후(이름·shift) 또는 type 이 퇴근.
+ */
+export function sleepCheckRoutes(routes) {
+  const list = (routes || []).filter(r => r && r.id);
+  const pinnedList = list.filter(isSleepCheckRoute);
+  if (pinnedList.length > 0) return { routes: pinnedList, pinned: true };
+  const guess = list.filter(r => {
+    const name = String(r.name || "");
+    if (/방과\s*후|하교|Late Activity|Back Home/i.test(name)) return true;
+    if (/하교|방과/.test(String(r.shift || ""))) return true;
+    return String(r.type || "") === "퇴근";
+  });
+  return { routes: guess, pinned: false };
+}
+
+// ─── 확인 내역 표시(2026-08-25 미팅 — "언제 찍었고 어디 찍었고") ───────────────
+/** 확인 시각 "HH:MM". 없으면 null. */
+export function sleepCheckedAtLabel(dispatch) {
+  const ms = sleepCheckedAt(dispatch);
+  if (ms == null) return null;
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/**
+ * "어디서 찍었나" 한 줄. 🔴 주소가 아니라 **기준점에서의 거리**다 — 그게 우리가 가진 전부이고,
+ * 관리자가 실제로 판단하는 것도 "차 근처였나"이지 번지수가 아니다.
+ *   { text, tone } · tone: 'ok' | 'warn' | 'mute'
+ */
+export function sleepCheckPlaceLabel(dispatch) {
+  const c = (dispatch && dispatch.sleepingCheck) || null;
+  if (!c || !c.checkedAt) return { text: "", tone: "mute" };
+  if (c.distanceM == null) return { text: "위치 미확인", tone: "mute" };
+  const ref = c.distanceRef === "vehicle" ? "차량" : "종점";
+  const text = `${ref}에서 ${c.distanceM}m`;
+  return { text, tone: c.nearOk === false ? "warn" : "ok" };
+}
+
+/** 확인 방식 — NFC 는 물리적 접촉이 강제되므로 QR 과 구분해 보여준다. */
+export function sleepCheckViaLabel(dispatch) {
+  const via = dispatch && dispatch.sleepingCheck && dispatch.sleepingCheck.via;
+  if (via === "nfc") return "NFC";
+  if (via === "qr") return "QR";
+  return "";
+}
+
+/**
+ * 현황 화면 한 줄씩. 상태 무관 전부 돌려준다(운행 중도 보여야 "아직 안 끝났다"가 읽힌다).
+ * 정렬 = 봐야 할 것 먼저(late → waiting → checked → running), 같은 등급은 늦은 순.
+ */
+export function sleepCheckRows(dispatches, stopsByRoute, now = Date.now(), graceMs = SLEEP_CHECK_GRACE_MS) {
+  const RANK = { late: 0, waiting: 1, checked: 2, running: 3 };
+  return (dispatches || []).map(d => {
+    const stops = (stopsByRoute && stopsByRoute[d.routeId]) || [];
+    const state = sleepCheckState(d, stops, now, graceMs);
+    const end = terminalArrivalMs(d, stops);
+    return {
+      d,
+      state,
+      endMs: end,
+      checkedAtMs: sleepCheckedAt(d),
+      waitedMs: (state === "late" || state === "waiting") && end != null ? now - end : null,
+      audit: sleepCheckAudit(d),
+    };
+  }).sort((a, b) => {
+    const r = (RANK[a.state] ?? 9) - (RANK[b.state] ?? 9);
+    if (r !== 0) return r;
+    return (b.waitedMs ?? b.checkedAtMs ?? 0) - (a.waitedMs ?? a.checkedAtMs ?? 0);
+  });
+}

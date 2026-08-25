@@ -19,7 +19,7 @@ import { toLatLngPath } from "../lib/routeProgress";
 // 운행 이력 GPS 궤적 분해(2026-08-18) — 연속 구간/신호 공백/표본 간격 실측
 import { trackSegments, formatDuration, TRACK_GAP_SEC } from "../lib/gpsTrack";
 import { forceReconnect } from "../lib/forceReconnect";
-import { pendingSleepChecks, sleepCheckSummary, formatWaited, sleepCheckAudit, sleepAuditLabel } from "../lib/sleepingCheck";
+import { pendingSleepChecks, sleepCheckSummary, formatWaited, sleepCheckAudit, sleepAuditLabel, sleepCheckRoutes, sleepCheckRows, sleepCheckedAtLabel, sleepCheckPlaceLabel, sleepCheckViaLabel, sleepCheckedAt } from "../lib/sleepingCheck";
 import { classifyRunSignals, STALE_SIGNAL_MIN } from "../lib/runSignals";
 import { forceEndRun } from "../lib/forceEndRun";
 import { createPartnerCode, getBoardingUrl } from "../lib/partner";
@@ -58,7 +58,7 @@ import { applyAppManifest } from "../lib/pwaManifest";
 
 // ⚠ 탭 추가는 **배열 끝에만**. 아래 렌더 분기가 `tab === 0..N` 하드코딩이라 중간 삽입 시
 //   전 탭이 밀려 다른 화면이 뜬다(개선 요청 딥링크 `?imp=` 포함). 2026-07-22 부정승차 추가.
-const TABS = ["대시보드", "실시간 관제", "배차 관리", "배차 일정", "노선 관리", "기사 관리", "차량 관리", "시뮬레이터", "운행 이력", "탑승 통계", "협력사 관리", "공지 발송", "개선 요청", "부정승차"];
+const TABS = ["대시보드", "실시간 관제", "배차 관리", "배차 일정", "노선 관리", "기사 관리", "차량 관리", "시뮬레이터", "운행 이력", "탑승 통계", "협력사 관리", "공지 발송", "개선 요청", "부정승차", "빈 차 확인"];
 const TAB_ICONS = ["grid", "pin", "flag", "calendar", "route", "user", "bus", "play", "clock", "chart", "globe", "bell", "sparkle", "eye"];
 // "개선 요청"(인덱스 12) = 모든 admin/superadmin 노출(회사관리처럼 superadmin 한정 아님).
 // SUPER_TAB_INDEX 는 TABS.length 로 동적 계산 → 회사 관리 탭은 자동으로 13 으로 밀림.
@@ -365,6 +365,7 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
         {tab === 11 && <ErrorBoundary label="공지 발송"><NoticeTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
         {tab === IMPROVE_TAB_INDEX && <ErrorBoundary label="개선 요청"><ImprovementTab companyId={activeCompanyId} user={user} role={role} companies={companies} deepLinkId={improveDeepLinkId} onDeepLinkConsumed={() => setImproveDeepLinkId(null)} /></ErrorBoundary>}
         {tab === 13 && <ErrorBoundary label="부정승차"><NfcRejectTab companyId={activeCompanyId} /></ErrorBoundary>}
+        {tab === 14 && <ErrorBoundary label="빈 차 확인"><SleepCheckTab companyId={activeCompanyId} allowed={allowed} /></ErrorBoundary>}
         {/* SaaS Phase 1.2 — 슈퍼관리자 전용 회사 관리 탭(인덱스=TABS.length). 일반 admin 비표시. */}
         {isSuperAdmin && tab === SUPER_TAB_INDEX && (
           <ErrorBoundary label="회사 관리">
@@ -2389,7 +2390,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
   const [editItem, setEditItem] = useState(null);
   const [filter, setFilter] = useState("전체");
   const [search, setSearch] = useState("");
-  const [form, setForm] = useState({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"", boardingMode:"", order:"", displayStart:"", displayEnd:"" });
+  const [form, setForm] = useState({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"", boardingMode:"", order:"", displayStart:"", displayEnd:"", sleepCheckEnabled:false });
   // 회사 기본 표시 범위(2026-08-05) — companies/{cid}.gpsWindowPreMin / gpsWindowPostMin.
   // 미설정이면 30/30(routeWindow.js 기본값과 같은 수). 노선 '표시 시간'이 있으면 그쪽이 우선.
   const [winPre, setWinPre] = useState(WINDOW_PRE_MIN_DEFAULT);
@@ -2485,10 +2486,10 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
     );
   }, [stopsRoute, companyId]);
 
-  const openAdd = () => { setEditItem(null); setForm({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"", boardingMode:"", order:"", displayStart:"", displayEnd:"" }); setShowForm(true); };
+  const openAdd = () => { setEditItem(null); setForm({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"", boardingMode:"", order:"", displayStart:"", displayEnd:"", sleepCheckEnabled:false }); setShowForm(true); };
   const openEdit = (item) => {
     setEditItem(item);
-    setForm({ name:item.name||"", code:item.code||"", type:item.type||"출근", shift:item.shift||"주간조", seats:item.seats?.toString()||"", departTime:item.departTime||"", memo:item.memo||"", partnerCode:item.partnerCode||"", partnerName:item.partnerName||"", boardingMode:item.boardingMode||"", order: typeof item.order === "number" ? String(item.order) : "", displayStart:item.displayStart||"", displayEnd:item.displayEnd||"" });
+    setForm({ name:item.name||"", code:item.code||"", type:item.type||"출근", shift:item.shift||"주간조", seats:item.seats?.toString()||"", departTime:item.departTime||"", memo:item.memo||"", partnerCode:item.partnerCode||"", partnerName:item.partnerName||"", boardingMode:item.boardingMode||"", order: typeof item.order === "number" ? String(item.order) : "", displayStart:item.displayStart||"", displayEnd:item.displayEnd||"", sleepCheckEnabled: !!item.sleepCheckEnabled });
     setShowForm(true);
   };
 
@@ -2504,7 +2505,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
     // 표시 시간(2026-08-05) — 둘 다 넣어야 명시 창으로 인정. 한쪽만 넣으면 판정이 애매해지므로 거부.
     const ds = (form.displayStart || "").trim(), de = (form.displayEnd || "").trim();
     if ((ds && !de) || (!ds && de)) { setLoading(false); return alert("표시 시간은 시작·종료를 모두 입력하거나 둘 다 비워주세요"); }
-    const data = { name:form.name.trim(), code:form.code.trim(), type:form.type, shift:form.shift, seats:form.seats?parseInt(form.seats):null, departTime:form.departTime, memo:form.memo.trim(), partnerCode:form.partnerCode, partnerName:form.partnerName, boardingMode:form.boardingMode||"", order:orderVal, displayStart:ds||null, displayEnd:de||null, updatedAt:new Date().toISOString() };
+    const data = { name:form.name.trim(), code:form.code.trim(), type:form.type, shift:form.shift, seats:form.seats?parseInt(form.seats):null, departTime:form.departTime, memo:form.memo.trim(), partnerCode:form.partnerCode, partnerName:form.partnerName, boardingMode:form.boardingMode||"", order:orderVal, displayStart:ds||null, displayEnd:de||null, sleepCheckEnabled: !!form.sleepCheckEnabled, updatedAt:new Date().toISOString() };
     try {
       if (editItem) {
         await updateDoc(doc(db, "companies", companyId, "routes", editItem.id), data);
@@ -3500,6 +3501,20 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
           </select>
           <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:-2, marginBottom:6, lineHeight:1.4 }}>
             여러 협력사 승객이 같이 타는 혼승 노선은 "강제"로 한쪽을 명시하세요.
+          </div>
+          {/* 🛏 빈 차 확인 대상(2026-08-25 미팅) — way "슬리핑 차일드 운용하는 노선 선택이
+              있어야 되겠네. 그러면 그 노선만 떠서 그 노선만 보면 되잖아."
+              🔴 등교처럼 마지막 운행이 아닌 노선까지 켜면 미확인 목록이 매일 쌓이고
+                 그 목록은 곧 아무도 안 본다(배시현 지적). 하교·방과후에만 켠다. */}
+          <label style={{ ...S.label, display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <input type="checkbox" checked={!!form.sleepCheckEnabled}
+              onChange={e => setForm({ ...form, sleepCheckEnabled: e.target.checked })}
+              style={{ width: 16, height: 16, cursor: "pointer" }} />
+            🛏 빈 차 확인 대상 노선
+          </label>
+          <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:-2, marginBottom:6, lineHeight:1.4 }}>
+            켜면 <b>빈 차 확인</b> 탭 현황에 이 노선이 올라옵니다. <b>마지막 운행(하교·방과후)</b>에만 켜세요 —
+            등교처럼 뒤에 운행이 더 있는 노선은 확인할 필요가 없습니다.
           </div>
           <label style={S.label}>메모</label>
           <input style={S.input} placeholder="비고 사항" value={form.memo} onChange={e=>setForm({...form,memo:e.target.value})} />
@@ -6383,6 +6398,194 @@ const S = {
 //
 // rules: read=isAdmin(companyId), write=false(CF Admin SDK 전용) → 조회만.
 // ═══════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+// 빈 차 확인(슬리핑 차일드) 현황 — 2026-08-25 미팅
+//   배시현 "언제 찍었고 어디 찍었고 요런 내역 좀 제가 볼 수 있고" · way "당연히 있어야지.
+//   관리자 화면에 넣어 줄게 슬리핑 차일드 현황."
+//
+// 🔴 관제 좌측 레일에는 **미확인 목록과 완료 '건수'** 만 있었다 — 확인된 건이 언제·어디서
+//    찍혔는지는 어디서도 볼 수 없었다. 데이터(`dispatch.sleepingCheck`)는 2026-08-18 부터
+//    이미 쌓이고 있었으므로 여기서는 **화면만** 만든다(스키마 변경 0).
+// 🔴 대상 노선을 안 정했으면 **마지막 운행 성격 노선으로 폴백**한다 — 지정 전에 빈 화면을
+//    보여주면 "기능이 없다"로 읽힌다(opt-in + 시드 0건 함정). 판정은 lib/sleepingCheck.js.
+// ════════════════════════════════════════════════════════════════════════════
+function SleepCheckTab({ companyId, allowed }) {
+  const todayStr = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
+  const [date, setDate] = useState(todayStr);
+  const [routes, setRoutes] = useState([]);
+  const [dispatches, setDispatches] = useState([]);
+  const [stopsByRoute, setStopsByRoute] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [tick, setTick] = useState(0);
+
+  // 경과 시간(“종점 도착 뒤 12분 확인 없음”)이 멈춰 보이지 않게 1분마다 다시 그린다.
+  useEffect(() => { const t = setInterval(() => setTick(n => n + 1), 60000); return () => clearInterval(t); }, []);
+
+  useEffect(() => {
+    if (!companyId) return;
+    const unsub = onSnapshot(collection(db, "companies", companyId, "routes"),
+      (snap) => setRoutes(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      () => setRoutes([]));
+    return () => unsub();
+  }, [companyId]);
+
+  useEffect(() => {
+    if (!companyId || !date) return;
+    setLoading(true);
+    const unsub = onSnapshot(collection(db, "companies", companyId, "dispatches", date, "list"),
+      (snap) => { setDispatches(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false); },
+      () => { setDispatches([]); setLoading(false); });
+    return () => unsub();
+  }, [companyId, date]);
+
+  // 대상 노선(지정 → 없으면 폴백). 협력사 권한 범위도 함께 적용.
+  const { routes: targetRoutes, pinned } = useMemo(() => {
+    const scoped = routes.filter(r => !allowed || allowed.includes("*") || allowed.includes(r.partnerCode));
+    return sleepCheckRoutes(scoped);
+  }, [routes, allowed]);
+  const targetIds = useMemo(() => new Set(targetRoutes.map(r => r.id)), [targetRoutes]);
+
+  // 종점 판정에 stops 가 필요하다 — 대상 노선 것만 1회씩(노선당 getDocs 1회).
+  useEffect(() => {
+    if (!companyId) return;
+    const ids = dispatches.map(d => d.routeId).filter(rid => rid && targetIds.has(rid) && !stopsByRoute[rid]);
+    const uniq = Array.from(new Set(ids));
+    if (uniq.length === 0) return;
+    let alive = true;
+    Promise.all(uniq.map(async rid => {
+      try {
+        const snap = await getDocs(query(collection(db, "companies", companyId, "routes", rid, "stops"), orderBy("order", "asc")));
+        return [rid, snap.docs.map(d => ({ id: d.id, ...d.data() }))];
+      } catch (_) { return [rid, []]; }
+    })).then(pairs => {
+      if (!alive) return;
+      setStopsByRoute(prev => { const next = { ...prev }; pairs.forEach(([rid, st]) => { next[rid] = st; }); return next; });
+    });
+    return () => { alive = false; };
+  }, [companyId, dispatches, targetIds, stopsByRoute]);
+
+  const isToday = date === todayStr();
+  // 🔴 과거 날짜를 볼 때 '지금'으로 재면 경과시간이 `종점 뒤 21시간째` 처럼 무한히 늘어난다
+  //    (2026-07-20 `조기도착 수천분` 과 같은 계열 — 날짜 뷰는 그 날짜에 시계를 맞춰야 한다).
+  const anchorNow = useMemo(() => isToday ? Date.now() : new Date(`${date}T23:59:59+09:00`).getTime(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [date, isToday, tick]);
+  // 🔴 대상 노선 **밖에서 찍힌 확인도 반드시 보여준다**. prod 실측(2026-08-25): 그날 확인 6건이
+  //    전부 **등교** 노선이었다 — 대상을 하교로만 좁히면 기사가 실제로 찍은 기록이 화면에서
+  //    사라지고 "찍었는데 안 보인다"가 된다. 기록은 숨기지 않는다.
+  const scoped = useMemo(
+    () => dispatches.filter(d => targetIds.has(d.routeId) || sleepCheckedAt(d)),
+    [dispatches, targetIds]);
+  const rows = useMemo(() => sleepCheckRows(scoped, stopsByRoute, anchorNow),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scoped, stopsByRoute, anchorNow]);
+  const counts = useMemo(() => {
+    const c = { checked: 0, late: 0, waiting: 0, running: 0 };
+    rows.forEach(r => { c[r.state] = (c[r.state] || 0) + 1; });
+    return c;
+  }, [rows]);
+
+  const STATE = {
+    checked: { label: "확인 완료", bg: "#E6F7EB", fg: "#007A29" },
+    late:    { label: "미확인",    bg: "#FDECEC", fg: "var(--color-destructive)" },
+    waiting: { label: "확인 대기", bg: "#FFF4E5", fg: "#B95300" },
+    running: { label: "운행 전·중", bg: "var(--color-bg-soft)", fg: "var(--color-label-mute)" },
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+        <h2 style={{ margin: 0, fontSize: 18 }}>🛏 빈 차 확인 현황</h2>
+        <input type="date" value={date} onChange={e => setDate(e.target.value)} style={{ ...S.input, width: "auto", padding: "8px 12px", fontSize: 13 }} />
+        <button style={S.editBtn} onClick={() => setDate(todayStr())}>오늘</button>
+        <span style={{ fontSize: 12, color: "var(--color-label-mute)" }}>
+          확인 {counts.checked} · 미확인 {counts.late} · 대기 {counts.waiting} · 운행 전·중 {counts.running}
+        </span>
+      </div>
+
+      {/* 대상 노선 안내 — 아직 안 정했으면 지금 보이는 게 추천이라는 걸 분명히 한다. */}
+      <div style={{ padding: "10px 12px", marginBottom: 12, borderRadius: 8, fontSize: 12, lineHeight: 1.6,
+        background: pinned ? "var(--color-bg-soft)" : "#FFF4E5", color: pinned ? "var(--color-label-mute)" : "#8A4B00",
+        border: `1px solid ${pinned ? "var(--color-line)" : "#F0C79A"}` }}>
+        {pinned ? (
+          <>대상 노선 <b>{targetRoutes.length}개</b>가 지정되어 있습니다. 바꾸시려면 <b>노선 관리</b>에서 노선을 열어 <b>빈 차 확인 대상</b>을 켜고 끄시면 됩니다.</>
+        ) : (
+          <>아직 <b>대상 노선을 정하지 않으셨습니다</b>. 지금은 마지막 운행으로 보이는 노선 <b>{targetRoutes.length}개</b>를 임시로 보여드립니다.
+          <br/><b>노선 관리</b>에서 노선을 열어 <b>빈 차 확인 대상</b>을 켜시면 그 노선만 여기에 나옵니다.</>
+        )}
+      </div>
+
+      {loading ? (
+        <div style={{ padding: 24, textAlign: "center", color: "var(--color-label-mute)" }}>불러오는 중...</div>
+      ) : rows.length === 0 ? (
+        <div style={{ padding: 24, textAlign: "center", color: "var(--color-label-alt)" }}>
+          이 날짜에 대상 노선 배차가 없습니다.
+        </div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={S.table}>
+            <thead><tr>
+              <th style={S.th}>상태</th><th style={S.th}>노선</th><th style={S.th}>차량</th><th style={S.th}>기사</th>
+              <th style={S.th}>확인 시각</th><th style={S.th}>확인 위치</th><th style={S.th}>방식</th><th style={S.th}>점검</th>
+            </tr></thead>
+            <tbody>
+              {rows.map(({ d, state, checkedAtMs, waitedMs, audit }) => {
+                const st = STATE[state] || STATE.running;
+                const place = sleepCheckPlaceLabel(d);
+                const via = sleepCheckViaLabel(d);
+                return (
+                  <tr key={d.id}>
+                    <td style={S.td}>
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: "var(--radius-pill)", background: st.bg, color: st.fg, whiteSpace: "nowrap" }}>
+                        {st.label}
+                      </span>
+                      {waitedMs != null && isToday && (
+                        <div style={{ fontSize: 10.5, color: "var(--color-label-mute)", marginTop: 3 }}>
+                          종점 뒤 {formatWaited(waitedMs)}
+                        </div>
+                      )}
+                    </td>
+                    <td style={S.td}>
+                      {d.routeName || d.routeId || "-"}
+                      {!targetIds.has(d.routeId) && (
+                        <span title="대상 노선은 아니지만 확인 기록이 있어 함께 보여드립니다"
+                          style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 700, padding: "2px 7px", borderRadius: "var(--radius-pill)", background: "var(--color-bg-soft)", color: "var(--color-label-mute)" }}>대상 외</span>
+                      )}
+                    </td>
+                    <td style={S.td}>{d.vehicleNo || d.vehicleId || "-"}</td>
+                    <td style={S.td}>{d.driverName || "-"}</td>
+                    <td style={{ ...S.td, fontVariantNumeric: "tabular-nums", fontWeight: checkedAtMs ? 700 : 400 }}>
+                      {sleepCheckedAtLabel(d) || "-"}
+                    </td>
+                    <td style={{ ...S.td, color: place.tone === "warn" ? "var(--color-destructive)" : place.tone === "mute" ? "var(--color-label-mute)" : "var(--color-label)" }}>
+                      {place.text || "-"}
+                    </td>
+                    <td style={S.td}>
+                      {via ? (
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: "var(--radius-pill)",
+                          background: via === "NFC" ? "#E8F0FE" : "var(--color-bg-soft)",
+                          color: via === "NFC" ? "var(--color-primary-deep)" : "var(--color-label-mute)" }}>{via}</span>
+                      ) : "-"}
+                    </td>
+                    <td style={{ ...S.td, color: "var(--color-cautionary)", fontSize: 11 }}>
+                      {audit && audit.suspicious ? sleepAuditLabel(audit.reasons) : ""}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{ marginTop: 14, fontSize: 11.5, color: "var(--color-label-mute)", lineHeight: 1.7 }}>
+        🔴 <b>인쇄한 QR 은 사진으로 복제됩니다</b> — 뒷좌석까지 가지 않아도 찍힐 수 있어, 아이들이 타는 노선에는 NFC 태그를 권합니다.
+        <br/>확인 위치는 주소가 아니라 <b>기준점(차량 또는 종점)에서의 거리</b>입니다. 멀리서 찍혔거나 도착 직후 즉시 찍힌 건은 <b>점검</b> 칸에 표시됩니다.
+      </div>
+    </div>
+  );
+}
+
 function NfcRejectTab({ companyId }) {
   const todayStr = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
   const [date, setDate] = useState(todayStr);
