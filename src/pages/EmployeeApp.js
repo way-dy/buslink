@@ -697,7 +697,8 @@ function LoginScreen({ companyId, onLogin }) {
         </div>
         <div style={{ fontSize: 20, fontWeight: 800, color: "var(--color-label)", letterSpacing: "-0.02em", marginBottom: 4 }}>로그인</div>
         <div style={{ fontSize: 13, color: "var(--color-label-mute)", marginBottom: 18, lineHeight: 1.55 }}>
-          받으신 안내문의 아이디와 비밀번호를 입력하세요<br/>
+          받으신 안내문의 아이디를 입력하세요<br/>
+          초기 비밀번호는 <b style={{ color: "var(--color-label)", letterSpacing: "0.08em" }}>000000</b> 입니다<br/>
           <span style={{ color: "var(--color-cautionary)", fontWeight: 600 }}>첫 로그인 후 비밀번호를 직접 정하게 됩니다</span>
         </div>
         <input style={S.input} type="text" inputMode="text" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="사번"

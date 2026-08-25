@@ -323,7 +323,7 @@ function FileUploadMode({ codeData, code, routes, onDone }) {
           <button onClick={downloadSampleExcel} style={S.btnSecondary}>📥 엑셀 양식 다운로드</button>
           <div style={S.excelGuide}>
             <div style={{ fontWeight:700, marginBottom:10, color:"#B95300", fontSize:13 }}>📋 양식 작성 안내</div>
-            {[["사번","필수 · 숫자 또는 문자"],["이름","필수"],["부서","선택 · 통계 사용"],["노선코드","선택 · 예) 662"],["재직여부","Y / N"],["NFC카드번호","선택 · 비우면 기존 등록 유지"],["초기PIN","선택 · 비우면 자동 발급(권장)"]].map(([k,v])=>(
+            {[["사번","필수 · 숫자 또는 문자"],["이름","필수"],["부서","선택 · 통계 사용"],["노선코드","선택 · 예) 662"],["재직여부","Y / N"],["NFC카드번호","선택 · 비우면 기존 등록 유지"],["초기PIN","선택 · 비우면 000000"]].map(([k,v])=>(
               <div key={k} style={{ display:"flex", gap:10, fontSize:12, marginBottom:4 }}>
                 <span style={{ color:"var(--color-primary)", fontWeight:700, minWidth:60 }}>{k}</span>
                 <span style={{ color:"var(--color-label-mute)" }}>{v}</span>

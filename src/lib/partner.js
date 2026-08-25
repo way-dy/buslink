@@ -347,7 +347,8 @@ export async function verifyPassenger({ companyId, empNo, pin, routeId, tokenId 
 export function downloadSampleExcel() {
   const XLSX = window.XLSX;
   // NFC 카드번호·초기PIN 은 **선택 컬럼** — 비워두면 기존 등록이 그대로 보존된다(지워지지 않음).
-  // 초기PIN 을 비우면 신규 등록 승객마다 자동으로 서로 다른 PIN 이 발급된다(권장).
+  // 초기PIN 을 비우면 신규 등록 승객은 전원 공통 `000000` 으로 발급된다(2026-08-25 way 결정).
+  //   개인별로 다른 값을 주고 싶으면 이 컬럼에 직접 채워 넣으면 그 값이 이긴다.
   const ws = XLSX.utils.aoa_to_sheet([
     ["사번", "이름", "부서", "노선코드", "재직여부(Y/N)", "NFC카드번호(선택)", "초기PIN(선택)"],
     ["10001", "홍길동", "개발팀", "662", "Y", "0453CE9A", ""],

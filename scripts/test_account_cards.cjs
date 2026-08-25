@@ -8,7 +8,7 @@ const vm = require("vm");
 const src = fs.readFileSync(path.join(__dirname, "..", "src", "lib", "accountCards.js"), "utf8")
   .replace(/^export const /gm, "const ")
   .replace(/^export function /gm, "function ");
-const exportNames = ["INITIAL_PIN_LENGTH", "generateInitialPin", "isValidInitialPin", "buildPassengerLoginUrl", "buildAccountCardsHtml", "openPrintWindow"];
+const exportNames = ["INITIAL_PIN_LENGTH", "DEFAULT_INITIAL_PIN", "generateInitialPin", "generateRandomPin", "isValidInitialPin", "buildPassengerLoginUrl", "buildAccountCardsHtml", "openPrintWindow"];
 // window.crypto 를 실제 WebCrypto 로 채워 브라우저와 같은 경로를 태운다.
 const sandbox = { module: { exports: {} }, window: { crypto: require("crypto").webcrypto, open: () => null }, Uint8Array, Math, JSON, String, Number, Array, RegExp, encodeURIComponent };
 vm.createContext(sandbox);
@@ -21,16 +21,24 @@ function ok(name, cond, extra) {
   else { fail++; console.log(`  ✗ ${name}${extra ? " → " + extra : ""}`); }
 }
 
-console.log("\n[1] generateInitialPin");
+console.log("\n[1] generateInitialPin — 전원 공통 000000 (2026-08-25 way 결정)");
 {
+  // 🔴 예전 단언은 정반대였다("전부 같은 값이 아님"·"000000 고정이 아님"). way 가 배부·문의
+  //    비용을 이유로 고정을 택했고, 노출 창은 **첫 로그인 강제 변경**이 좁힌다.
+  //    되돌린다면 `accountCards.generateRandomPin` 이 옛 발급기 그대로 남아 있다.
   const pins = Array.from({ length: 500 }, () => A.generateInitialPin());
   ok("기본 6자리", pins.every(p => p.length === 6));
   ok("숫자만", pins.every(p => /^\d+$/.test(p)));
-  ok("전부 같은 값이 아님(랜덤성)", new Set(pins).size > 400, `distinct=${new Set(pins).size}`);
-  ok("000000 고정이 아님", !pins.every(p => p === "000000"));
-  ok("길이 인자 4 반영", A.generateInitialPin(4).length === 4);
-  ok("길이 범위 클램프(하한)", A.generateInitialPin(1).length === 4);
-  ok("길이 범위 클램프(상한)", A.generateInitialPin(99).length === 6);
+  ok("전원 공통 000000", pins.every(p => p === "000000"), `distinct=${new Set(pins).size}`);
+  ok("상수와 일치", A.DEFAULT_INITIAL_PIN === "000000", A.DEFAULT_INITIAL_PIN);
+  ok("길이 인자를 줘도 고정값(호출부 오해 방지)", A.generateInitialPin(4) === "000000");
+  // 옛 발급기는 되돌리기용으로 살아 있어야 한다 — 지우면 복구 경로가 사라진다.
+  ok("generateRandomPin 이 남아 있다", typeof A.generateRandomPin === "function");
+  {
+    const r = Array.from({ length: 500 }, () => A.generateRandomPin());
+    ok("generateRandomPin 은 여전히 개인별로 다르다", new Set(r).size > 400, `distinct=${new Set(r).size}`);
+    ok("generateRandomPin 길이 클램프", A.generateRandomPin(1).length === 4 && A.generateRandomPin(99).length === 6);
+  }
 }
 
 console.log("\n[2] isValidInitialPin");

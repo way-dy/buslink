@@ -6,8 +6,14 @@
 //   관리자가 셋팅 → 개인별 안내문 인쇄 → 배부 흐름을 자동화한다.
 //
 // 여기 있는 것 두 가지:
-//   ① 초기 PIN 개인별 발급  — 전원 `000000` 고정이면 사번(명부 순번)만 알면
-//      남의 계정으로 들어가 그 사람 노선·정류장·공지를 본다. 인원이 늘수록 그대로 확대.
+//   ① 초기 PIN 발급 — **전원 공통 `000000`**(2026-08-25 way 결정).
+//      🔴 이 값을 되돌리려면 아래 `DEFAULT_INITIAL_PIN` 한 곳만 고치면 된다(옛 랜덤 발급기는
+//      `generateRandomPin` 으로 남겨 뒀다). 되돌리기 전에 **왜 고정했는지**를 먼저 읽을 것 —
+//      way 판단 = 배부·문의 비용이 실제 병목이고, 첫 로그인에서 본인 번호로 바꾸게 강제하므로
+//      노출 창이 짧다. ⚠ 남아 있는 위험은 **아직 첫 로그인을 안 한 사람**이다: 명부가 익명에게
+//      열려 있어(P4 전) 사번 목록을 얻을 수 있고, 남이 먼저 들어가 PIN 을 바꾸면 **본인이 잠긴다**.
+//      이 시스템은 동시 로그인을 막지 않으므로 "로그인해 있으면 남이 못 쓴다"는 성립하지 않는다.
+//      → P4(명부 닫기)가 이 위험의 실질적 종결이다.
 //   ② 계정 안내문 인쇄 HTML — 이름/ID/PIN/QR 카드. QR 은 사번이 프리필된
 //      승객앱 링크라 "내 ID가 뭐냐" 문의와 오타가 사라진다.
 //
@@ -21,12 +27,26 @@
 /** 초기 PIN 자릿수 기본값(승객앱 로그인은 4~6자리 허용). */
 export const INITIAL_PIN_LENGTH = 6;
 
+/** 전원 공통 초기 비밀번호(2026-08-25 way 결정). 되돌리려면 여기만 고친다. */
+export const DEFAULT_INITIAL_PIN = "000000";
+
 /**
- * 초기 PIN 자동 생성 — 암호학적 난수 기반 숫자열.
- * `Math.random` 을 쓰면 같은 순간 대량 생성 시 예측 가능성이 생겨 crypto 사용.
+ * 초기 PIN 발급 — **고정값**을 돌려준다.
+ * 관리자가 엑셀 `초기PIN` 컬럼으로 값을 지정하면 그쪽이 이긴다(partner.js).
+ * 🔴 첫 로그인 화면(`FirstPinSetup`)과 CF `passengerSetPin` 이 새 PIN 으로 `000000` 을
+ *    **거부**한다 — 그래야 "바꿨는데 그대로"가 안 된다. 그 가드를 지우지 말 것.
+ */
+export function generateInitialPin() {
+  return DEFAULT_INITIAL_PIN;
+}
+
+/**
+ * 옛 개인별 랜덤 발급기 — 지금은 안 쓰지만 **되돌릴 때를 위해 남겨 둔다**.
+ * 거래처별로 초기 PIN 을 다르게 주는 안(설계 초안 결정 1)을 채택하면 여기로 돌아온다.
+ * 암호학적 난수 기반: `Math.random` 은 같은 순간 대량 생성 시 예측 가능성이 생긴다.
  * 첫 자리 0 도 허용한다(문자열로 다루고 로그인 입력도 문자열 비교).
  */
-export function generateInitialPin(len = INITIAL_PIN_LENGTH) {
+export function generateRandomPin(len = INITIAL_PIN_LENGTH) {
   const n = Math.max(4, Math.min(6, Number(len) || INITIAL_PIN_LENGTH));
   const g = (typeof window !== "undefined" && window.crypto) || null;
   if (g && typeof g.getRandomValues === "function") {
@@ -76,7 +96,7 @@ export function buildAccountCardsHtml({ partnerName, notice, cards } = {}) {
   const list = Array.isArray(cards) ? cards : [];
   const head = esc(partnerName || "통근버스");
   // 배부물은 학부모·직원이 읽는다 — "사번"·"PIN" 같은 내부 용어를 쓰지 않는다.
-  const foot = esc(notice || "QR을 휴대폰 카메라로 찍으면 아이디가 자동으로 입력됩니다. 비밀번호는 첫 로그인 후 본인만 아는 번호로 바꾸게 됩니다.");
+  const foot = esc(notice || "QR을 휴대폰 카메라로 찍으면 아이디가 자동으로 입력됩니다. 초기 비밀번호는 000000 이며, 첫 로그인에서 본인만 아는 번호로 바꾸게 됩니다. 되도록 받으신 날 바로 바꿔주세요.");
 
   const cardHtml = list.map(c => `
     <div class="card">
