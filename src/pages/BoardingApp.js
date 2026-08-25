@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { validateAndBoard, validateAndBoardStatic } from "../lib/boarding";
+import { hashPin } from "../lib/partner";
 import { auth } from "../firebase";
 import { signInAnonymously } from "firebase/auth";
 import { Icon } from "../components/ui";
@@ -10,6 +11,25 @@ function getParam(key) {
 
 const STEPS = { INPUT: "input", LOADING: "loading", SUCCESS: "success", ERROR: "error" };
 
+// ─── 이 기기 기억(2026-08-25 본인 확인) ────────────────────────────────────
+// 🔴 앱 밖(외부 카메라)에서 고정 QR 을 열면 예전엔 사번만 받고 탑승이 적재됐다 — 아무
+//    문자열이나 통과했다. 이제 PIN 을 함께 받아 서버가 명부와 대조한다.
+//    다만 버스를 탈 때마다 6자리를 치게 하면 그게 곧 다음 민원이므로, **한 번 확인에
+//    성공하면 이 기기에 기억**해 두 번째부터는 버튼 한 번이다.
+// ⚠ 앱(`/p`)의 세션 키(`buslink_employee`)와 **일부러 다른 키**다 — 고정 QR 주소는
+//    관리자가 인쇄한 호스트(admin.*)를 가리킬 수 있어 origin 이 다르고, 앱 세션을
+//    여기서 덮어쓰면 로그인 상태가 꼬인다.
+const LS_KEY = "buslink_board_id";
+function loadRemembered() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch { return null; }
+}
+function saveRemembered(v) {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(v)); } catch { /* 사파리 프라이빗 등 — 무해 */ }
+}
+function clearRemembered() {
+  try { localStorage.removeItem(LS_KEY); } catch { /* 무해 */ }
+}
+
 export default function BoardingApp() {
   const tokenId = getParam("t");
   // 정적(고정) QR — 토큰 없이 회사/차량 ID 만 인코딩(`?c=&v=`). BoardingApp 이 오늘 배차로 노선 해석.
@@ -17,8 +37,14 @@ export default function BoardingApp() {
   const vId = getParam("v");
   const isStatic = !tokenId && !!cId && !!vId;
   const [step, setStep] = useState(STEPS.INPUT);
+  // 이 기기에 기억된 사람(있으면 사번·PIN 입력 없이 버튼 한 번). 회사가 다르면 무시.
+  const [remembered, setRemembered] = useState(() => {
+    const r = loadRemembered();
+    return (r && r.empNo && r.pinHash && (!cId || r.companyId === cId)) ? r : null;
+  });
   const [empNo, setEmpNo] = useState("");
   const [name, setName] = useState("");
+  const [pin, setPin] = useState("");
   const [result, setResult] = useState(null);
   const [errMsg, setErrMsg] = useState("");
   const [authReady, setAuthReady] = useState(false);
@@ -42,7 +68,11 @@ export default function BoardingApp() {
   }, []);
 
   const handleBoard = async () => {
-    if (!empNo.trim()) return;
+    // 기억된 사람이면 입력 없이 진행, 아니면 사번+PIN 을 다 받아야 한다.
+    const useEmpNo = remembered ? remembered.empNo : empNo.trim();
+    const useName  = remembered ? (remembered.name || "") : name;
+    if (!useEmpNo) return;
+    if (!remembered && pin.length < 4) return;
     if (!authReady) {
       setErrMsg("연결 중입니다. 잠시 후 다시 시도해주세요.");
       setStep(STEPS.ERROR);
@@ -50,17 +80,35 @@ export default function BoardingApp() {
     }
     setStep(STEPS.LOADING);
     try {
+      // 🔴 서버가 명부의 pinHash 와 대조한다 — 여기서 만든 해시가 곧 본인 확인 근거다.
+      const proof = remembered ? remembered.pinHash : await hashPin(pin);
       const res = isStatic
-        ? await validateAndBoardStatic({ companyId: cId, vehicleId: vId, empNo, name })
-        : await validateAndBoard({ tokenId, empNo, name });
+        ? await validateAndBoardStatic({ companyId: cId, vehicleId: vId, empNo: useEmpNo, name: useName, pinHash: proof })
+        : await validateAndBoard({ tokenId, empNo: useEmpNo, name: useName });
+      // 확인에 성공한 뒤에만 기억한다(틀린 값을 굳혀 두면 매번 실패한다).
+      if (isStatic && !remembered) {
+        const r = { companyId: cId, empNo: useEmpNo, name: useName, pinHash: proof };
+        saveRemembered(r); setRemembered(r);
+      }
       setResult(res);
       setStep(STEPS.SUCCESS);
       // 진동 피드백 (모바일)
       if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]);
     } catch (e) {
+      // 기억해 둔 사람으로 본인 확인이 깨지면(앱에서 PIN 을 바꿨거나 명부에서 빠짐)
+      // 그 값을 붙들고 있으면 **영원히 실패**한다 → 지우고 다시 입력받는다.
+      if (remembered && /본인 확인|등록되지 않은|비활성화/.test(e.message || "")) {
+        clearRemembered(); setRemembered(null); setEmpNo(""); setPin("");
+      }
       setErrMsg(e.message);
       setStep(STEPS.ERROR);
     }
+  };
+
+  // 다른 사람으로 찍기 — 기억을 지우고 입력 화면으로.
+  const handleSwitchUser = () => {
+    clearRemembered(); setRemembered(null);
+    setEmpNo(""); setPin(""); setName(""); setErrMsg(""); setStep(STEPS.INPUT);
   };
 
   const handleKeyDown = (e) => {
@@ -87,7 +135,9 @@ export default function BoardingApp() {
             </div>
             <div style={S.title}>탑승 확인</div>
             <div style={S.desc}>
-              사번을 입력하면 탑승이 기록됩니다.
+              {remembered
+                ? <>버튼을 누르면 탑승이 기록됩니다.</>
+                : <>사번과 비밀번호로 본인 확인 후 탑승이 기록됩니다.</>}
               {!isStatic && (
                 <>
                   <br/>
@@ -96,42 +146,64 @@ export default function BoardingApp() {
               )}
             </div>
 
-            <div style={S.inputGroup}>
-              <label style={S.inputLabel}>사번 *</label>
-              <input
-                style={S.input}
-                type="tel"
-                inputMode="numeric"
-                placeholder="사번 입력 (예: 10001)"
-                value={empNo}
-                onChange={e => setEmpNo(e.target.value)}
-                onKeyDown={handleKeyDown}
-                autoFocus
-              />
-            </div>
+            {/* 이 기기에 기억된 사람 — 두 번째부터는 입력 없이 버튼 한 번(2026-08-25). */}
+            {remembered ? (
+              <div style={S.inputGroup}>
+                <label style={S.inputLabel}>탑승자</label>
+                <div style={{ ...S.input, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <span style={{ fontWeight: 700 }}>
+                    {remembered.name ? `${remembered.name} · ` : ""}{remembered.empNo}
+                  </span>
+                  <button onClick={handleSwitchUser}
+                    style={{ background: "none", border: "none", color: "#9FB6FF", fontSize: 12, fontFamily: "inherit", cursor: "pointer", textDecoration: "underline", flexShrink: 0 }}>
+                    다른 사람
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div style={S.inputGroup}>
+                  <label style={S.inputLabel}>사번 *</label>
+                  <input
+                    style={S.input}
+                    type="tel"
+                    inputMode="numeric"
+                    placeholder="사번 입력 (예: 10001)"
+                    value={empNo}
+                    onChange={e => setEmpNo(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    autoFocus
+                  />
+                </div>
 
-            <div style={S.inputGroup}>
-              <label style={S.inputLabel}>이름 (선택)</label>
-              <input
-                style={S.input}
-                type="text"
-                placeholder="이름 입력 (선택사항)"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                onKeyDown={handleKeyDown}
-              />
-            </div>
+                <div style={S.inputGroup}>
+                  <label style={S.inputLabel}>비밀번호 *</label>
+                  <input
+                    style={S.input}
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="앱 로그인과 같은 비밀번호"
+                    value={pin}
+                    onChange={e => setPin(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                  />
+                </div>
+              </>
+            )}
 
             <button
-              style={{ ...S.btn, opacity: empNo.trim() ? 1 : 0.5 }}
+              style={{ ...S.btn, opacity: (remembered || (empNo.trim() && pin.length >= 4)) ? 1 : 0.5 }}
               onClick={handleBoard}
-              disabled={!empNo.trim()}
+              disabled={!(remembered || (empNo.trim() && pin.length >= 4))}
             >
               탑승 확인
             </button>
 
             <div style={S.notice}>
-              본인 확인 후 탑승이 기록됩니다.<br/>타인의 사번을 무단 사용 시 불이익이 있습니다.
+              {remembered
+                ? <>이 휴대폰에 기억해 둔 정보로 확인합니다.<br/>다른 분이 타실 때는 <b>다른 사람</b>을 눌러주세요.</>
+                : <>한 번 확인하면 이 휴대폰에 기억해 다음부터는 바로 탑승됩니다.<br/>타인의 사번을 무단 사용 시 불이익이 있습니다.</>}
             </div>
           </>
         )}

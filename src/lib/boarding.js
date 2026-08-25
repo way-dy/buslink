@@ -258,14 +258,18 @@ export async function resolveStaticDispatch({ companyId, vehicleId, selectedRout
 // ─── 정적 QR 검증 + 탑승 기록 ────────────────────────────
 // 만료/소각 없음(재사용 가능). 중복 방지 = 멱등(직원 1인 × 차량 × 당일 1건).
 // boardings 스키마는 validateAndBoard 와 100% 동일(통계 화면 무영향) + via:"static" 만 추가.
-export async function validateAndBoardStatic({ companyId, vehicleId, empNo, name, selectedRouteId }) {
+// pinHash: 본인 확인용(2026-08-25). 승객 로그인 시 세션에 저장된 값 그대로 넘긴다 —
+//   앱 안에서 찍는 경로는 추가 입력 0. 앱 밖(외부 카메라 → BoardingApp)은 PIN 을 받아
+//   `hashPin(pin)` 으로 만들어 넘긴다. 🔴 서버가 이 값을 명부와 대조해 거부한다.
+export async function validateAndBoardStatic({ companyId, vehicleId, empNo, name, selectedRouteId, pinHash }) {
   if (!empNo || !empNo.trim()) throw new Error("사번을 입력해주세요"); // 빠른 UX 가드(클라)
+  if (!pinHash) throw new Error("본인 확인이 필요합니다\n앱에서 로그인한 뒤 다시 찍어주세요");
 
   // 배차 재해석·partnerCode/GPS 캡처·멱등 boarding 생성은 서버(CF boardStatic·Admin SDK)에 위임.
   // 익명 진입점이 배차 읽기 규칙(admin/driver 잠금)에서 거부되던 문제 회피. 반환 계약 보존.
   // selectedRouteId 있으면 서버가 선택 노선 배차만 매칭(불일치=차단·적재 노선=선택 노선).
   const { data } = await httpsCallable(functions, "boardStatic")({
-    companyId, vehicleId, empNo: empNo.trim(), name: name || "", selectedRouteId: selectedRouteId || null,
+    companyId, vehicleId, empNo: empNo.trim(), name: name || "", selectedRouteId: selectedRouteId || null, pinHash,
   });
   return {
     routeName: data.routeName,

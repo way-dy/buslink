@@ -1451,7 +1451,7 @@ exports.resolveStaticBoarding = onCall(async (request) => {
 exports.boardStatic = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
 
-  const { companyId, vehicleId, empNo, name, selectedRouteId } = request.data || {};
+  const { companyId, vehicleId, empNo, name, selectedRouteId, pinHash } = request.data || {};
   if (!companyId || !vehicleId || !empNo || !String(empNo).trim()) {
     throw new HttpsError("invalid-argument", "사번을 입력해주세요");
   }
@@ -1459,19 +1459,39 @@ exports.boardStatic = onCall(async (request) => {
 
   const db = admin.firestore();
 
+  // ── 본인 확인(2026-08-25 미팅) ─────────────────────────────────────────────
+  // 🔴 예전엔 `request.auth` 만 봤는데 그건 **익명 인증이라 누구나 통과**한다. 그래서 차량에
+  //    붙은 고정 QR 을 외부 카메라로 열면 사번 칸에 **아무 문자열이나 넣어도 탑승이 적재**됐다
+  //    (2026-08-25 배시현 실측). 배차·차량은 서버가 다시 해석했지만 **사람은 아무도 확인하지
+  //    않았다** — 통계에 가짜 탑승이 섞이고 정원·탑승률이 오염된다.
+  // 확인은 두 겹이다: ① 명부에 있는 사번인가 ② 그 사람의 PIN 해시가 맞는가.
+  //    ①만으로도 신고된 공격(무작위 문자열)은 막히지만, ② 가 없으면 남의 사번으로 대신
+  //    찍는 것을 못 막는다. 실측상 263명 **전원 pinHash 보유**라 강제해도 막히는 사람은 없다.
+  // ⚠ pinHash 는 승객 로그인 시 세션에 이미 들어 있다(EmployeeApp onLogin) — 앱 안에서
+  //    QR 을 찍는 경로는 추가 입력이 없다. 앱 밖(외부 카메라) 경로만 PIN 을 묻는다.
+  const passSnap = await db
+    .collection("companies").doc(companyId)
+    .collection("passengers").doc(trimmedEmpNo).get();
+  if (!passSnap.exists) {
+    console.warn(`[boardStatic:거부] 명부에 없는 사번 cid=${companyId} emp=${trimmedEmpNo}`);
+    throw new HttpsError("permission-denied", "등록되지 않은 사번입니다\n담당자에게 문의하세요");
+  }
+  const passenger = passSnap.data() || {};
+  if (passenger.active === false) {
+    throw new HttpsError("permission-denied", "비활성화된 계정입니다\n담당자에게 문의하세요");
+  }
+  if (!pinHash || passenger.pinHash !== pinHash) {
+    console.warn(`[boardStatic:거부] 본인 확인 실패 cid=${companyId} emp=${trimmedEmpNo} hash=${pinHash ? "불일치" : "없음"}`);
+    throw new HttpsError("permission-denied", "본인 확인이 필요합니다\n앱에서 로그인한 뒤 다시 찍어주세요");
+  }
+
   // 오늘 배차 해석(비면 failed-precondition) — routeId/routeName/driverId/vehicleNo 확보.
   // selectedRouteId 있으면 선택 노선 매칭 강제(불일치=차단, 2026-07-16 회의 #1).
   const { today, routeId, routeName, driverId, vehicleNo } =
     await resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRouteId);
 
-  // partnerCode 자동 채움 — passengers/{empNo}.partnerCode(협력사별 통계용).
-  let partnerCode = null;
-  try {
-    const passSnap = await db
-      .collection("companies").doc(companyId)
-      .collection("passengers").doc(trimmedEmpNo).get();
-    if (passSnap.exists) partnerCode = (passSnap.data() || {}).partnerCode || null;
-  } catch (_) { /* 권한/네트워크 오류는 partnerCode 부재로 처리 — 탑승 기록 자체는 진행 */ }
+  // partnerCode 자동 채움 — 위에서 이미 읽은 승객 문서 재사용(협력사별 통계용).
+  const partnerCode = passenger.partnerCode || null;
 
   // 차량 GPS 위치 캡처 — 탑승 시점 좌표 보존(정류장 매핑용).
   let vehicleLat = null, vehicleLng = null, vehicleSpeed = null;

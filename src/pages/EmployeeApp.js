@@ -2985,7 +2985,8 @@ function ScanTabDriverQR({ companyId, session }) {
     setStep("processing");
     try {
       if (staticQr) {
-        const res = await validateAndBoardStatic({ ...staticQr, empNo: session.empNo, name: session.name });
+        // pinHash 는 로그인 때 세션에 들어온 값(2026-08-25 본인 확인) — 승객 입력 0.
+        const res = await validateAndBoardStatic({ ...staticQr, empNo: session.empNo, name: session.name, pinHash: session.pinHash });
         setAlreadyBoarded(!!res.alreadyBoarded);
       } else {
         await validateAndBoard({ tokenId: scannedToken, empNo: session.empNo, name: session.name });
