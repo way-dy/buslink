@@ -10,7 +10,7 @@ import {
 } from "firebase/firestore";
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { calcETA } from "../lib/gps";
-import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom, toLatLngPath } from "../lib/routeProgress";
+import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom, toLatLngPath, advanceProgress } from "../lib/routeProgress";
 import { computeStopEstimates, formatDelayLabel, formatPassengerEta, describeEtaSource } from "../lib/stopSchedule";
 import { useSmoothedEta } from "../lib/useSmoothedEta";
 import { computeRunEnded } from "../lib/runStatus";
@@ -793,6 +793,7 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
 
   const favorites = session.favorites || [];
   const lastBusProgressRef = useRef(null); // 경로 이탈 시 직전 유효 진행거리 유지
+  const progressRouteRef = useRef(null);   // 진행거리를 유지할 "한 운행"의 노선(바뀌면 리셋)
   // 정류장 탭 시 사용자가 직접 센터를 옮긴 상태 — true 면 GPS 갱신 자동 재센터를 억제
   // (탭한 정류장이 다음 GPS 틱에 버스↔내정류장 중점으로 즉시 밀려나던 결함 차단, #3).
   const userCenteredRef = useRef(false);
@@ -984,15 +985,17 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
   // 버스를 경로에 투영 — 이탈(수직거리>OFF_ROUTE_M) 시 직전 유효 진행거리 유지
   const busProj = (usePathProgress && mainBus)
     ? projectToPolyline({ lat: mainBus.lat, lng: mainBus.lng }, routePath, routeCum) : null;
-  let busProgress = null;
-  if (busProj) {
-    if (busProj.perpDist <= OFF_ROUTE_M) {
-      busProgress = busProj.progress;
-      lastBusProgressRef.current = busProgress;
-    } else {
-      busProgress = lastBusProgressRef.current; // 이탈 좌표 제외 — 직전 유효값 유지
-    }
+  // 🔴 진행거리 리셋 축은 **노선**이다 — 노선을 바꾸면 이전 노선 진행거리를 물려받으면
+  //    안 된다(이 수정 전부터 있던 결함). 렌더 중 ref 갱신은 이 파일의 기존 패턴과 같다.
+  if (progressRouteRef.current !== activeRouteId) {
+    progressRouteRef.current = activeRouteId;
+    lastBusProgressRef.current = null;
   }
+  // 🔴 역행 금지 — 판정은 정본 `routeProgress.advanceProgress`(2026-08-25 채드윅).
+  //    운행이 끝난 버스가 종점을 지나 되짚어 가면 progress 가 역행해 "지나온 회색/남은 파랑"
+  //    분할이 되감기고, 회색이던 구간이 다시 파래진다. 근거·실측은 그 함수 주석 참조.
+  const busProgress = advanceProgress(busProj, lastBusProgressRef.current, OFF_ROUTE_M);
+  lastBusProgressRef.current = busProgress;
   // 내 정류장도 경로에 투영해 진행거리 산출
   const myStopProgress = (usePathProgress && myStop)
     ? projectToPolyline({ lat: myStop.lat, lng: myStop.lng }, routePath, routeCum)?.progress

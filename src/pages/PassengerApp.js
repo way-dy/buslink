@@ -6,7 +6,7 @@ import { collection, onSnapshot, query, where, doc, getDoc, getDocs, orderBy } f
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { computeRouteWindow, isWithinRouteWindow, normalizeWindowOpts, nowMinutesKST } from "../lib/routeWindow";
 import { calcETA } from "../lib/gps";
-import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom } from "../lib/routeProgress";
+import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom, advanceProgress } from "../lib/routeProgress";
 import { computeStopEstimates, formatDelayLabel, formatPassengerEta, describeEtaSource } from "../lib/stopSchedule";
 import { useSmoothedEta } from "../lib/useSmoothedEta";
 import { useWakeTick } from "../lib/useWakeTick";
@@ -87,6 +87,7 @@ export default function PassengerApp() {
   const [showPicker, setShowPicker] = useState(false); // 노선 변경 모달 표시
   const [routeQuery, setRouteQuery] = useState("");    // 노선 검색어
   const lastBusProgressRef = useRef(null); // 경로 이탈 시 직전 유효 진행거리 유지
+  const progressRouteRef = useRef(null);   // 진행거리를 유지할 "한 운행"의 노선(바뀌면 리셋)
 
   // 백그라운드(전날부터 등)에서 깨어났을 때 onSnapshot 강제 재구독 — 모바일/PWA에서
   // 탭 frozen 후 stale 리스너 살아나는 듯하나 새 doc 변경 못 받음. wakeTick deps로
@@ -219,15 +220,15 @@ export default function PassengerApp() {
   // 버스를 경로에 투영 — 이탈(수직거리>OFF_ROUTE_M) 시 직전 유효 진행거리 유지
   const busProj = (usePathProgress && mainBus)
     ? projectToPolyline({ lat: mainBus.lat, lng: mainBus.lng }, routePath, routeCum) : null;
-  let busProgress = null;
-  if (busProj) {
-    if (busProj.perpDist <= OFF_ROUTE_M) {
-      busProgress = busProj.progress;
-      lastBusProgressRef.current = busProgress;
-    } else {
-      busProgress = lastBusProgressRef.current; // 이탈 좌표 제외
-    }
+  // 🔴 진행거리 리셋 축은 **노선**이다 — 노선을 바꾸면 이전 노선 진행거리를 물려받으면 안 된다.
+  if (progressRouteRef.current !== routeId) {
+    progressRouteRef.current = routeId;
+    lastBusProgressRef.current = null;
   }
+  // 🔴 역행 금지 — 판정은 정본 `routeProgress.advanceProgress`(2026-08-25 채드윅).
+  //    직원앱(`/p`)과 **같은 결함이 이 화면에도 있었다** — 한쪽만 고치면 다음 신고가 반대쪽에서 온다.
+  const busProgress = advanceProgress(busProj, lastBusProgressRef.current, OFF_ROUTE_M);
+  lastBusProgressRef.current = busProgress;
   const myStopProgress = (usePathProgress && myStopIdx !== null && stops[myStopIdx])
     ? projectToPolyline({ lat: stops[myStopIdx].lat, lng: stops[myStopIdx].lng }, routePath, routeCum)?.progress
     : null;

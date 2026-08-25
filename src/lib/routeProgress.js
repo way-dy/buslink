@@ -157,3 +157,31 @@ export function pathFrom(path, cumLen, progressM) {
   }
   return out;
 }
+
+/**
+ * 진행거리를 "한 운행 안에서 뒤로 가지 않게" 고른다 — 2026-08-25 채드윅(배시현) 신고.
+ *
+ * 신고: "운행이 끝나 다 회색으로 바뀌었는데 10분 20분 뒤에 갑자기 어느 부분에서만 파란색으로 뜬다.
+ *        기사가 운행 끝나고 저기 밑에 판교 쪽에 가 있으면."
+ *
+ * 🔴 근인 = **운행이 끝난 버스가 종점을 지나 차고지로 가며 노선 경로를 되짚는다.** 그 좌표는
+ *    경로 이탈이 `offRouteM` 안이라 유효 좌표로 먹혀 `progress` 가 **역행**하고,
+ *    "지나온 회색 / 남은 파랑" 분할(`pathUpTo`/`pathFrom`)이 되감겨 **회색이던 구간이 다시 파래진다**.
+ *    prod 실측 `[A] 방과후하교` 2026-08-24 — 19:03 종점 `54245m` → 19:10 `52483m` → 19:14 `47404m`
+ *    (= 6.8km 가 다시 파랑). 잔떨림 수준의 GPS 역행도 같은 식으로 잡힌다.
+ * 🔴 **버스는 노선을 되돌아가지 않는다** — 편도 전제이므로 역행은 언제나 표시 오류다.
+ * ⚠ 같은 노선을 하루 두 번 도는 순환 운행은 제품이 아직 지원하지 않는다(issues.md) —
+ *    그 경우 2회차가 완주 상태로 굳는다. 호출부는 **노선이 바뀌면 `prev` 를 리셋**해야 한다
+ *    (안 하면 이전 노선 진행거리를 새 노선이 물려받는다).
+ *
+ * @param {{progress:number, perpDist:number}|null} proj  projectToPolyline 결과
+ * @param {number|null} prev      직전까지 채택된 진행거리(없으면 null)
+ * @param {number} offRouteM      경로 이탈 임계(m)
+ * @returns {number|null} 채택할 진행거리
+ */
+export function advanceProgress(proj, prev, offRouteM) {
+  if (!proj) return prev == null ? null : prev;
+  if (proj.perpDist > offRouteM) return prev == null ? null : prev;   // 이탈 좌표는 버린다
+  if (prev != null && proj.progress < prev) return prev;              // 🔴 역행 금지
+  return proj.progress;
+}
