@@ -56,3 +56,26 @@ export function filterRoutesByKind(routes, kind) {
   if (!kind) return routes || [];
   return (routes || []).filter(r => routeKind(r) === kind);
 }
+
+/**
+ * 노선명을 "본문 + 특이사항 꼬리표"로 가른다 — 2026-08-25 최우석 요청("조기출근 같은 걸 진하게").
+ *
+ * 규칙 = **` - `(앞뒤 공백이 있는 하이픈) 마지막 것 뒤**를 꼬리표로 본다.
+ *   `04:39 고양일산 - 조기출근` → { head: "04:39 고양일산", note: "조기출근" }
+ *   `06:14 안산 (월)`          → { head: "06:14 안산 (월)", note: null }
+ *
+ * 🔴 **공백 없는 `-` 로 가르면 안 된다** — prod 실측(112개 노선)에서 `[H1-1] 등교…` 가
+ *    `[H1` + `1] 등교…` 로 쪼개진다. 공백 있는 형태는 112개 중 2개뿐이고
+ *    (`05:45 군포 - 출근`·`04:39 고양일산 - 조기출근`) 둘 다 실제 특이사항이라 오탐 0.
+ * 🔴 `/` 뒤는 **영문 병기**(29개)라 꼬리표가 아니다 — 가르지 않는다.
+ */
+export function splitRouteNameNote(name) {
+  const s = (name == null ? "" : String(name)).trim();
+  const i = s.lastIndexOf(" - ");
+  if (i < 0) return { head: s, note: null };
+  const head = s.slice(0, i).trim();
+  const note = s.slice(i + 3).trim();
+  // 한쪽이 비면 가르지 않는다(`이름 - ` 같은 입력 실수 방어).
+  if (!head || !note) return { head: s, note: null };
+  return { head, note };
+}

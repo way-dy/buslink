@@ -19,6 +19,7 @@ import { useWakeTick } from "../lib/useWakeTick";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
 import { forceReconnect } from "../lib/forceReconnect";
 import { compareRoutes, sortRoutes, homeRouteList } from "../lib/routeOrder";
+import { splitRouteNameNote } from "../lib/routeKind";
 
 import { validateAndBoard, createPassengerToken, resolveStaticDispatch, validateAndBoardStatic } from "../lib/boarding";
 import { hashPin } from "../lib/partner";
@@ -2235,8 +2236,17 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
                     이름이 길어져 한 줄 말줄임에 잘렸다. **글자 크기는 그대로 두고 줄바꿈**으로 푼다
                     (prod 실측 최대 44자 → 2줄에 들어간다. 더보기 탭이 없어도 다 보인다).
                     🔴 `wordBreak: keep-all` — 한국어를 낱말 중간에서 끊지 않는다. */}
+                {/* 특이사항 꼬리표(`… - 조기출근`)를 진하게(2026-08-25 최우석 요청·캡처).
+                    가르는 규칙과 그 근거는 `lib/routeKind.js splitRouteNameNote` 주석 참조 —
+                    공백 있는 ` - ` 만 본다(공백 없는 `-` 로 가르면 `[H1-1]` 이 깨진다). */}
                 <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-label)", marginBottom: 4, whiteSpace: "normal", wordBreak: "keep-all", lineHeight: 1.35 }}>
-                  {r.name}
+                  {(() => {
+                    const { head, note } = splitRouteNameNote(r.name);
+                    if (!note) return r.name;
+                    return (<>
+                      {head} - <span style={{ fontWeight: 900, color: "var(--color-primary-deep)" }}>{note}</span>
+                    </>);
+                  })()}
                 </div>
                 <div style={{ fontSize: 12, color: "var(--color-label-mute)" }}>
                   출발 {r.departTime} · 좌석 {r.seats || "–"}석
