@@ -109,6 +109,21 @@ function hhmmToTodayMillis(hhmm, now) {
   return d.getTime() + base * 60 * 1000;
 }
 
+// 통과한 정류장의 "출발 기준시각" — 이후 정류장 예상시각·지연을 전파하는 체인의 기준점.
+//   🔴 출발지(index 0)만 계획시각으로 클램프한다(2026-08-24 배시현 게시판 2건).
+//      노선 departTime 은 "이 시각에 출발한다"는 약속이라, 차가 30분 미리 와서 대기해도
+//      출발은 계획시각이다. 클램프 전에는 05:55(실도착)가 체인 기준점이 되어
+//      ① 이후 전 정류장 예상시각이 "지금+30초"(과거금지 가드)로 눌려 40분 내내 '곧 도착'
+//      ② 지연 배지가 '조기도착 30분'으로 전파(같은 줄 예상시각과 어긋남)
+//      가 동시에 났다. 도착 기록 자체(estimatedAt='05:55')와 그 정류장의 delaySec 은
+//      사실이므로 손대지 않는다 — 기사·관리자 화면은 '30분 일찍 도착'을 그대로 봐야 한다.
+//   ⚠ 중간 정류장은 클램프하지 않는다 — 거기서 실제로 일찍 떠날 수 있고, 그때는 예상을
+//      앞당겨 두는 쪽이 승객에게 안전하다(늦게 예측하면 버스를 놓친다).
+function departureBaseMs(idx, actualMs, plannedMs) {
+  if (idx !== 0 || plannedMs == null) return actualMs;
+  return Math.max(actualMs, plannedMs);
+}
+
 // 정류장 estimates 산출. 신호:
 //   stops: [{ id, lat, lng, order, offsetMin? }, ...]  (order asc)
 //   departTime: "HH:MM"
@@ -156,7 +171,7 @@ export function computeStopEstimates({
         : null;
       const actualMs = arrivals[s.id];
       if (plannedMs != null && actualMs != null) {
-        cumulativeDelaySec = Math.round((actualMs - plannedMs) / 1000);
+        cumulativeDelaySec = Math.round((departureBaseMs(lastIdxWithActual, actualMs, plannedMs) - plannedMs) / 1000);
         hasDelayRef = true;
       }
     }
@@ -328,8 +343,11 @@ export function computeStopEstimates({
       );
       const delaySec = (plannedMs != null)
         ? Math.round((actualMs - plannedMs) / 1000) : null;
-      prevEstMs = actualMs;
-      if (delaySec != null) prevDelaySec = delaySec;
+      // 체인 기준점은 "출발 기준시각" — 출발지는 계획시각 전에 출발하지 않는다(위 helper).
+      const baseMs = departureBaseMs(i, actualMs, plannedMs);
+      prevEstMs = baseMs;
+      // carry-forward 지연도 같은 기준 — 대기 시간이 '조기 30분'으로 흘러가지 않게.
+      if (plannedMs != null) prevDelaySec = Math.round((baseMs - plannedMs) / 1000);
       out.push({
         stopId: s.id, plannedAt, estimatedAt, delaySec,
         status: "arrived", source: gpsPassedIds.has(s.id) ? "gps" : "actual",

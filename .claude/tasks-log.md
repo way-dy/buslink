@@ -1,5 +1,12 @@
 # Tasks Log (옛 완료 누적·시간역순)
 
+### 2026-08-18 (tasks.md 에서 이관 · 2026-08-25)
+> **2026-08-18 후속 — 익명 3화면의 '실제 도착시각' 되살림(prod `main.55ab95e2.js` + CF `getRouteStopArrivals` 신설·way 승인)**: 아래 협력사 관제 건과 **같은 권한 벽**에 승객앱·직원앱·협력사 노선도가 걸려 있었다. `dispatches` 를 익명이 못 읽는데 세 화면이 직접 구독하다 거부를 빈 값으로 흡수 → **정류장 실제 도착시각·직전 정류장 인앱 알림·'운행 종료' 표기·노선도 ✓ 가 전부 조용히 죽어 있었다**(오늘만 해도 배차 27건에 도착 기록 83개가 쌓여 있는데 화면엔 0개). 신규 onCall 이 **도착 기록만** 돌려주고(기사명·차량번호 미포함) 클라는 정본 훅 `src/lib/useRouteStopArrivals.js` 하나로 받는다. rules 완화 0. 검증=익명 실호출 대조 11단언 + 실화면(대조군에서 `도착` 0개·✓ 0개 재현 → 배포 후 6개·60개).
+> ⚠ **다음 사람에게**: 폴링은 **버스가 달릴 때만** 60초다. 상시로 바꾸면 승객 250명 × 분 만큼 호출·읽기가 는다. 그리고 익명 화면이 새 컬렉션을 읽게 될 때는 **익명 클라로 한 번 실제로 읽어 보고** 붙일 것 — 거부는 에러 없이 빈 화면으로만 나타난다.
+- [x] **2026-07-20** 도착 감지 반경 회사 설정화 (prod `main.2415d9bb.js` + CF `pollDeviceVehicleGps` 배포·`--only functions:pollDeviceVehicleGps,hosting`, rules/indexes 변경 0, +419B, 신규 경고 0): way 요청 — 하드코딩 `STOP_ARRIVE_M=100`(gps.js·functions 2곳)을 관리자 조정 가능화. `companies/{cid}.stopArriveRadiusM`(미설정=100m 폴백). `gps.js startGPS({arriveRadiusM})`·DriverApp 회사 반경 로드→전달·`pollDeviceVehicleGps` 회사 반경 사용·AdminApp HistoryTab 슬라이더(50~300m)+저장+반경원 시각화. 기사앱은 운행 시작 시 캡처(값 변경=다음 운행부터). 상세 issues.md `[패턴]`.
+- [x] **2026-07-20** 🔴 노선도 뷰 "조기도착 수천분" 수정 (prod `main.517c8c12.js`·`--only hosting`, AdminApp 단독·stopSchedule 무변경, rules/indexes/CF 변경 0, 신규 경고 0): way 점검 — 타 날짜 stopArrivals(테스트 배차 잔존·복제)의 `actualAt` 을 오늘 도착으로 오인해 `delaySec` 이 며칠짜리(계획 오늘−실측 며칠전). prod 실데이터로 확정(07:50 판교역 actualAt=07-15→−7204분). `RouteTimelineCard` 에 운행 날짜 창 필터 + 과거 조회 `now` 앵커(`parseDateStartMs`). 격리 node 테스트로 수정전/후 검증. 부수: `scripts/clean_stale_arrivals.cjs`(잔존 정리·dry-run 완료·**--apply 미실행**). 상세 issues.md `[해결]`.
+- [x] **2026-07-13** device(유비칸 단말) GPS 운행 시간 창 게이트 (**prod 배포 `functions:pollDeviceVehicleGps`**, functions 단독·hosting 무관, rules/indexes/클라 변경 0): 사용자 지적="GPS 상시신호라 수신 시간 설정이 노선설정에서 가능해야". device 폴러가 매1분 24시간 돌며 시간대 창 없이 ①오늘배차 ②15분 신선도로만 판단 → 운행시간 밖 이동(퇴근 후 개인운전 등) 위치가 뜸. **해결(옵션1=기존 데이터 자동도출)**: 순수함수 `computeGpsWindow(meta)` — 노선 `departTime`+정류장 `offsetMin`에서 창 `[dep−30, (dep+max offset)+60]`(offsetMin 전무 시 기본 120분) 도출, 현재 KST 분이 창 밖이면 busin 조회·write skip. **`departTime` 미설정 노선=게이트 없음(기존 동작 보존)**. meta 는 게이트에서 1회 로드→도착감지 재사용(중복 제거). 상수 PRE30/POST60/DEFAULT120·자정 클램프. 운영자 통제점=노선 출발시각·정류장 offsetMin(별도 UI 0). 검증=격리 node 테스트 11케이스 통과·`node --check` 통과. **배포**: `firebase deploy --only functions:pollDeviceVehicleGps`. 상세 issues.md `[패턴]`.
+
 > tasks.md의 최근 7일을 제외한 누적 로그. 상세는 issues.md 패턴·redesign-log.md·git log.
 
 ## 2026-08-04~05 일부 세션 (tasks.md 에서 이관, 2026-08-06)

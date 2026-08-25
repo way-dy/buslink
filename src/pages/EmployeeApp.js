@@ -1542,7 +1542,13 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
                       // 붙였는데("전 정류장에 붙이면 글자가 뒤엉킨다" — 2026-06-26 #5), 그때는 컬럼이 좁고
                       // 이름이 시각과 같은 줄 폭을 다퉜다. 지금은 컬럼을 넓히고(78→86) 줄을 분리했으며,
                       // 🔴 겹침을 픽셀로 재는 하네스(headless_check_home_strip.cjs)로 잠갔다.
-                      const timeLabel = est && (est.estimatedAt || est.plannedAt);
+                      // 🔴 **계획시각 우선**(2026-08-24 배시현). 예전엔 estimatedAt 을 먼저 썼는데,
+                      //    ① 출발지는 차가 미리 와 있으면 그 도착시각(05:55)이 뜨고
+                      //    ② 이후 정류장은 '지금+30초'로 눌린 값이 떠서 화면을 새로고침할 때마다
+                      //       현재시각으로 바뀌었다("첫로그인시 정상시간, 내렸다 올리면 바뀜").
+                      //    이 줄은 노선표 역할이라 **정해진 시각**이 맞다 — 실시간 예상은 내 정류장
+                      //    카드와 노선 탭 정류장 목록이 맡는다. offsetMin 미설정 정류장만 폴백.
+                      const timeLabel = est && (est.plannedAt || est.estimatedAt);
 
                       const nameColor = isMyStop ? 'var(--color-primary)'
                         : isFirst ? 'var(--color-positive)'
@@ -2351,7 +2357,11 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
                                 {!arrived && e.plannedAt && e.estimatedAt && e.estimatedAt !== e.plannedAt && (
                                   <> · 예상 <span style={{ color: 'var(--color-primary-deep)', fontWeight:700 }}>{e.estimatedAt}</span></>
                                 )}
-                                {lab.label && lab.tone !== 'mute' && (
+                                {/* 🔴 조기도착(tone 'warn')은 이 탭에서 안 띄운다(2026-08-24 배시현).
+                                    차가 정시 출발 전에 미리 와서 대기하는 건 정상 운행인데 '조기도착'
+                                    으로 읽혀 탑승객이 버스를 놓친 줄 안다. 정류장 목록은 정보 전달용이라
+                                    계획·예상 시각만 남긴다. 지연은 승객이 알아야 하므로 유지. */}
+                                {lab.label && lab.tone !== 'mute' && lab.tone !== 'warn' && (
                                   <> · <span style={{ color: labColor, fontWeight:700 }}>{lab.label}</span></>
                                 )}
                               </div>
