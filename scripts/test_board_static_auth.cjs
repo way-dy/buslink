@@ -129,7 +129,9 @@ async function makeCaller() {
     if (res.code !== "functions/internal" && res.code !== "functions/not-found") instrumentAlive = true;
     // 🔴 "거부됐다"만 보면 안 된다 — 배차 없음(failed-precondition)으로 막혀도 거부는 거부다.
     //    본인 확인 단계에서 막혔는지 **문구**로 확정한다(그게 이 검사의 대상이다).
-    const denied = !res.ok && /등록되지 않은 사번|본인 확인이 필요|비활성화된 계정/.test(res.message);
+    // "앱을 새로 고친 뒤" = 레거시 pinHash 경로가 기한 만료로 닫힌 뒤의 거부 문구(2026-08-25 P2).
+    //   이 하네스는 **익명**으로 부르므로 신원 토큰이 없다 = 언제나 레거시 경로를 잰다.
+    const denied = !res.ok && /등록되지 않은 사번|본인 확인이 필요|비활성화된 계정|새로 고친 뒤/.test(res.message);
     ok(label, denied, res);
   }
   // 🔴 계측기가 살아 있었나 — 전 케이스가 not-found/internal 이면 아무것도 못 잰 것이지

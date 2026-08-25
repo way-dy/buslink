@@ -38,7 +38,18 @@
 4. 회귀 시 가설-재배포 금지 → 콘솔 Hosting 롤백 먼저, 재현은 localhost.
 
 ## 다음 할 일
-- [ ] 🔴 **승객 인증 구조 — 설계 확정 대기(2026-08-25)**: 미팅 요청 2건(고정 QR 우회 차단 · 초기 PIN `000000`)과 작업 중 발견한 **명부 전체 익명 열람**이 한 뿌리(=승객에게 Firebase 신원이 없다)에 걸려 있다. 초안 `.claude/passenger-auth-design-draft.md`(P0~P5 단계 · 결정 3건 · **way 확정 전 구현 금지**). 🔴 **P0(`boardStatic` 본인 확인)는 배포 완료**(배포 전 3건 성공 → 배포 후 3건 전부 거부, `scripts/test_board_static_auth.cjs` 9/9)이고 P1~P5 는 착수 전. ⚠ **초기 PIN `000000` 을 지금 켜면 안 된다** — 명부가 익명에게 열려 있어 사번 목록이 그대로 나오므로 전원 계정 개방과 같다(초안 결정 1: 거래처별 초기 PIN 지정으로 대체 추천).
+- [ ] 🔴 **승객 인증 구조 — P1·P2 구현 완료 · 🚧 배포 전(2026-08-25)**: 미팅 요청 2건(고정 QR 우회 차단 · 초기 PIN `000000`)과 작업 중 발견한 **명부 전체 익명 열람**이 한 뿌리(=승객에게 Firebase 신원이 없다)에 걸려 있다. 설계 `.claude/passenger-auth-design-draft.md`(P0~P5).
+  - [x] **P0 `boardStatic` 본인 확인** — 배포 완료(2026-08-25). 무작위 사번 탑승 차단.
+  - [x] **P1 승객 신원(커스텀 토큰)** — 코드 완료·**미배포**. CF `passengerLogin`/`passengerResume`/`passengerLogout`/`passengerMigrate`(`functions/index.js`) + 클라 `src/lib/passengerAuth.js` + `EmployeeApp`·`BoardingApp` 전환. PIN 대조가 **서버로 이동**했고 승객마다 uid(`passenger_{cid}_{empNo}`)·클레임이 생긴다.
+  - [x] **P2 탑승·PIN 을 클레임 기준으로** — 코드 완료·**미배포**. `boardStatic` 이 클라가 보낸 사번 대신 **토큰의 사번**을 쓴다. PIN 첫설정·변경은 CF `passengerSetPin`. 세션(localStorage)에서 `pinHash` 를 **뺐다**.
+  - [ ] **P3 PartnerApp 명부 CRUD → 포털 CF** (대) · [ ] **P4 `passengers` rules 신원으로 좁히기** · [ ] **P5 초기 PIN 정책**
+  - 🔴 **배포 순서 = functions 먼저, hosting 나중**. 반대로 하면 새 번들이 없는 CF 를 불러 전원 로그인 불가. `firebase deploy --only functions:passengerLogin,functions:passengerResume,functions:passengerLogout,functions:passengerMigrate,functions:passengerSetPin,functions:boardStatic` → `firebase deploy --only firestore:rules` → hosting.
+  - **배포 전 확인 완료**(`node scripts/verify_passenger_auth.cjs` · 읽기 전용): 서버/클라 해시식 일치 · **실명부 대조 통과**(REVIEW/112233) · 명부 258명 중 pinHash 없음 0·비활성 0 · 런타임 SA `1040702853398-compute@…` 가 `roles/iam.serviceAccountTokenCreator` **보유**(= `createCustomToken` signBlob 통과). 빌드 `main.08f82f42.js` 신규 경고 0.
+  - 🔴 **배포 직후 반드시 실측할 것**: ⓐ 승객 1명 실제 로그인 ⓑ 새로고침 후에도 로그인 유지(= `passengerResume` 동작) ⓒ 앱 안에서 고정 QR 1건 ⓓ `node scripts/test_board_static_auth.cjs`(거부 3종). ⓑ 가 깨지면 **매번 로그인**이 되므로 즉시 롤백.
+  - ⚠ **아직 안 닫힌 것**: 명부는 여전히 익명에게 열려 있다(`allow read: if isAuth()`) — P3·P4 전까지 `pinHash` 는 비밀이 아니다. 그래서 **전환 유예 경로 2개**를 `2026-09-30` 하드 기한으로 두었다(`PASSENGER_LEGACY_UNTIL`): ⓐ `passengerMigrate`(옛 기기 세션 승계 — 안 두면 로그인 중이던 124명이 한 번씩 튕긴다) ⓑ `boardStatic` 의 레거시 `pinHash` 경로(옛 번들 대응). **이 둘이 살아 있는 동안 '명부 읽은 사람이 대신 찍기'는 여전히 가능하다** — 기한이 지나면 자동으로 닫힌다.
+  - ⚠ **P4 와 함께 넣을 것**: CF 로그인 **시도 제한**. 지금은 없다(의도 — 명부가 열려 있어 CF 를 막아도 클라에서 같은 대조가 가능하다). 명부를 닫는 순간 `passengerLogin` 이 유일한 관문이 되므로 그때가 아니면 늦다.
+  - ⚠ **초기 PIN `000000` 은 P4 이후**. 지금 켜면 명부에서 사번 목록이 그대로 나오므로 전원 계정 개방과 같다(설계 결정 1: 거래처별 초기 PIN 지정으로 대체 추천).
+  - 📌 **별건 발견** — 기사 QR 경로(`/board?t=`)는 화면이 **비밀번호를 받아 놓고 쓰지 않는다**(`validateAndBoard` 는 PIN 을 검증하지 않는다). 사용자는 확인받는다고 믿는데 아니다. 고정 QR 과 달리 5분 만료 QR 뒤에 있어 위험은 낮지만 **문구가 거짓**이다. 고치려면 이 경로도 로그인으로 바꿔야 하는데 그러면 **명부에 없는 사람(게스트·신규 입사)이 막힌다** — 정책 판단 필요(way).
 
 - [ ] **📋 2026-08-25 미팅 2건 요구사항 — 점검 완료·착수 대기** (원문 `file/20260825/meeting1.txt`(신촌세브란스 도입)·`meeting2.txt`(채드윅) · 전사본 `meetings/2026-08-25_*.md`). 🔴 **같은 폴더 `summary.txt`(AI 생성 PRD)는 정본이 아니다** — 작성일자 2024.05.22 오기 · 회의에 없는 내용 4건(유비칸 `Hardware ID > Vehicle Number > Driver Name` 우선순위 재설계 · 사번 제한 "해제 확정" · DYCS 를 좌표계로 오해 · "노선 90개" 를 "정확도 90%" 로 오독). **판단은 원문·전사본으로**. 항목별 실측 상태:
   - [ ] 🔴 **고정 QR 로그인 우회 — 확인됨(코드 실측)**: 외부 카메라로 `/board?c=&v=` 를 열면 `BoardingApp` 이 **사번·이름만 받고 익명 인증으로 탑승 적재**한다. 서버 `functions/index.js:1451 boardStatic` 은 `request.auth`(익명이면 통과) 만 보고, `passengers/{empNo}` 조회는 **partnerCode 채우기용**이라 **없는 사번도 그대로 적재된다**(`:1467~1473`). 배시현 "아무거나 넣어도 탑승이 돼요" 는 정확한 신고. **최우선**.

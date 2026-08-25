@@ -91,6 +91,14 @@ service cloud.firestore {
         allow write: if isAuth(); // 협력사 포털 업로드 허용
       }
 
+      // ─── 승객 세션 승계표 (2026-08-25 P1) ─────────────
+      // CF passengerLogin/passengerResume 가 발급한 resumeToken 의 **해시만** 담긴다.
+      // 🔴 클라 접근 전면 차단 — 이 문서 ID 를 얻는 것은 곧 남의 계정 로그인이다.
+      //    읽기·쓰기 모두 Admin SDK(CF) 전용. nfcRejects 와 같은 패턴.
+      match /passengerSessions/{tokenHash} {
+        allow read, write: if false;
+      }
+
       match /boardings/{date}/list/{boardingId} {
         // 협력사 포털 탑승 통계 view용으로 isAuth() 허용 (2026-05-26).
         // passengers·fcmTokens와 동일 패턴 — companyId 경로 자체가 회사 분리,

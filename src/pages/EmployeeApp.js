@@ -22,7 +22,7 @@ import { compareRoutes, sortRoutes, homeRouteList } from "../lib/routeOrder";
 import { splitRouteNameNote } from "../lib/routeKind";
 
 import { validateAndBoard, createPassengerToken, resolveStaticDispatch, validateAndBoardStatic } from "../lib/boarding";
-import { hashPin } from "../lib/partner";
+import { passengerLogin, passengerResume, passengerMigrate, passengerSetPin, passengerLogout } from "../lib/passengerAuth";
 import QRCode from "qrcode";
 import { BusLinkLogo, StatusDot, Icon } from "../components/ui";
 import { computeRouteWindow, isWithinRouteWindow, normalizeWindowOpts, nowMinutesKST, describeRouteWindow } from "../lib/routeWindow";
@@ -271,7 +271,7 @@ export default function EmployeeApp() {
   // 저장용이라 companyId 분리 키는 없음(과거 단일테넌트 전제) — URL+hostname 만 활용.
   const companyId = resolveCompanyIdForAnon({ urlParam: getParam("c") });
   const [ready, setReady] = useState(false);
-  const [session, setSession] = useState(null);   // { empNo, name, dept, routeId, pinHash }
+  const [session, setSession] = useState(null);   // { empNo, name, dept, routeId, resumeToken, ... }
   const [tab, setTab] = useState("home");
   const [helpOpen, setHelpOpen] = useState(false);   // 도움말 시트(2026-08-10)
   const [activeNotice, setActiveNotice] = useState(null); // 공지 배너
@@ -288,10 +288,52 @@ export default function EmployeeApp() {
   // 뒤로가기 종료 확인(마운트 시 1회 발판 push, 인증/로딩 분기와 무관).
   useExitConfirm();
 
-  // 익명 인증
+  // ── 인증 부팅 (2026-08-25 P1) ─────────────────────────
+  // 저장된 세션이 있으면 **승객 신원**(커스텀 토큰)으로 복원하고, 없으면 익명으로 들어간다.
+  // 익명이 여전히 필요한 이유 = 로그인 화면도 회사·노선 read 규칙(`isAuth()`)을 탄다.
+  // ⚠ 승객앱은 `inMemoryPersistence` 라(firebase.js) **새로고침마다 여기를 다시 지난다** —
+  //   토큰은 사라지고 기기에 남는 건 `resumeToken` 뿐이다.
   useEffect(() => {
-    signInAnonymously(auth).finally(() => setReady(true));
-  }, []);
+    let alive = true;
+    const done = () => { if (alive) setReady(true); };
+    const stored = loadSession();
+    const mine = (stored && stored.companyId === companyId) ? stored : null;
+
+    // 복원에 실패하면 **익명으로 내려앉히고 로그인 화면**을 보여준다. 깨진 세션을 붙들면
+    // 로그인도 못 하고 화면도 안 뜨는 상태가 된다.
+    const fallback = (why) => {
+      console.warn("[승객 세션 복원 실패]", why);
+      clearSession();
+      if (alive) setSession(null);
+      return signInAnonymously(auth).catch(() => {});
+    };
+    const adopt = ({ resumeToken, passenger }) => {
+      if (!alive) return;
+      // 🔴 `routeId` 는 서버 값으로 덮지 않는다 — 승객이 앱에서 고른 **기준 노선**은
+      //    localStorage 에만 사는 값이고(RoutesTab.chooseRoute), 예전에는 새로고침해도
+      //    유지됐다. 복원 때마다 명부 값으로 되돌리면 "노선을 바꿔도 자꾸 돌아온다"가 된다.
+      const merged = { ...passenger, companyId, resumeToken };
+      if (mine && mine.routeId) merged.routeId = mine.routeId;
+      saveSession(merged);
+      setSession(merged);
+    };
+
+    let p;
+    if (mine && mine.resumeToken) {
+      p = passengerResume({ companyId, resumeToken: mine.resumeToken }).then(adopt).catch(e => fallback(e && e.message));
+    } else if (mine && mine.pinHash && mine.empNo) {
+      // 🔴 이 배포 **이전에** 로그인해 둔 기기 — 승계표가 없고 `pinHash` 만 있다.
+      //    한 번만 조용히 승계한다(서버에 하드 만료일 있음). 실패하면 다시 로그인받는다.
+      p = passengerMigrate({ companyId, empNo: mine.empNo, pinHash: mine.pinHash }).then(adopt).catch(e => fallback(e && e.message));
+    } else {
+      if (mine) clearSession();   // 신원 근거가 없는 세션은 쓸 수 없다
+      p = signInAnonymously(auth).catch(() => {});
+    }
+    p.finally(done);
+    return () => { alive = false; };
+    // companyId 는 URL·호스트에서 나오는 상수라 사실상 마운트 1회.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
 
   // 설치형 앱(PWA) 조건용 SW 등록 1회 — 브라우저가 URL+scope 로 dedupe 하므로
   // FCM SDK(lib/notifications)가 같은 파일을 다시 등록해도 충돌·이중등록 없음.
@@ -313,12 +355,8 @@ export default function EmployeeApp() {
     });
   }, []);
 
-  // 저장된 세션 복원
-  useEffect(() => {
-    if (!ready) return;
-    const s = loadSession();
-    if (s?.companyId === companyId) setSession(s);
-  }, [ready, companyId]);
+  // 세션 복원은 위 "인증 부팅"이 겸한다 — 신원(토큰) 없이 화면만 복원하면 탑승 CF 가
+  // 거부하므로 **둘을 갈라 놓으면 안 된다**(2026-08-25 P1).
 
   const handleLogin = (s) => {
     const data = { ...s, companyId };
@@ -327,9 +365,12 @@ export default function EmployeeApp() {
   };
 
   const handleLogout = () => {
+    const rt = session && session.resumeToken;
     clearSession();
     setSession(null);
     setTab("home");
+    // 서버에 남은 승계표까지 끊고 익명으로 되돌린다(공용 폰 대비). 실패해도 화면은 이미 로그아웃.
+    passengerLogout({ companyId, resumeToken: rt }).catch(() => {});
   };
 
   // 저장된 공지함 읽음 시각 복원
@@ -604,17 +645,13 @@ function LoginScreen({ companyId, onLogin }) {
     if (!empNo.trim() || pin.length < 4) return;
     setLoading(true); setError("");
     try {
-      const ref = doc(db, "companies", companyId, "passengers", empNo.trim());
-      const snap = await getDoc(ref);
-      if (!snap.exists()) throw new Error("등록되지 않은 사번입니다\n담당자에게 문의하세요");
-      const p = snap.data();
-      if (!p.active) throw new Error("비활성화된 계정입니다");
-      const hashed = await hashPin(pin);
-      if (p.pinHash !== hashed) throw new Error("PIN이 올바르지 않습니다");
-      // 최초 접속 여부 기록(2026-07-27) — 협력사 포털이 "아직 계정을 못 받은 사람"을
-      // 가려내는 유일한 신호다. 실패해도 로그인은 진행(best-effort).
-      updateDoc(ref, { lastLoginAt: serverTimestamp() }).catch(() => {});
-      onLogin({ empNo: p.empNo, name: p.name, dept: p.dept, routeId: p.routeId, partnerCode: p.partnerCode || null, partnerName: p.partnerName || null, pinHash: hashed, pinInitial: p.pinInitial, pinLocked: !!p.pinLocked, favorites: p.favorites || [] });
+      // 🔴 PIN 대조는 **서버**(CF `passengerLogin`)가 한다. 통과하면 승객 신원(커스텀 토큰)이
+      //    생기고, 그 뒤로 탑승 CF 는 클라가 보낸 사번이 아니라 토큰의 사번을 쓴다.
+      //    예전엔 여기서 명부 문서를 직접 읽어 해시를 비교했는데, 그 방식은 ⓐ 명부를 익명에게
+      //    열어 둬야 하고 ⓑ 서버가 "누가 로그인했는지"를 끝내 알 수 없었다.
+      //    `lastLoginAt` 기록도 서버가 겸한다.
+      const { resumeToken, passenger } = await passengerLogin({ companyId, empNo: empNo.trim(), pin });
+      onLogin({ ...passenger, resumeToken });
     } catch (e) {
       setError(e.message);
     }
@@ -690,13 +727,11 @@ function FirstPinSetup({ companyId, session, onDone, onLogout }) {
     if (newPin === "000000") return setError("너무 쉬운 비밀번호입니다. 다른 번호로 정해주세요");
     setLoading(true); setError("");
     try {
-      const newHash = await hashPin(newPin);
-      await updateDoc(doc(db, "companies", companyId, "passengers", session.empNo), {
-        pinHash: newHash, pinInitial: false,
-      });
-      onDone({ pinHash: newHash, pinInitial: false });
+      // 첫 설정이라 현재 PIN 을 다시 묻지 않는다 — 서버가 `pinInitial` 로 판정한다.
+      await passengerSetPin({ newPin });
+      onDone({ pinInitial: false });
     } catch (e) {
-      setError("저장에 실패했습니다. 잠시 후 다시 시도해주세요");
+      setError((e && e.message) || "저장에 실패했습니다. 잠시 후 다시 시도해주세요");
       setLoading(false);
     }
   };
@@ -2998,8 +3033,9 @@ function ScanTabDriverQR({ companyId, session }) {
     setStep("processing");
     try {
       if (staticQr) {
-        // pinHash 는 로그인 때 세션에 들어온 값(2026-08-25 본인 확인) — 승객 입력 0.
-        const res = await validateAndBoardStatic({ ...staticQr, empNo: session.empNo, name: session.name, pinHash: session.pinHash });
+        // 본인 확인은 **로그인 토큰**이 한다(2026-08-25 P2) — 승객 입력 0, 클라가 보내는
+        // 사번은 서버가 토큰 값으로 덮어쓴다.
+        const res = await validateAndBoardStatic({ ...staticQr, empNo: session.empNo, name: session.name });
         setAlreadyBoarded(!!res.alreadyBoarded);
       } else {
         await validateAndBoard({ tokenId: scannedToken, empNo: session.empNo, name: session.name });
@@ -3359,13 +3395,9 @@ function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate }
     if (newPin !== confirmPin) return setMsg({ type:"error", text:"새 PIN이 일치하지 않습니다" });
     setLoading(true); setMsg(null);
     try {
-      const oldHash = await hashPin(oldPin);
-      if (oldHash !== session.pinHash) throw new Error("현재 PIN이 올바르지 않습니다");
-      const newHash = await hashPin(newPin);
-      await updateDoc(doc(db, "companies", companyId, "passengers", session.empNo), {
-        pinHash: newHash, pinInitial: false,
-      });
-      onSessionUpdate({ pinHash: newHash, pinInitial: false });
+      // 현재 PIN 대조도 서버가 한다 — 세션에 `pinHash` 를 들고 다니지 않는다(2026-08-25 P2).
+      await passengerSetPin({ currentPin: oldPin, newPin });
+      onSessionUpdate({ pinInitial: false });
       setMsg({ type:"success", text:"PIN이 변경되었습니다" });
       setShowPinChange(false);
       setOldPin(""); setNewPin(""); setConfirmPin("");

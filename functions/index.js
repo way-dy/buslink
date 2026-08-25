@@ -1445,6 +1445,264 @@ exports.resolveStaticBoarding = onCall(async (request) => {
   return await resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRouteId);
 });
 
+// ════════════════════════════════════════════════════════
+// 승객 인증 — 커스텀 토큰 (2026-08-25 설계 P1·P2)
+//
+// 뿌리: 승객 로그인은 Firebase Auth 가 아니었다. 앱이 `passengers/{empNo}` 를 **클라에서
+//   직접 읽어** `pinHash` 를 비교하고 결과를 localStorage 에 넣는 게 전부라, 서버 입장에서
+//   모든 승객은 **익명 사용자 한 종류**였다. 그래서 규칙에 "본인만"을 쓸 수단이 없었고
+//   (`passengers: allow read: if isAuth()`), `boardStatic` 도 클라가 보낸 `pinHash` 를
+//   대조하는 것 말고는 사람을 특정할 방법이 없었다.
+// 여기서 하는 일: PIN 대조를 **서버(Admin SDK)로 옮기고** 통과하면 커스텀 토큰을 발급한다.
+//   승객마다 uid(`passenger_{cid}_{empNo}`)와 클레임(companyId·empNo·partnerCode)이 생긴다.
+//   → `boardStatic` 이 클라가 보낸 사번이 아니라 **토큰의 사번**을 쓴다(위조 불가).
+//   → P4 에서 `passengers` read 를 신원 기준으로 좁힐 수 있게 된다(이 단계에선 규칙 불변).
+//
+// ⚠ 지속성: 승객앱(`/p`·`/board`)은 `inMemoryPersistence` 다(firebase.js — 익명 로그인이
+//   관리자 세션을 덮어쓰던 2026-07-09 결함 방지). 즉 **새로고침하면 토큰이 사라진다**.
+//   그래서 로그인 시 `resumeToken`(랜덤 32B)을 함께 발급해 기기에 보관하고, 부팅 때
+//   `passengerResume` 로 새 커스텀 토큰을 받는다. 서버엔 **해시만** 저장한다
+//   (`companies/{cid}/passengerSessions/{sha256(resumeToken)}` · 클라 접근 전면 차단).
+//
+// 🔴 배포 전 IAM 확인: `createCustomToken` 은 런타임 서비스계정에
+//   `roles/iam.serviceAccountTokenCreator` 가 없으면 `iam.serviceAccounts.signBlob` 거부로
+//   죽는다(v2 기본 SA = `{projectNumber}-compute@developer.gserviceaccount.com`).
+//   절차는 `.claude/issues.md` 참조. 배포 후 **첫 로그인 1건을 반드시 실측**할 것.
+// 🔴 시도 제한 없음(의도) — 지금은 명부가 익명에게 열려 있어 CF 를 막아도 클라에서 같은
+//   대조가 가능하다(막아 봐야 아무것도 못 얻는다). **P4 에서 명부를 닫는 순간 여기가
+//   유일한 관문이 되므로 그때 시도 제한을 함께 넣어야 한다**(tasks.md 기재).
+// ════════════════════════════════════════════════════════
+const crypto = require("crypto");
+
+// 클라 `hashPin`(src/lib/partner.js)과 **같은 값이어야 한다**. 한쪽만 바꾸면 전원 로그인 불가.
+const PASSENGER_PIN_SALT = "buslink_salt_2026";
+
+// 🔴 **전환 유예 하드 기한**. 두 곳이 같이 쓴다: ⓐ `passengerMigrate`(옛 기기 세션 승계)
+//    ⓑ `boardStatic` 의 레거시 `pinHash` 경로. 둘 다 `pinHash` 를 증거로 받는데 그 값은
+//    P4 전까지 **익명 누구나 명부에서 읽을 수 있다** — 즉 증거가 아니다. 유예를 무기한
+//    두면 P2·P4 가 무의미해지므로 날짜를 박아 스스로 닫히게 한다. 기한이 지나면 승객은
+//    PIN 을 다시 입력하고(승계), 옛 번들은 화면을 새로 고치면 된다(탑승).
+const PASSENGER_LEGACY_UNTIL = "2026-09-30";
+
+// 오늘(KST) 이 유예 기한 안인가.
+function withinLegacyWindow() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date()) <= PASSENGER_LEGACY_UNTIL;
+}
+
+function hashPinAdmin(pin) {
+  return crypto.createHash("sha256").update(String(pin) + PASSENGER_PIN_SALT).digest("hex");
+}
+
+function passengerUidOf(companyId, empNo) {
+  return `passenger_${companyId}_${empNo}`;
+}
+
+function resumeDocId(resumeToken) {
+  return crypto.createHash("sha256").update(String(resumeToken)).digest("hex");
+}
+
+// 승객 문서 → 앱이 세션으로 들고 다니는 값. 🔴 `pinHash` 는 **넣지 않는다**(P2 목표).
+// empNo 는 필드가 아니라 **문서 ID** 를 정본으로 쓴다 — 실측상 명부 258건 중 1건은
+// `empNo` 필드가 없다(2026-08-25 `inspect_passenger_auth_fields.cjs`). 필드를 믿으면
+// 그 사람만 조용히 세션이 깨진다.
+function passengerProfileOf(snap) {
+  const p = snap.data() || {};
+  return {
+    empNo: snap.id,
+    name: p.name || "",
+    dept: p.dept || "",
+    routeId: p.routeId || null,
+    partnerCode: p.partnerCode || null,
+    partnerName: p.partnerName || null,
+    pinInitial: !!p.pinInitial,
+    pinLocked: !!p.pinLocked,
+    favorites: Array.isArray(p.favorites) ? p.favorites : [],
+  };
+}
+
+// 명부 조회 + 계정 상태 확인. 로그인·승계·PIN 변경이 공유한다.
+// `!active` 로 판정하는 이유 = 기존 클라 로그인(`if (!p.active) throw`)과 **한 글자도
+// 다르면 안 되기 때문**이다. `active === false` 로 완화하면 필드가 없는 문서가 새로
+// 통과해 버려 "예전엔 못 들어오던 사람이 들어온다".
+async function loadActivePassenger(db, companyId, empNo) {
+  const snap = await db
+    .collection("companies").doc(companyId)
+    .collection("passengers").doc(String(empNo).trim()).get();
+  if (!snap.exists) {
+    throw new HttpsError("permission-denied", "등록되지 않은 사번입니다\n담당자에게 문의하세요");
+  }
+  if (!(snap.data() || {}).active) {
+    throw new HttpsError("permission-denied", "비활성화된 계정입니다\n담당자에게 문의하세요");
+  }
+  return snap;
+}
+
+// 커스텀 토큰 + (필요하면) 새 resumeToken 발급.
+// reuseToken 이 오면 재발급하지 않고 `lastUsedAt` 만 갱신한다 — 탭을 여러 개 띄워 두면
+// 부팅이 동시에 여러 번 일어나는데, 매번 돌려 끼우면 서로의 토큰을 무효화한다.
+async function mintPassengerSession(db, companyId, snap, reuseToken) {
+  const profile = passengerProfileOf(snap);
+  let token;
+  try {
+    token = await admin.auth().createCustomToken(passengerUidOf(companyId, profile.empNo), {
+      role: "passenger",
+      companyId,
+      empNo: profile.empNo,
+      // 🔴 클레임에 null 을 넣으면 토큰 생성이 거부된다 — 없으면 빈 문자열.
+      partnerCode: profile.partnerCode || "",
+    });
+  } catch (e) {
+    // 거의 항상 IAM(signBlob) 이다. 사용자에게는 재시도해도 소용없다는 걸 알려야 한다.
+    console.error("[승객인증] 커스텀 토큰 발급 실패 — IAM(serviceAccountTokenCreator) 확인:", e.message);
+    throw new HttpsError("internal", "로그인 서버 설정 오류입니다\n담당자에게 문의하세요");
+  }
+  const resumeToken = reuseToken || crypto.randomBytes(32).toString("hex");
+  const ref = db.collection("companies").doc(companyId)
+    .collection("passengerSessions").doc(resumeDocId(resumeToken));
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  if (reuseToken) {
+    await ref.set({ lastUsedAt: now }, { merge: true });
+  } else {
+    await ref.set({ companyId, empNo: profile.empNo, createdAt: now, lastUsedAt: now });
+  }
+  return { token, resumeToken, passenger: profile };
+}
+
+// passengerLogin({ companyId, empNo, pin }) — 사번+PIN 대조 후 승객 신원 발급.
+// 반환: { token, resumeToken, passenger }.
+exports.passengerLogin = onCall(async (request) => {
+  const { companyId, empNo, pin } = request.data || {};
+  if (!companyId || typeof companyId !== "string") {
+    throw new HttpsError("invalid-argument", "companyId가 필요합니다");
+  }
+  if (!empNo || !String(empNo).trim()) {
+    throw new HttpsError("invalid-argument", "사번을 입력해주세요");
+  }
+  if (!pin || String(pin).length < 4) {
+    throw new HttpsError("invalid-argument", "PIN을 입력해주세요");
+  }
+
+  const db = admin.firestore();
+  const snap = await loadActivePassenger(db, companyId, empNo);
+  if ((snap.data() || {}).pinHash !== hashPinAdmin(pin)) {
+    console.warn(`[승객인증:거부] PIN 불일치 cid=${companyId} emp=${snap.id}`);
+    throw new HttpsError("permission-denied", "PIN이 올바르지 않습니다");
+  }
+
+  // 최초 접속 기록 — 협력사 포털이 "아직 계정을 못 받은 사람"을 가려내는 유일한 신호다.
+  // 실패해도 로그인은 진행(best-effort, 기존 클라 동작 보존).
+  snap.ref.update({ lastLoginAt: admin.firestore.FieldValue.serverTimestamp() }).catch(() => {});
+
+  return await mintPassengerSession(db, companyId, snap, null);
+});
+
+// passengerResume({ companyId, resumeToken }) — 기기에 보관한 승계표로 세션 재발급.
+// 명부를 다시 읽으므로 **퇴사·비활성 처리는 다음 부팅에 즉시 반영**된다.
+exports.passengerResume = onCall(async (request) => {
+  const { companyId, resumeToken } = request.data || {};
+  if (!companyId || !resumeToken || typeof resumeToken !== "string") {
+    throw new HttpsError("invalid-argument", "다시 로그인해주세요");
+  }
+
+  const db = admin.firestore();
+  const sessRef = db.collection("companies").doc(companyId)
+    .collection("passengerSessions").doc(resumeDocId(resumeToken));
+  const sess = await sessRef.get();
+  if (!sess.exists) {
+    throw new HttpsError("unauthenticated", "다시 로그인해주세요");
+  }
+  const empNo = (sess.data() || {}).empNo;
+  if (!empNo) {
+    await sessRef.delete().catch(() => {});
+    throw new HttpsError("unauthenticated", "다시 로그인해주세요");
+  }
+
+  let snap;
+  try {
+    snap = await loadActivePassenger(db, companyId, empNo);
+  } catch (e) {
+    // 명부에서 빠졌거나 비활성 → 승계표도 같이 버린다(되살아나지 않게).
+    await sessRef.delete().catch(() => {});
+    throw e;
+  }
+  return await mintPassengerSession(db, companyId, snap, resumeToken);
+});
+
+// passengerLogout({ companyId, resumeToken }) — 승계표를 서버에서 없앤다.
+// 기기 localStorage 만 지우면 그 값이 어딘가에 복사돼 있을 때 계속 살아 있다. 공용 폰에서
+// 로그아웃하는 상황이 실제 용례라 서버에서도 끊는다. 실패해도 클라는 로그아웃을 진행한다.
+exports.passengerLogout = onCall(async (request) => {
+  const { companyId, resumeToken } = request.data || {};
+  if (!companyId || !resumeToken) return { ok: true };
+  await admin.firestore()
+    .collection("companies").doc(companyId)
+    .collection("passengerSessions").doc(resumeDocId(resumeToken))
+    .delete().catch(() => {});
+  return { ok: true };
+});
+
+// passengerMigrate({ companyId, empNo, pinHash }) — 🔴 **한시적 전환 통로**.
+// 이 배포 이전에 로그인해 둔 기기는 localStorage 에 `pinHash` 만 들고 있다. 그걸 그대로
+// 승계표로 바꿔 주지 않으면 **로그인해 있던 사람 전원이 한 번씩 튕긴다**(실측 124명이
+// lastLoginAt 보유). 증거로 받는 `pinHash` 는 지금도 익명 누구나 명부에서 읽을 수 있으므로
+// 이 통로가 **새로 여는 구멍은 없다** — 다만 P4(명부 닫기) 전에 반드시 사라져야 한다.
+// 그래서 하드 만료일을 박아 둔다. 만료 후에는 그냥 PIN 을 다시 받는다.
+exports.passengerMigrate = onCall(async (request) => {
+  const { companyId, empNo, pinHash } = request.data || {};
+  if (!companyId || !empNo || !pinHash) {
+    throw new HttpsError("invalid-argument", "다시 로그인해주세요");
+  }
+  if (!withinLegacyWindow()) {
+    console.warn(`[승객인증] 만료된 레거시 승계 시도 cid=${companyId} emp=${empNo} (until=${PASSENGER_LEGACY_UNTIL})`);
+    throw new HttpsError("failed-precondition", "보안 정책이 바뀌었습니다\nPIN을 다시 입력해주세요");
+  }
+
+  const db = admin.firestore();
+  const snap = await loadActivePassenger(db, companyId, empNo);
+  if ((snap.data() || {}).pinHash !== String(pinHash)) {
+    throw new HttpsError("permission-denied", "다시 로그인해주세요");
+  }
+  console.log(`[승객인증] 레거시 세션 승계 cid=${companyId} emp=${snap.id}`);
+  return await mintPassengerSession(db, companyId, snap, null);
+});
+
+// passengerSetPin({ currentPin, newPin }) — 본인 PIN 설정·변경. 신원은 **토큰에서만** 읽는다.
+// 첫 설정(pinInitial=true)은 현재 PIN 을 다시 묻지 않는다 — 방금 그 값으로 로그인해 왔다.
+// 공용 계정(pinLocked)은 거부: 여러 명이 같은 계정을 쓰므로 한 사람이 바꾸면 전원이 막힌다
+// (2026-07-21 사고).
+exports.passengerSetPin = onCall(async (request) => {
+  const claims = (request.auth && request.auth.token) || {};
+  if (claims.role !== "passenger" || !claims.companyId || !claims.empNo) {
+    throw new HttpsError("unauthenticated", "다시 로그인해주세요");
+  }
+  const { currentPin, newPin } = request.data || {};
+  if (!newPin || String(newPin).length < 4) {
+    throw new HttpsError("invalid-argument", "비밀번호는 4자리 이상이어야 합니다");
+  }
+  if (String(newPin) === "000000") {
+    throw new HttpsError("invalid-argument", "너무 쉬운 비밀번호입니다. 다른 번호로 정해주세요");
+  }
+
+  const db = admin.firestore();
+  const snap = await loadActivePassenger(db, claims.companyId, claims.empNo);
+  const p = snap.data() || {};
+  if (p.pinLocked) {
+    throw new HttpsError("failed-precondition", "공용으로 사용하는 계정이라 PIN을 변경할 수 없습니다");
+  }
+  if (!p.pinInitial) {
+    if (!currentPin || p.pinHash !== hashPinAdmin(currentPin)) {
+      throw new HttpsError("permission-denied", "현재 PIN이 올바르지 않습니다");
+    }
+  }
+
+  await snap.ref.update({
+    pinHash: hashPinAdmin(newPin),
+    pinInitial: false,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  return { ok: true, pinInitial: false };
+});
+
 // boardStatic({ companyId, vehicleId, empNo, name }) — 배차 재해석 + 멱등 boarding 생성.
 // 서버가 배차를 다시 해석(클라 값 불신). 멱등 doc id = `${empNo}__${vehicleId}`.
 // 반환: { ok:true, alreadyBoarded, routeName, vehicleNo, dispatchDate }.
@@ -1452,10 +1710,18 @@ exports.boardStatic = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
 
   const { companyId, vehicleId, empNo, name, selectedRouteId, pinHash } = request.data || {};
-  if (!companyId || !vehicleId || !empNo || !String(empNo).trim()) {
+  if (!companyId || !vehicleId) {
+    throw new HttpsError("invalid-argument", "차량 정보가 없습니다");
+  }
+  // 🔴 사번은 **토큰이 있으면 토큰 것**을 쓴다 — 클라가 보낸 값은 위조 가능하다.
+  //    (2026-08-25 P2. 승객 신원은 passengerLogin/Resume 이 발급한 커스텀 토큰.)
+  const claims = (request.auth && request.auth.token) || {};
+  const claimEmpNo = (claims.role === "passenger" && claims.companyId === companyId)
+    ? String(claims.empNo || "").trim() : "";
+  const trimmedEmpNo = claimEmpNo || String(empNo || "").trim();
+  if (!trimmedEmpNo) {
     throw new HttpsError("invalid-argument", "사번을 입력해주세요");
   }
-  const trimmedEmpNo = String(empNo).trim();
 
   const db = admin.firestore();
 
@@ -1480,9 +1746,20 @@ exports.boardStatic = onCall(async (request) => {
   if (passenger.active === false) {
     throw new HttpsError("permission-denied", "비활성화된 계정입니다\n담당자에게 문의하세요");
   }
-  if (!pinHash || passenger.pinHash !== pinHash) {
-    console.warn(`[boardStatic:거부] 본인 확인 실패 cid=${companyId} emp=${trimmedEmpNo} hash=${pinHash ? "불일치" : "없음"}`);
-    throw new HttpsError("permission-denied", "본인 확인이 필요합니다\n앱에서 로그인한 뒤 다시 찍어주세요");
+  // 신원 토큰이 있으면 그 자체가 본인 확인이다(위 trimmedEmpNo 가 토큰 값).
+  // ⚠ 아래 `pinHash` 경로는 **전환 유예**다 — 이 배포 전 번들을 열어 둔 기기가 화면을
+  //   새로 고치기 전까지만 필요하다. 🔴 `pinHash` 는 명부에서 누구나 읽을 수 있어 증거가
+  //   못 된다(남의 사번으로 대신 찍기가 이 경로로 남아 있다) — 그래서 기한을 박아 뒀다.
+  if (!claimEmpNo) {
+    if (!withinLegacyWindow()) {
+      console.warn(`[boardStatic:거부] 만료된 레거시 경로 cid=${companyId} emp=${trimmedEmpNo}`);
+      throw new HttpsError("failed-precondition", "앱을 새로 고친 뒤 다시 찍어주세요");
+    }
+    if (!pinHash || passenger.pinHash !== pinHash) {
+      console.warn(`[boardStatic:거부] 본인 확인 실패 cid=${companyId} emp=${trimmedEmpNo} hash=${pinHash ? "불일치" : "없음"}`);
+      throw new HttpsError("permission-denied", "본인 확인이 필요합니다\n앱에서 로그인한 뒤 다시 찍어주세요");
+    }
+    console.log(`[boardStatic] 레거시 pinHash 경로 cid=${companyId} emp=${trimmedEmpNo}`);
   }
 
   // 오늘 배차 해석(비면 failed-precondition) — routeId/routeName/driverId/vehicleNo 확보.

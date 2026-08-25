@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { validateAndBoard, validateAndBoardStatic } from "../lib/boarding";
-import { hashPin } from "../lib/partner";
+import { passengerLogin, passengerResume, passengerMigrate } from "../lib/passengerAuth";
 import { auth } from "../firebase";
 import { signInAnonymously } from "firebase/auth";
 import { Icon } from "../components/ui";
@@ -40,7 +40,7 @@ export default function BoardingApp() {
   // 이 기기에 기억된 사람(있으면 사번·PIN 입력 없이 버튼 한 번). 회사가 다르면 무시.
   const [remembered, setRemembered] = useState(() => {
     const r = loadRemembered();
-    return (r && r.empNo && r.pinHash && (!cId || r.companyId === cId)) ? r : null;
+    return (r && r.empNo && (r.resumeToken || r.pinHash) && (!cId || r.companyId === cId)) ? r : null;
   });
   const [empNo, setEmpNo] = useState("");
   const [name, setName] = useState("");
@@ -56,15 +56,42 @@ export default function BoardingApp() {
     }
   }, [tokenId, isStatic]);
 
-  // 익명 인증 (2026-05-26) — boardings create rule(`isAuth()`) 통과용. 미인증 시 탑승 저장 차단됨.
-  // EmployeeApp·PassengerApp·PartnerApp 패턴 일관. BoardingApp만 누락되어 있어 QR 탑승이 통계에 안 잡히는 결함 보정.
+  // ── 인증 부팅 ────────────────────────────────────────────────────────────
+  // 기억된 사람이 있으면 **승객 신원**(커스텀 토큰)으로 복원한다(2026-08-25 P1) — 고정 QR
+  // 탑승은 이제 서버가 토큰의 사번으로 적재하므로 익명으로는 못 찍는다.
+  // 기억이 없으면 익명(2026-05-26) — 기사 QR(`?t=`) 경로의 `boardings` create 규칙(`isAuth()`)
+  // 통과용이다. 미인증 시 탑승 저장이 차단된다.
   useEffect(() => {
-    signInAnonymously(auth)
-      .then(() => setAuthReady(true))
-      .catch(e => {
-        console.warn("[BoardingApp] 익명 인증 실패:", e?.message);
-        setAuthReady(true); // 인증 실패해도 사용자가 시도할 수 있게 함(에러는 boarding 시점에 표면).
-      });
+    let alive = true;
+    const done = () => { if (alive) setAuthReady(true); };
+    // 인증 실패해도 사용자가 시도는 할 수 있게 한다(에러는 boarding 시점에 표면).
+    const anon = () => signInAnonymously(auth).catch(e => console.warn("[BoardingApp] 익명 인증 실패:", e?.message));
+    const drop = (why) => {
+      console.warn("[BoardingApp] 세션 복원 실패:", why);
+      clearRemembered();
+      if (alive) setRemembered(null);
+      return anon();
+    };
+    const r = remembered;
+    let p;
+    if (isStatic && r && r.resumeToken) {
+      p = passengerResume({ companyId: cId, resumeToken: r.resumeToken }).catch(e => drop(e && e.message));
+    } else if (isStatic && r && r.pinHash && r.empNo) {
+      // 🔴 이 배포 이전에 기억된 기기 — 승계표가 없다. 한 번만 승계한다(서버에 만료일 있음).
+      p = passengerMigrate({ companyId: cId, empNo: r.empNo, pinHash: r.pinHash })
+        .then(({ resumeToken }) => {
+          if (!alive) return;
+          const nr = { companyId: cId, empNo: r.empNo, name: r.name || "", resumeToken };
+          saveRemembered(nr); setRemembered(nr);
+        })
+        .catch(e => drop(e && e.message));
+    } else {
+      p = anon();
+    }
+    p.finally(done);
+    return () => { alive = false; };
+    // 마운트 1회 — remembered 는 초기값만 본다(복원 결과로 갱신되면 재실행하면 안 된다).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleBoard = async () => {
@@ -80,16 +107,20 @@ export default function BoardingApp() {
     }
     setStep(STEPS.LOADING);
     try {
-      // 🔴 서버가 명부의 pinHash 와 대조한다 — 여기서 만든 해시가 곧 본인 확인 근거다.
-      const proof = remembered ? remembered.pinHash : await hashPin(pin);
-      const res = isStatic
-        ? await validateAndBoardStatic({ companyId: cId, vehicleId: vId, empNo: useEmpNo, name: useName, pinHash: proof })
-        : await validateAndBoard({ tokenId, empNo: useEmpNo, name: useName });
-      // 확인에 성공한 뒤에만 기억한다(틀린 값을 굳혀 두면 매번 실패한다).
+      // 🔴 본인 확인 = **로그인**이다(2026-08-25 P2). 기억된 기기는 부팅 때 이미 신원을
+      //    복원했고, 처음 찍는 사람은 여기서 사번+PIN 으로 로그인한다. 예전엔 클라가 만든
+      //    `pinHash` 를 증거로 보냈는데 그 값은 명부에서 누구나 읽을 수 있어 증거가 못 됐다.
       if (isStatic && !remembered) {
-        const r = { companyId: cId, empNo: useEmpNo, name: useName, pinHash: proof };
+        const issued = await passengerLogin({ companyId: cId, empNo: useEmpNo, pin });
+        // 로그인 성공이 곧 본인 확인 성공이다 → **여기서** 기억한다. 탑승이 뒤에서
+        // 실패해도(그 시간에 배차가 없다 등) 신원은 맞았으므로 PIN 을 다시 칠 이유가 없다.
+        // (틀린 값을 굳혀 두면 매번 실패하므로 로그인 전에는 기억하지 않는다.)
+        const r = { companyId: cId, empNo: useEmpNo, name: useName, resumeToken: issued.resumeToken };
         saveRemembered(r); setRemembered(r);
       }
+      const res = isStatic
+        ? await validateAndBoardStatic({ companyId: cId, vehicleId: vId, empNo: useEmpNo, name: useName })
+        : await validateAndBoard({ tokenId, empNo: useEmpNo, name: useName });
       setResult(res);
       setStep(STEPS.SUCCESS);
       // 진동 피드백 (모바일)
@@ -97,7 +128,7 @@ export default function BoardingApp() {
     } catch (e) {
       // 기억해 둔 사람으로 본인 확인이 깨지면(앱에서 PIN 을 바꿨거나 명부에서 빠짐)
       // 그 값을 붙들고 있으면 **영원히 실패**한다 → 지우고 다시 입력받는다.
-      if (remembered && /본인 확인|등록되지 않은|비활성화/.test(e.message || "")) {
+      if (remembered && /본인 확인|등록되지 않은|비활성화|다시 로그인|보안 정책/.test(e.message || "")) {
         clearRemembered(); setRemembered(null); setEmpNo(""); setPin("");
       }
       setErrMsg(e.message);
