@@ -4,7 +4,7 @@ import {
   importEmployees, downloadSampleExcel, reissuePins
 } from "../lib/partner";
 import { partnerRouteOptions, partnerOpsRoutes } from "../lib/partnerAccess";
-import { seatUsage } from "../lib/routeOrder";
+import { seatUsage, sortRoutes } from "../lib/routeOrder";
 import QRCode from "qrcode";
 import { buildAccountCardsHtml, buildPassengerLoginUrl, openPrintWindow } from "../lib/accountCards";
 import { normalizeNfcUid, isValidNfcUid, formatNfcUid, isWebNfcSupported, createTagCooldown } from "../lib/nfc";
@@ -107,7 +107,12 @@ export default function PartnerApp() {
       const data = await validatePartnerCode(code.trim());
       setCodeData(data);
       const snap = await getDocs(collection(db, "companies", data.companyId, "routes"));
-      setRoutes(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      // 🔴 관리자 노선 관리의 ▲▼ 순서(`routes.order`)를 여기서 한 번만 적용한다(2026-08-26
+      //    게시판 DqF7nony). 이 포털만 정렬 없이 받아 **Firestore 문서 ID 순**으로 쓰고 있었다
+      //    — 관리자·승객앱·직원앱은 전부 `lib/routeOrder` 를 따르는데 여기만 빠져 있었다.
+      //    이 배열이 노선 드롭다운·승객 관리·탑승 통계·운영 포털 노선도의 공통 원본이라
+      //    여기서 정렬해 두면 아래 화면들은 입력 순서를 그대로 물려받는다.
+      setRoutes(sortRoutes(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
       setStep(STEPS.MAIN);
     } catch (e) { setError(e.message); }
     setLoading(false);
@@ -1792,7 +1797,11 @@ function OperationsMode({ codeData, code, routes }) {
         });
       }
     });
-    list.sort((a, b) => (a.departTime || "").localeCompare(b.departTime || ""));
+    // 🔴 여기서 다시 정렬하지 않는다(2026-08-26 게시판 DqF7nony). 종전엔 **출발시각만으로**
+    //    다시 줄을 세워, 관리자가 정한 순서를 덮어쓰고 같은 시각대 노선을 뒤섞었다
+    //    (실측: 관리자 9~15번 = 시청광화문 1·2·3 → 불광 1·2·3 인데, 08:15/08:20/08:25 와
+    //     08:20/08:30 이 맞물려 포털에선 `시청광화문 2 → 불광 1 → 시청광화문 3` 로 갈렸다).
+    //    위 `routes` 가 이미 관리자 순서로 정렬돼 있고 이 forEach 가 그 순서로 돈다.
     return list;
   }, [routes, myRouteIds, byRouteCount]);
 
