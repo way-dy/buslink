@@ -170,7 +170,7 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
   // 본인이 등록한 거래처 배차/노선이 안 보이던 누락 → 최상위에서 한 번 합쳐 전 탭에 동일 적용.
   const [createdPartnerCodes, setCreatedPartnerCodes] = useState([]);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const isMobile = useIsMobile();
 
   // SaaS Phase 1.2 (2026-05-28) — 슈퍼관리자 분기.
   // selectedCompanyId: 일반 admin = companyId prop 고정. 슈퍼관리자만 회사 전환 가능.
@@ -203,12 +203,17 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
   }, [isSuperAdmin]);
   useEffect(() => { reloadCompanies(); }, [reloadCompanies]);
 
-  // 화면 크기 변경 감지
+  // 🔴 PC 폭으로 돌아오면 드로어 상태를 반드시 접는다(2026-08-26) — 안 접으면 모바일에서
+  //    열어둔 채 회전·리사이즈했을 때 사이드바는 고정 열로 뜨는데 **딤만 남아 화면이 잠긴다**.
+  useEffect(() => { if (!isMobile) setMenuOpen(false); }, [isMobile]);
+
+  // ESC 로 드로어 닫기 — 딤 탭과 같은 출구를 키보드에도 준다.
   useEffect(() => {
-    const handler = () => setIsMobile(window.innerWidth < 768);
-    window.addEventListener("resize", handler);
-    return () => window.removeEventListener("resize", handler);
-  }, []);
+    if (!menuOpen) return;
+    const onKey = (e) => { if (e.key === "Escape") setMenuOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
 
   // 관제 PWA 매니페스트·아이콘 적용(2026-05-27) — manifest.json 은 이미 admin 아이콘이지만
   // 직원/기사 앱과 패턴 일관성 위해 동적 호출(idempotent — 이미 같은 href 면 no-op).
@@ -237,9 +242,20 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
     <div style={S.wrap}>
       {/* PWA 설치 안내(설치형 앱 전환) — PC Chrome 에서 "앱 설치" 버튼, 모바일은 안내 바텀시트 */}
       <InstallPrompt />
-      {/* ── PC: 사이드바 ── */}
-      {!isMobile && (
-        <div style={S.sidebar}>
+      {/* ── 사이드바 — PC 는 고정 열, 모바일은 오프캔버스 드로어(2026-08-26 way, YDYOPS 참조) ──
+          🔴 종전 모바일 메뉴는 `position:absolute` 로 본문 위를 덮는 2열 드롭다운이었고,
+             **닫을 방법이 항목 선택뿐**이라 열어놓고 화면을 볼 수가 없었다("메뉴가 가린다").
+             YDYOPS `shared/Sidebar.tsx` 와 같은 형태로 바꾼다 — 화면 밖에 대기하다 밀려 들어오고,
+             뒤의 딤을 누르면 닫힌다. PC 는 지금 그대로(flexShrink:0 고정 열).
+          ⚠ `position:fixed` 는 조상의 overflow:hidden 에 안 잘린다(S.wrap 에 transform 이 없어
+            fixed 의 컨테이닝 블록이 뷰포트다). 조상에 transform 을 넣으면 이 전제가 깨진다. */}
+      {isMobile && menuOpen && (
+        <div style={S.navBackdrop} onClick={() => setMenuOpen(false)} aria-hidden="true" />
+      )}
+      {(
+        <div style={isMobile
+          ? { ...S.sidebarDrawer, transform: menuOpen ? "translateX(0)" : "translateX(-100%)" }
+          : S.sidebar}>
           <div style={S.logo}>
             <BusLinkLogo size={22} sub="관리자" />
           </div>
@@ -248,7 +264,7 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
               아래 항목이 잘린 채 접근 불가였다. 로고·회사ID·로그아웃은 고정 유지. */}
           <nav data-nav-scroll style={S.nav}>
             {TABS.map((t, i) => (
-              <div key={i} data-nav-item onClick={() => setTab(i)}
+              <div key={i} data-nav-item onClick={() => { setTab(i); setMenuOpen(false); }}
                 style={{ ...S.navItem, ...(tab === i ? S.navActive : {}) }}>
                 {tab === i && <span style={S.navAccent} />}
                 <span style={S.navIcon}><Icon name={TAB_ICONS[i]} size={17} stroke={tab === i ? 2 : 1.7} /></span>
@@ -257,7 +273,7 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
             ))}
             {/* SaaS Phase 1.2 — 슈퍼관리자 전용 탭. 일반 admin 비표시. */}
             {isSuperAdmin && (
-              <div data-nav-item onClick={() => setTab(SUPER_TAB_INDEX)}
+              <div data-nav-item onClick={() => { setTab(SUPER_TAB_INDEX); setMenuOpen(false); }}
                 style={{ ...S.navItem, ...(tab === SUPER_TAB_INDEX ? S.navActive : {}) }}>
                 {tab === SUPER_TAB_INDEX && <span style={S.navAccent} />}
                 <span style={S.navIcon}><Icon name={SUPER_TAB_ICON} size={17} stroke={tab === SUPER_TAB_INDEX ? 2 : 1.7} /></span>
@@ -326,32 +342,9 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
           </div>
         )}
 
-        {/* 모바일 드롭다운 메뉴 — maxHeight+스크롤 필수: 부모(content)가 overflow:hidden 이라
-            넘치면 항목이 통째로 잘린 채 접근 불가가 된다(PC 사이드바와 같은 함정). */}
-        {isMobile && menuOpen && (
-          <div data-nav-scroll style={{ position:"absolute", top:50, left:0, right:0, maxHeight:"calc(100dvh - 50px)", overflowY:"auto", background:"var(--color-bg)", zIndex:100, borderBottom:"1px solid var(--color-line)", boxShadow:"var(--shadow-strong)" }}>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:0 }}>
-              {TABS.map((t, i) => (
-                <div key={i} onClick={() => { setTab(i); setMenuOpen(false); }}
-                  style={{ display:"flex", alignItems:"center", gap:10, padding:"13px 16px", cursor:"pointer", fontSize:13, borderBottom:"1px solid var(--color-line)",
-                    background: tab === i ? "var(--color-primary-soft)" : "transparent",
-                    color: tab === i ? "var(--color-primary-deep)" : "var(--color-label-mute)",
-                    fontWeight: tab === i ? 700 : 500 }}>
-                  <Icon name={TAB_ICONS[i]} size={16} /> {t}
-                </div>
-              ))}
-              {isSuperAdmin && (
-                <div onClick={() => { setTab(SUPER_TAB_INDEX); setMenuOpen(false); }}
-                  style={{ display:"flex", alignItems:"center", gap:10, padding:"13px 16px", cursor:"pointer", fontSize:13, borderBottom:"1px solid var(--color-line)",
-                    background: tab === SUPER_TAB_INDEX ? "var(--color-primary-soft)" : "transparent",
-                    color: tab === SUPER_TAB_INDEX ? "var(--color-primary-deep)" : "var(--color-label-mute)",
-                    fontWeight: tab === SUPER_TAB_INDEX ? 700 : 500 }}>
-                  <Icon name={SUPER_TAB_ICON} size={16} /> {SUPER_TAB_LABEL}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+        {/* 🔴 종전 여기 있던 2열 드롭다운 메뉴는 걷어냈다(2026-08-26) — 본문 위를 덮는데
+            닫는 방법이 항목 선택뿐이었다. 이제 메뉴는 위쪽 오프캔버스 드로어 하나뿐이고
+            PC·모바일이 **같은 목록**을 쓴다(탭이 늘 때 한 곳만 고치면 된다). */}
 
         {tab === 0 && <ErrorBoundary label="대시보드"><DashboardTab companyId={activeCompanyId} drivers={drivers} vehicles={vehicles} onNav={setTab} onManageRoutes={(pc) => { setRoutesFocusPartner(pc); setTab(4); }} allowed={allowed} currentUserUid={user?.uid} /></ErrorBoundary>}
         {tab === 1 && <ErrorBoundary label="실시간 관제"><MapTab companyId={activeCompanyId} allowed={allowed} drivers={drivers} /></ErrorBoundary>}
@@ -720,7 +713,21 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
 // ═══════════════════════════════════════════════════════
 // 탭1: 실시간 관제
 // ═══════════════════════════════════════════════════════
+// 모바일 판정 한 곳(2026-08-26). 🔴 셸(사이드바 드로어)과 MapTab 오버레이가 **같은 기준**을
+// 써야 한다 — 어긋나면 사이드바는 드로어인데 지도 레일은 PC 배치인 중간 상태가 생긴다.
+const MOBILE_MAX_W = 768;
+function useIsMobile() {
+  const [mobile, setMobile] = useState(() => window.innerWidth < MOBILE_MAX_W);
+  useEffect(() => {
+    const h = () => setMobile(window.innerWidth < MOBILE_MAX_W);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+  return mobile;
+}
+
 function MapTab({ companyId, allowed, drivers }) {
+  const isMobile = useIsMobile();
   const [rawVehicles, setRawVehicles] = useState([]);
   const [selected, setSelected] = useState(null);
   const [center, setCenter] = useState({ lat: 37.3894, lng: 126.9522 });
@@ -1013,11 +1020,14 @@ function MapTab({ companyId, allowed, drivers }) {
       </div>
 
       {/* 부유 글래스 탑바 — 로고+회사+ 지도/노선도 토글 */}
-      <div style={MS.topbar}>
-        <BusLinkLogo size={20} />
-        <div style={MS.topDivider} />
-        <span style={MS.topCo}>동영관광 <span style={{ color:"var(--color-label-alt)" }}>· {companyId}</span></span>
-        <span style={MS.topTab}><Icon name="pin" size={15}/> 실시간 관제</span>
+      <div style={isMobile ? { ...MS.topbar, ...MS.topbarMobile } : MS.topbar}>
+        {/* 🔴 로고·회사명·화면이름은 모바일에서 뺀다(2026-08-26) — 상단 헤더가 이미 탭 이름을
+            보여줘 중복이고, 그 폭을 실제 컨트롤(뷰 토글·날짜·거래처·새로고침)에 넘겨야
+            글자가 눌려 세로로 쌓이지 않는다. */}
+        {!isMobile && <BusLinkLogo size={20} />}
+        {!isMobile && <div style={MS.topDivider} />}
+        {!isMobile && <span style={MS.topCo}>동영관광 <span style={{ color:"var(--color-label-alt)" }}>· {companyId}</span></span>}
+        {!isMobile && <span style={MS.topTab}><Icon name="pin" size={15}/> 실시간 관제</span>}
         {/* 뷰 토글 */}
         <div style={MS.viewToggle}>
           <button onClick={() => !isPastDate && setViewMode("map")}
@@ -1067,7 +1077,7 @@ function MapTab({ companyId, allowed, drivers }) {
 
       {/* 좌 레일 — 운행 차량 목록(실 onSnapshot 데이터만) — 지도 모드만 */}
       {viewMode === "map" && (
-      <div style={MS.leftRail}>
+      <div style={isMobile ? MS.railSheet : MS.leftRail}>
         <div style={MS.railHead}>
           <span style={MS.railTitle}>운행 중인 차량</span>
           {selected ? (
@@ -1555,6 +1565,15 @@ const MS = {
   topTab:{ marginLeft:24, display:"flex", alignItems:"center", gap:6, fontSize:13, fontWeight:700, color:"var(--color-primary)", background:"var(--color-primary-soft)", padding:"7px 12px", borderRadius:8 },
   topNow:{ marginLeft:"auto", display:"flex", alignItems:"center", gap:7, fontSize:12, fontWeight:600, color:"var(--color-label-mute)" },
   leftRail:{ position:"absolute", top:76, left:12, bottom:12, width:"min(280px,32vw)", minWidth:200, display:"flex", flexDirection:"column", background:"var(--color-bg)", borderRadius:16, boxShadow:"var(--shadow-float)", zIndex:10, overflow:"hidden" },
+  // ── 모바일 전용(2026-08-26 way "왼쪽 메뉴가 가리지 않게 · 세로글씨 안 나오게") ──
+  // 🔴 탑바가 세로글씨의 근인이었다: 컨트롤 9개를 **고정 height:52 · 줄바꿈 없음** 한 줄에
+  //    밀어 넣어, 폭이 모자라면 각 항목이 min-content 까지 찌부러지고 한글은 글자당 한 줄로
+  //    쌓인다(영문은 단어 단위라 덜 티가 나서 PC 에서 안 보였다). 높이를 풀고 줄바꿈을 켠다.
+  topbarMobile:{ top:8, left:8, right:8, height:"auto", flexWrap:"wrap", gap:8, rowGap:8, padding:"10px 12px", borderRadius:12 },
+  // 🔴 차량 목록을 왼쪽에 두면 좁은 화면에서 지도를 절반 넘게 가린다 — `minWidth:200` 이
+  //    `32vw` 를 이겨 360px 기기에서 200px(=56%)를 먹었다. 모바일은 **하단 시트**로 내린다.
+  //    (지도 앱들의 관례이기도 하다. 세로로 40% 를 쓰면 지도 상단이 온전히 남는다.)
+  railSheet:{ position:"absolute", left:8, right:8, bottom:8, top:"auto", width:"auto", minWidth:0, maxHeight:"40%", display:"flex", flexDirection:"column", background:"var(--color-bg)", borderRadius:16, boxShadow:"var(--shadow-float)", zIndex:10, overflow:"hidden" },
   railHead:{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 16px 12px", borderBottom:"1px solid var(--color-bg-soft)", flexShrink:0 },
   railTitle:{ fontSize:15, fontWeight:700, color:"var(--color-label)" },
   railBody:{ flex:1, overflowY:"auto", padding:"8px" },
@@ -3911,6 +3930,7 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
 // 탭6: GPS 시뮬레이터
 // ═══════════════════════════════════════════════════════
 function SimulatorTab({ companyId, vehicles, drivers }) {
+  const isMobile = useIsMobile();
   const [driverId, setDriverId] = useState("");
   const [vehicleId, setVehicleId] = useState("");
   const [routeName, setRouteName] = useState("테스트노선");
@@ -3949,8 +3969,8 @@ function SimulatorTab({ companyId, vehicles, drivers }) {
   useEffect(()=>()=>clearInterval(timerRef.current),[]);
 
   return (
-    <div style={{display:"flex",height:"100%",minHeight:0}}>
-      <div style={{...S.mapSidebar,padding:"0 0 16px"}}>
+    <div style={{display:"flex",flexDirection:isMobile?"column":"row",height:"100%",minHeight:0,minWidth:0}}>
+      <div style={{...S.mapSidebar,padding:"0 0 16px",...(isMobile?S.mapSidebarMobile:{})}}>
         <div style={S.panelHeader}>
           <span style={{fontWeight:700,color:"var(--color-label)"}}>🧪 GPS 시뮬레이터</span>
           <span style={{fontSize:11,fontWeight:600,color:running?"var(--color-positive)":"var(--color-label-mute)"}}>{running?"● 송출 중":"○ 정지"}</span>
@@ -4016,6 +4036,7 @@ function SimulatorTab({ companyId, vehicles, drivers }) {
 // 탭7: 운행 이력
 // ═══════════════════════════════════════════════════════
 function HistoryTab({ companyId, vehicles, allowed }) {
+  const isMobile = useIsMobile();
   const [date, setDate] = useState(getToday());
   const [vehicleId, setVehicleId] = useState("");
   const [points, setPoints] = useState([]);
@@ -4262,8 +4283,8 @@ function HistoryTab({ companyId, vehicles, allowed }) {
   const formatTs = (ts) => { if (!ts) return "–"; const d=ts.toDate?ts.toDate():new Date(ts); return d.toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit"}); };
 
   return (
-    <div style={{display:"flex",height:"100%",minHeight:0}}>
-      <div style={{...S.mapSidebar}}>
+    <div style={{display:"flex",flexDirection:isMobile?"column":"row",height:"100%",minHeight:0,minWidth:0}}>
+      <div style={{...S.mapSidebar,...(isMobile?S.mapSidebarMobile:{})}}>
         <div style={S.panelHeader}>
           <span style={{fontWeight:700}}>📅 운행 이력</span>
           {points.length>0&&<span style={{fontSize:12,fontWeight:600,color:"var(--color-positive)"}}>{points.length}개 포인트</span>}
@@ -6408,6 +6429,14 @@ function ImprovementDetailModal({ req, user, isSuperAdmin, companyLabel, onClose
 const S = {
   wrap:{display:"flex",height:"100dvh",background:"var(--color-bg-soft)",fontFamily:"var(--font-base)",color:"var(--color-label)",position:"relative",overflow:"hidden",fontSize:13},
   sidebar:{width:236,flexShrink:0,background:"var(--color-bg)",borderRight:"1px solid var(--color-line)",display:"flex",flexDirection:"column",minHeight:0,padding:"18px 14px"},
+  // 모바일 오프캔버스 드로어(2026-08-26 · YDYOPS `shared/Sidebar.tsx` 와 같은 형태).
+  // 🔴 화면 밖(translateX(-100%))에 **항상 마운트된 채로** 대기한다 — 조건부 언마운트로 만들면
+  //    열 때마다 transition 시작 프레임이 없어 슥 들어오지 않고 툭 튀어나온다.
+  // ⚠ position:fixed 라 조상의 overflow:hidden 에 안 잘린다. 단 조상에 transform·filter·
+  //   will-change 가 생기면 그게 컨테이닝 블록이 되어 이 전제가 깨진다(S.wrap 에 넣지 말 것).
+  sidebarDrawer:{position:"fixed",top:0,bottom:0,left:0,width:"min(80vw,264px)",zIndex:60,background:"var(--color-bg)",borderRight:"1px solid var(--color-line)",display:"flex",flexDirection:"column",minHeight:0,padding:"18px 14px",transition:"transform .2s ease",boxShadow:"var(--shadow-strong)"},
+  // 드로어 뒤 딤 — **누르면 닫힌다**. 종전 드롭다운에 이게 없어서 "메뉴가 가린다" 가 됐다.
+  navBackdrop:{position:"fixed",inset:0,background:"var(--color-overlay)",zIndex:55},
   logo:{display:"flex",alignItems:"baseline",gap:8,flexShrink:0,padding:"4px 8px 16px",marginBottom:10,borderBottom:"1px solid var(--color-line)"},
   logoText:{fontSize:20,fontWeight:800,fontFamily:"var(--font-brand)",letterSpacing:"-0.03em",color:"var(--color-primary)"},
   logoSub:{fontSize:12,color:"var(--color-label-mute)"},
@@ -6415,14 +6444,25 @@ const S = {
   // flex:1+minHeight:0 = 남는 높이를 전부 차지하고 넘치면 자기 안에서 스크롤.
   // 🔴 minHeight:0 을 빼면 flex 기본 min-content 때문에 스크롤이 안 생기고 다시 잘린다.
   nav:{display:"flex",flexDirection:"column",gap:2,flex:1,minHeight:0,overflowY:"auto",overflowX:"hidden"},
-  navItem:{display:"flex",alignItems:"center",gap:11,flexShrink:0,padding:"10px 12px",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:500,color:"var(--color-label-mute)",position:"relative",transition:"background .15s,color .15s",userSelect:"none"},
+  // whiteSpace:nowrap = 메뉴 이름은 절대 줄바꿈하지 않는다(2026-08-26) — 드로어가 80vw 라
+  // 좁은 기기에서 "실시간 관제" 가 두 줄, 더 좁으면 글자당 한 줄로 쌓일 수 있다.
+  navItem:{display:"flex",alignItems:"center",gap:11,flexShrink:0,padding:"10px 12px",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:500,color:"var(--color-label-mute)",position:"relative",transition:"background .15s,color .15s",userSelect:"none",whiteSpace:"nowrap"},
   navActive:{background:"var(--color-primary-soft)",color:"var(--color-primary-deep)",fontWeight:700},
   navAccent:{position:"absolute",left:3,top:"50%",transform:"translateY(-50%)",width:3,height:18,borderRadius:3,background:"var(--color-primary)"},
   navIcon:{flexShrink:0,display:"flex",opacity:.92},
   sideFoot:{display:"flex",alignItems:"center",gap:7,flexShrink:0,padding:"10px 12px 8px",marginTop:8,borderTop:"1px solid var(--color-line)",fontSize:11,color:"var(--color-label-alt)"},
   logoutBtn:{display:"flex",alignItems:"center",justifyContent:"center",gap:7,width:"100%",flexShrink:0,border:"1px solid var(--color-line)",borderRadius:10,padding:"10px 12px",color:"var(--color-label-mute)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"},
-  content:{flex:1,display:"flex",flexDirection:"column",minHeight:0,overflow:"hidden"},
+  // 🔴 minWidth:0 이 **세로글씨의 근인**이었다(2026-08-26). flex 아이템의 기본값은
+  //    min-width:auto = "내용보다 좁아지지 않는다" 라, 좁은 화면에서 이 열이 안 줄고
+  //    안쪽 요소들이 대신 찌부러지면서 한글이 글자당 한 줄로 쌓였다.
+  //    minHeight:0(세로 스크롤용)과 짝이다 — 가로에도 같은 함정이 있다. 빼지 말 것.
+  content:{flex:1,minWidth:0,display:"flex",flexDirection:"column",minHeight:0,overflow:"hidden"},
   mapSidebar:{width:"min(280px,38vw)",minWidth:180,background:"var(--color-bg)",borderRight:"1px solid var(--color-line)",display:"flex",flexDirection:"column",overflowY:"auto"},
+  // 🔴 운행 이력·시뮬레이터는 옆으로 나란히 두면 모바일에서 둘 다 못 쓴다(2026-08-26) —
+  //    `minWidth:180` 이 `38vw` 를 이겨 360px 기기에서 180px 를 먹고 지도에 180px 만 남았다.
+  //    모바일은 **위아래로 쌓는다**(부모 flexDirection:column). 여기선 폭 제약을 전부 풀고
+  //    높이를 46% 로 묶는다 — 안 묶으면 목록이 길 때 지도가 화면 밖으로 밀린다.
+  mapSidebarMobile:{width:"auto",minWidth:0,maxHeight:"46%",flexShrink:0,borderRight:"none",borderBottom:"1px solid var(--color-line)"},
   panelHeader:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,padding:"14px 20px",borderBottom:"1px solid var(--color-line)",background:"var(--color-bg)",flexShrink:0},
   vehicleCard:{margin:"8px 12px 0",background:"var(--color-bg-alt)",border:"1px solid var(--color-line)",borderRadius:10,padding:"12px 14px",cursor:"pointer"},
   vehicleTop:{display:"flex",alignItems:"center",gap:8,marginBottom:6},
