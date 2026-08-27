@@ -64,20 +64,35 @@ function loadDb() {
   const pcSnap = await db.collection("partnerCodes").where("companyId", "==", COMPANY).get();
   const codes = pcSnap.docs.map((d) => ({ code: d.id, ...(d.data() || {}) }));
   const target = codes.find((c) => String(c.partnerName || "").includes(QUERY)) || codes[0];
-  const psSnap = await db.collection("companies").doc(COMPANY).collection("passengers")
-    .where("partnerCode", "==", target.code).limit(80).get();
-  if (psSnap.empty) { console.log(`⏭ ${target.partnerName} 승객 없음`); process.exit(0); }
+  // 🔴 `limit(N)` 으로 앞부분만 보지 말 것 — 문서 ID 순으로 잘리므로 **쓸 수 있는 계정이
+  //    뒤에 있으면 "없다"고 잘못 판정한다**(2026-08-27 실측: 신촌세브란스는 승객 8,255명
+  //    중 6명이 로그인 이력이 있는데 앞 80건에 하나도 없어 "캡처 불가"로 끝났다).
+  //    쓸 수 있는 조건(`lastLoginAt` 보유)으로 **서버에서 걸러** 가져온다.
+  //    `EMP=<사번>` 을 주면 그 사람으로 고정한다(검토용 계정 등).
+  const EMP = process.env.EMP || "";
+  const col = db.collection("companies").doc(COMPANY).collection("passengers");
+  let docs;
+  if (EMP) {
+    const one = await col.doc(EMP).get();
+    if (!one.exists) { console.log(`⏭ 승객 ${EMP} 없음`); process.exit(0); }
+    docs = [one];
+  } else {
+    // `lastLoginAt` 이 있는 사람만 = 첫 PIN 설정 화면에 갇히지 않는 계정(내림차순 최근순).
+    docs = (await col.where("partnerCode", "==", target.code)
+      .orderBy("lastLoginAt", "desc").limit(20).get()).docs;
+  }
+  if (!docs.length) { console.log(`⏭ ${target.partnerName} — 로그인 이력이 있는 승객이 없다. 캡처 불가`); process.exit(0); }
 
   // 🔴 아무나 고르면 안 된다 — `pinInitial:true` 인 사람으로 들어가면 앱이 **첫 PIN 설정
   //    화면**(FirstPinSetup)에 가둬 탭바가 아예 안 뜬다(2026-08-27 실측). 그렇다고 여기서
   //    PIN 을 정해 주면 **실제 사람의 비밀번호를 바꾸는 것**이다 → 이미 본인 번호로 바꾼
   //    사람(또는 그 화면이 면제되는 공용계정 `pinLocked`)만 고른다.
   //    노선이 배정된 사람을 앞세운다 — 홈 화면이 비면 디자인 검토가 안 된다.
-  const cands = psSnap.docs.map((d) => ({ empNo: d.id, ...(d.data() || {}) }))
+  const cands = docs.map((d) => ({ empNo: d.id, ...(d.data() || {}) }))
     .filter((x) => x.active !== false && (x.pinInitial !== true || x.pinLocked === true))
     .sort((a, b) => (b.routeId ? 1 : 0) - (a.routeId ? 1 : 0));
   if (!cands.length) {
-    console.log(`⏭ ${target.partnerName} — 첫 로그인을 마친 승객이 없다(전원 pinInitial). 캡처 불가`);
+    console.log(`⏭ ${target.partnerName} — 쓸 수 있는 승객이 없다(전원 pinInitial). 캡처 불가`);
     process.exit(0);
   }
   const p = cands[0];
