@@ -70,11 +70,19 @@ export function isValidInitialPin(v) {
  * 협력사 포털은 `partner.*` 에서 열리므로 승객앱 서브도메인(`p.*`)으로 치환한다.
  * 매핑이 없는 origin(web.app·localhost)은 그대로 두고 경로만 `/p` 를 붙인다.
  */
-export function buildPassengerLoginUrl({ origin, empNo } = {}) {
+export function buildPassengerLoginUrl({ origin, empNo, partnerCode } = {}) {
   const base = String(origin || "").replace(/\/+$/, "");
   const passengerBase = base.replace(/:\/\/partner\./i, "://p.");
-  const q = empNo ? `?emp=${encodeURIComponent(String(empNo))}` : "";
-  return `${passengerBase}/p${q}`;
+  // ⚠ `URLSearchParams` 를 쓰지 않는다 — 이 파일은 순수 모듈이라 격리 테스트가 bare vm 에서
+  //    태우는데 거기엔 그 전역이 없다(2026-08-27 실측으로 테스트가 잡았다).
+  const parts = [];
+  if (empNo) parts.push(`emp=${encodeURIComponent(String(empNo))}`);
+  // 🔴 `pc` = 거래처 코드. **로그인 전에는 앱이 누구인지 모르므로**, 이게 없으면 안내문 QR 로
+  //    들어와도 첫 화면이 기본 테마로 열린다(거래처 테마는 로그인 후에야 걸린다).
+  //    공개해도 되는 값이다 — `partnerCodes` read 규칙이 이미 공개고, 협력사 포털 진입에
+  //    쓰는 업체코드와 같은 값이라 이 링크로 새로 열리는 권한은 없다.
+  if (partnerCode) parts.push(`pc=${encodeURIComponent(String(partnerCode))}`);
+  return `${passengerBase}/p${parts.length ? "?" + parts.join("&") : ""}`;
 }
 
 // HTML 이스케이프 — 이름·부서에 `<`, `&` 가 들어와도 인쇄물이 깨지지 않게.

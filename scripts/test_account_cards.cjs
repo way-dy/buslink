@@ -64,6 +64,18 @@ console.log("\n[3] buildPassengerLoginUrl");
     A.buildPassengerLoginUrl({ origin: "https://partner.buslink.co.kr/", empNo: "1" }) === "https://p.buslink.co.kr/p?emp=1");
   ok("사번 URL 인코딩",
     A.buildPassengerLoginUrl({ origin: "https://p.buslink.co.kr", empNo: "가 나&1" }) === "https://p.buslink.co.kr/p?emp=" + encodeURIComponent("가 나&1"));
+  // 🔴 `pc`(거래처 코드) — 이게 있어야 안내문 QR 로 들어온 **첫 화면부터** 그 거래처 톤으로
+  //    열린다. 없으면 로그인 전까지 기본 테마다(2026-08-27).
+  ok("거래처 코드가 pc 로 실린다",
+    A.buildPassengerLoginUrl({ origin: "https://p.buslink.co.kr", empNo: "10001", partnerCode: "DY001-삼성전자샘플-2026-SMPL" })
+      === "https://p.buslink.co.kr/p?emp=10001&pc=" + encodeURIComponent("DY001-삼성전자샘플-2026-SMPL"),
+    A.buildPassengerLoginUrl({ origin: "https://p.buslink.co.kr", empNo: "10001", partnerCode: "DY001-삼성전자샘플-2026-SMPL" }));
+  ok("거래처 코드도 URL 인코딩(한글·하이픈 포함)",
+    !/[가-힣]/.test(A.buildPassengerLoginUrl({ origin: "https://p.buslink.co.kr", empNo: "1", partnerCode: "DY001-채드윅-2026-XX" })));
+  ok("거래처 코드만 있어도 붙는다",
+    A.buildPassengerLoginUrl({ origin: "https://p.buslink.co.kr", partnerCode: "C1" }) === "https://p.buslink.co.kr/p?pc=C1");
+  ok("🔴 거래처 코드가 없으면 예전과 글자 그대로 같다(회귀 0)",
+    A.buildPassengerLoginUrl({ origin: "https://partner.buslink.co.kr", empNo: "10001" }) === "https://p.buslink.co.kr/p?emp=10001");
   ok("사번 없으면 쿼리 없음",
     A.buildPassengerLoginUrl({ origin: "https://p.buslink.co.kr" }) === "https://p.buslink.co.kr/p");
   ok("경로 안 partner 문자열은 안 건드림",

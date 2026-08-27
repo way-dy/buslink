@@ -463,7 +463,11 @@ export default function EmployeeApp() {
   const [homepage, setHomepage] = useState(null); // {enabled,url} | null (2026-08-25)
   useEffect(() => {
     let cancelled = false;
-    const pc = session?.partnerCode;
+    // 🔴 로그인 **전에도** 거래처를 알 수 있으면 첫 화면부터 그 톤으로 연다(2026-08-27).
+    //    승객은 안내문 QR(`/p?emp=…&pc=<거래처코드>`)로 들어오므로 주소에 실린 값을 쓴다.
+    //    세션이 생기면 세션 값이 이긴다 — 주소의 `pc` 가 낡았거나 남의 것이어도 로그인 후엔
+    //    본인 거래처로 바로잡힌다. 모르는 코드면 조회가 null 이라 조용히 기본 테마다.
+    const pc = session?.partnerCode || getParam("pc");
     if (!pc) {
       clearPartnerBranding(); clearTagSoundPolicy();
       setBranding(null); setTheme(null); setInquiry(null); setHomepage(null);

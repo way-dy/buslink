@@ -48,11 +48,12 @@ const functions = getFunctions(undefined, "us-central1");
 // credentials(평문 PIN 포함·발급 직후에만 존재)로 개인별 QR 을 만들어 A4 인쇄창을 연다.
 // QR = 사번이 프리필된 승객앱 링크 → 배부받은 사람이 ID 를 타이핑할 필요가 없다.
 // QR 생성이 실패해도(용량·환경) 카드 자체는 ID/PIN 으로 쓸 수 있게 계속 진행한다.
-async function printAccountCards({ credentials, partnerName, routes }) {
+async function printAccountCards({ credentials, partnerName, routes, partnerCode }) {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const cards = [];
   for (const c of credentials) {
-    const loginUrl = buildPassengerLoginUrl({ origin, empNo: c.empNo });
+    // 🔴  를 함께 실어야 안내문 QR 로 들어온 첫 화면부터 그 거래처 톤으로 열린다.
+    const loginUrl = buildPassengerLoginUrl({ origin, empNo: c.empNo, partnerCode });
     let qrDataUrl = "";
     try {
       qrDataUrl = await QRCode.toDataURL(loginUrl, { width: 240, margin: 0 });
@@ -275,7 +276,7 @@ export default function PartnerApp() {
                   </div>
                 </div>
                 <button style={S.btn} onClick={async () => {
-                  const ok = await printAccountCards({ credentials: result.credentials, partnerName: codeData?.partnerName, routes });
+                  const ok = await printAccountCards({ credentials: result.credentials, partnerName: codeData?.partnerName, routes, partnerCode: code });
                   if (!ok) alert("팝업이 차단되었습니다. 브라우저 팝업 차단을 해제한 뒤 다시 시도하세요.");
                 }}>
                   📄 계정 안내문 인쇄 ({result.credentials.length}명)
@@ -886,7 +887,7 @@ function EmployeeManageMode({ codeData, code, routes }) {
   };
 
   const handlePrintPinResult = async () => {
-    const ok = await printAccountCards({ credentials: pinResult.credentials, partnerName: codeData?.partnerName, routes });
+    const ok = await printAccountCards({ credentials: pinResult.credentials, partnerName: codeData?.partnerName, routes, partnerCode: code });
     if (!ok) alert("팝업이 차단되었습니다. 브라우저 팝업 차단을 해제한 뒤 다시 시도하세요.");
   };
 
