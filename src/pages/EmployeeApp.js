@@ -19,7 +19,7 @@ import { useWakeTick } from "../lib/useWakeTick";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
 import { forceReconnect } from "../lib/forceReconnect";
 import { compareRoutes, sortRoutes, homeRouteList } from "../lib/routeOrder";
-import { splitRouteNameNote } from "../lib/routeKind";
+import { splitRouteNameNote, routeKind } from "../lib/routeKind";
 
 import { validateAndBoard, createPassengerToken, resolveStaticDispatch, validateAndBoardStatic } from "../lib/boarding";
 import { passengerLogin, passengerResume, passengerMigrate, passengerSetPin, passengerLogout } from "../lib/passengerAuth";
@@ -32,7 +32,7 @@ import PermissionGate from "../components/PermissionGate";
 import HelpSheet from "../components/HelpSheet";
 import { resolveCompanyIdForAnon } from "../lib/companyResolver";
 // 거래처 브랜딩(2026-07-16 회의 #5) — 메인 컬러 CSS 변수 + 헤더 로고. 미설정=기본 테마.
-import { applyPartnerTheme, clearPartnerBranding, fetchPartnerCodeData, logoHeightOf, brandBand } from "../lib/partnerBranding";
+import { applyPartnerTheme, clearPartnerBranding, fetchPartnerCodeData, logoHeightOf, brandBand, readableOn } from "../lib/partnerBranding";
 // 문의 게시판(2026-08-06 미팅) — dycs CS 위젯 연동. 거래처별 opt-in.
 import { resolveInquiryConfig, buildInquiryUrl } from "../lib/inquiry";
 import { resolveHomepageConfig, homepageDisplayHost } from "../lib/homepage";
@@ -1324,10 +1324,30 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
           </span>
         </div>
 
-        {/* 이름 — 보조 정보라 작게 */}
-        <div style={{ fontSize: 12, fontWeight: 600, color: band.fgMute, marginTop: 11 }}>
-          {session.name}{session.dept ? ` · ${session.dept}` : ''}
-        </div>
+        {/* 이름 — 보조 정보라 작게. 오른쪽에 운행 구분 배지(등교/하교/출근/퇴근).
+            🔴 **테마를 쓰는 거래처에만** 붙인다(2026-08-27) — 이 배지는 프리셋의 시각 언어
+               (포인트색이 밴드 안에서 한 번 드러나는 자리)이고, 테마를 안 쓰는 거래처에
+               새 요소를 얹으면 그쪽 화면이 바뀐다("부재=현행" 원칙). 그래서 `theme` 유무로 가른다.
+            🔴 글자색은 accent 휘도로 정한다 — 노랑 위 흰 글씨는 안 읽힌다. */}
+        {(() => {
+          const kind = theme ? routeKind(activeRoute) : null;
+          const nameLine = (
+            <div style={{ fontSize: 12, fontWeight: 600, color: band.fgMute }}>
+              {session.name}{session.dept ? ` · ${session.dept}` : ''}
+            </div>
+          );
+          if (!kind) return <div style={{ marginTop: 11 }}>{nameLine}</div>;
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 11 }}>
+              {nameLine}
+              <span style={{
+                marginLeft: 'auto', flexShrink: 0, padding: '3px 10px', borderRadius: 'var(--radius-pill)',
+                background: theme.accent, color: readableOn(theme.accent),
+                fontSize: 11, fontWeight: 800, letterSpacing: '-0.01em',
+              }}>{kind}</span>
+            </div>
+          );
+        })()}
         {/* 현재 노선 — 이 화면의 주인공. 2줄까지(실측 최대 44자는 2줄에 들어간다). */}
         <div style={{ fontSize: 17, fontWeight: 800, color: band.fg, marginTop: 2, letterSpacing: '-0.02em', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'keep-all', lineHeight: 1.3 }}>
           {activeRoute ? activeRoute.name : '노선을 선택하세요'}
