@@ -129,7 +129,7 @@ function loadDb() {
   }
 
   if (THEME === "kakao") {
-    await page.evaluate((t) => {
+    const painted = await page.evaluate((t) => {
       const r = document.documentElement.style;
       r.setProperty("--color-primary", t.primary);
       r.setProperty("--color-primary-soft", "#EAF1FE");
@@ -137,13 +137,28 @@ function loadDb() {
       r.setProperty("--color-band", t.band);
       r.setProperty("--color-accent", t.accent);
       r.setProperty("--color-accent-soft", t.accentSoft);
-      // 상단 밴드는 인라인 스타일이라 변수로 안 바뀐다 — 프리셋 값으로 직접 칠한다.
-      const band = [...document.querySelectorAll("div")]
-        .find((d) => /rgb\(15,\s*33,\s*61\)|rgb\(20,\s*44,\s*82\)|rgb\(0,\s*61,\s*204\)/.test(getComputedStyle(d).backgroundColor));
+      // 상단 밴드는 인라인 스타일이라 CSS 변수로 안 바뀐다 — 프리셋 값으로 직접 칠한다.
+      // 🔴 기대 색을 적어 두고 찾지 말 것 — 밴드색은 거래처 색에서 파생(25% 어둡게)이라
+      //    손으로 계산하면 반올림 한 자리로 빗나간다(실측: 예상 #0F213D, 실제 #0F213E →
+      //    한 픽셀도 안 바뀌었는데 캡처는 성공한 것처럼 끝났다). **구조로 찾는다** =
+      //    화면 맨 위에 붙은, 폭이 화면 전체인, 어두운 배경의 블록.
+      const lum = (bg) => {
+        const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(bg || "");
+        if (!m) return 1;
+        return (0.2126 * +m[1] + 0.7152 * +m[2] + 0.0722 * +m[3]) / 255;
+      };
+      const band = [...document.querySelectorAll("div")].find((d) => {
+        const r = d.getBoundingClientRect();
+        return r.top <= 2 && r.width >= window.innerWidth - 2 && r.height > 40 && r.height < 260
+          && lum(getComputedStyle(d).backgroundColor) < 0.28;
+      });
       if (band) band.style.background = t.band;
+      return !!band;                       // 못 찾으면 호출부가 멈춘다
     }, KAKAO);
     await page.waitForTimeout(600);
-    console.log("  (테마 주입: kakao)");
+    // 🔴 신호 유무 — 밴드를 못 찾았는데 조용히 넘어가면 «톤을 입혔다»는 캡처가 거짓이 된다.
+    if (!painted) throw new Error("상단 밴드를 못 찾았다 — 테마 캡처 중단(구조가 바뀌었는지 확인)");
+    console.log("  (테마 주입: kakao · 밴드 페인트 확인)");
   }
 
   const tabBtn = (l) => page.locator("button").filter({ hasText: new RegExp(`^${l}$`) }).last();

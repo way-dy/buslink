@@ -3,8 +3,12 @@
 import React from 'react';
 import { C } from './tokens';
 
+// 🔴 기본색을 **CSS 변수**로 둔다(2026-08-27). 예전 기본값은 `tokens.js` 의 정적 상수
+//    `C.primary` 라, 거래처 브랜딩·테마를 켜도 **로고만 늘 기본 파랑**으로 남았다
+//    (카카오 톤 안내서를 만들다 픽셀에서 잡혔다 — 버튼은 #4088FE 인데 로고는 #0066FF).
+//    `color` 를 명시로 넘기면 그 값이 이긴다(어두운 배경 위 흰 로고 등).
 export function BusLinkLogo({ size = 22, color, sub }) {
-  const c = color || C.primary;
+  const c = color || "var(--color-primary)";
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <svg width={size} height={size} viewBox="0 0 24 24" fill="none">

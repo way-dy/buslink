@@ -698,7 +698,7 @@ function LoginScreen({ companyId, onLogin }) {
     <div style={S.fullCenter}>
       <div style={S.loginCard}>
         <div style={S.header}>
-          <BusLinkLogo size={26} sub="승객 탑승 서비스" />
+          <BusLinkLogo size={26} color="var(--color-primary)" sub="승객 탑승 서비스" />
         </div>
         <div style={{ fontSize: 20, fontWeight: 800, color: "var(--color-label)", letterSpacing: "-0.02em", marginBottom: 4 }}>로그인</div>
         <div style={{ fontSize: 13, color: "var(--color-label-mute)", marginBottom: 18, lineHeight: 1.55 }}>
@@ -783,7 +783,7 @@ function FirstPinSetup({ companyId, session, onDone, onLogout }) {
     <div style={S.fullCenter}>
       <div style={S.loginCard}>
         <div style={S.header}>
-          <BusLinkLogo size={26} sub="승객 탑승 서비스" />
+          <BusLinkLogo size={26} color="var(--color-primary)" sub="승객 탑승 서비스" />
         </div>
         <div style={{ fontSize: 20, fontWeight: 800, color: "var(--color-label)", letterSpacing: "-0.02em", marginBottom: 4 }}>
           비밀번호를 정해주세요
