@@ -136,6 +136,7 @@
 - [ ] (선택) gpsHistory TTL 정책 — Firebase 콘솔 90일 자동 삭제.
 
 ## 백로그 / 검토 후보
+- [ ] 🧹 **`.claude/issues.md` 재분할 필요(2026-08-27 재실측 — 167줄·203KB)**: 2026-07-09 에 `issues-patterns.md` 를 떼어 99줄까지 줄였는데 두 달 만에 도로 넘쳤다. `tasks.md` 도 193줄·99KB. 줄 수보다 **바이트가 문제**다(issues.md 는 한 줄이 평균 1.2KB). 다음에 이 파일을 크게 손댈 때 토픽 분할 + 완결분 `issues-log.md` 아카이브. 후보 = 2026-07 이전 `[해결]`(정적 QR CF 위임·인앱 스캐너 3분기·뒤로가기 팝업·배차 복사 실행상태) — 전부 닫혔고 후속 변경에 덮였다.
 - [x] ~~🧹 `.claude/issues.md`·`tasks.md` 150줄 초과 정리~~ — issues.md 는 `issues-patterns.md` 분리로 99줄, tasks.md 는 2026-07-21 wrapup 에서 2026-05~06 완료·superseded 검증 항목을 `tasks-log.md` 로 이관해 112줄. 둘 다 소프트캡 이내.
 - [ ] 🎯 운행 이력 정류장 반경 시각화 확장: ① 반경 동적 조정 슬라이더(50~300m) — 도착 감지 임계 튜닝 진단 ② routePath(노선 사전 경로) Polyline 보조 표시 — GPS 실 경로 ↔ routePath 일치도 검증 ③ 정류장 마커 클릭 시 stopArrivals 상세(actualAt/plannedAt/delaySec/estimated 백필 여부) 카드 ④ 통과 마커 클릭 시 가장 가까운 GPS 포인트 자동 강조(시각 차이 확인).
 - [ ] 📣 카카오 알림톡/SMS 병행 발송 — callcenter SENS 계정 재사용. 템플릿 심사 + Secret Manager 후 진행.
