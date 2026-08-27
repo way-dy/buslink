@@ -2,3 +2,4 @@ node_modules/
 _verify.*
 out/
 _render_*.png
+kakao-deck/shots/

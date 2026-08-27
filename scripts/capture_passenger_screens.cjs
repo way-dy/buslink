@@ -30,6 +30,12 @@ const COMPANY = "dy001";
 const ROOT = path.join(__dirname, "..");
 const OUT = process.argv[2] || path.join(os.tmpdir(), "buslink-shots");
 const QUERY = process.argv[3] || "채드윅";
+// THEME=kakao 면 거래처 테마를 «화면에만» 입혀 찍는다(고객 문서용 시안).
+// 🔴 거래처 문서를 켜서 찍는 게 아니라 앱이 켜졌을 때 세팅하는 것과 **같은 CSS 변수**를
+//    주입한다 — 실고객 설정을 건드리지 않기 위해서다. 색 값은 `partnerBranding.THEME_PRESETS`
+//    와 같아야 하므로 바꿀 때 두 곳을 함께 고칠 것.
+const THEME = process.env.THEME || "";
+const KAKAO = { band: "#1E233D", accent: "#FFCD00", accentSoft: "#FFF3C4", primary: "#4088FE" };
 
 function loadAdmin() {
   return require(path.join(ROOT, "functions", "node_modules", "firebase-admin"));
@@ -120,6 +126,24 @@ function loadDb() {
   if (tabCount < 4) {
     const seen = await page.evaluate(() => (document.body.innerText || "").replace(/\s+/g, " ").slice(0, 160));
     throw new Error(`세션 복원 실패 — 로그인 화면에서 멈췄다(탭 ${tabCount}개)\n화면: ${seen}`);
+  }
+
+  if (THEME === "kakao") {
+    await page.evaluate((t) => {
+      const r = document.documentElement.style;
+      r.setProperty("--color-primary", t.primary);
+      r.setProperty("--color-primary-soft", "#EAF1FE");
+      r.setProperty("--color-primary-deep", "#2A6BE0");
+      r.setProperty("--color-band", t.band);
+      r.setProperty("--color-accent", t.accent);
+      r.setProperty("--color-accent-soft", t.accentSoft);
+      // 상단 밴드는 인라인 스타일이라 변수로 안 바뀐다 — 프리셋 값으로 직접 칠한다.
+      const band = [...document.querySelectorAll("div")]
+        .find((d) => /rgb\(15,\s*33,\s*61\)|rgb\(20,\s*44,\s*82\)|rgb\(0,\s*61,\s*204\)/.test(getComputedStyle(d).backgroundColor));
+      if (band) band.style.background = t.band;
+    }, KAKAO);
+    await page.waitForTimeout(600);
+    console.log("  (테마 주입: kakao)");
   }
 
   const tabBtn = (l) => page.locator("button").filter({ hasText: new RegExp(`^${l}$`) }).last();
