@@ -25,6 +25,7 @@ import { forceEndRun } from "../lib/forceEndRun";
 import { createPartnerCode, getBoardingUrl } from "../lib/partner";
 // 정적(고정) QR — 차량별 인쇄용 URL 생성(2026-07-08 RQ#3)
 import { getStaticBoardingUrl, getSleepCheckUrl } from "../lib/boarding";
+import { buildQrPrintHtml, QR_TONES } from "../lib/qrPrint";
 import { formatNfcUid } from "../lib/nfc";
 import { sendNotice } from "../lib/notifications";
 import { compressImageFile } from "../lib/image";
@@ -3697,6 +3698,8 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
   const [carIdMsg, setCarIdMsg] = useState("");
   // 고정(정적) QR 생성/인쇄 모달 상태(2026-07-08 RQ#3). 모든 차량에 제공(관리자가 필요 차량 인쇄).
   const [qrVehicle, setQrVehicle] = useState(null);
+  // 인쇄 톤 — 기본은 예전 인쇄물 그대로. 거래처가 카카오 프리셋이면 그 톤으로 뽑는다.
+  const [qrTone, setQrTone] = useState("default");
   const [qrDataUrl, setQrDataUrl] = useState("");
   // 슬리핑 차일드 확인용 뒷좌석 QR(2026-08-18) — 탑승 QR 과 **다른 경로**(/sleep)여야 한다.
   // 같은 QR 로 두면 승객이 찍었을 때 탑승이 적재된다.
@@ -3717,7 +3720,10 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
 
   // 새 창에 인쇄용 최소 HTML(차량번호 + QR + URL) → 로드 시 자동 인쇄. 팝업 차단 시 안내.
   // kind="board"=탑승용(차량 입구) · kind="sleep"=빈 차 확인용(맨 뒷좌석).
-  const printQr = (kind = "board") => {
+  // 인쇄 톤 — 부재=`default`(예전 인쇄물 그대로). 카카오 톤 고객사는 그 톤으로 뽑는다.
+  // 🔴 카드 마크업은 `lib/qrPrint.js` 가 정본이다 — 고객 안내서에 실리는 그림도 같은 함수로
+  //    만든다. 여기서 따로 그리면 실물과 안내서가 갈린다.
+  const printQr = (kind = "board", tone = qrTone) => {
     const isSleep = kind === "sleep";
     const img = isSleep ? sleepQrDataUrl : qrDataUrl;
     if (!img || !qrVehicle) return;
@@ -3727,18 +3733,12 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
     const url = isSleep
       ? getSleepCheckUrl({ companyId, vehicleId: qrVehicle.id })
       : getStaticBoardingUrl({ companyId, vehicleId: qrVehicle.id });
-    const title = isSleep ? "빈 차 확인 QR" : "탑승 QR";
-    const sub = isSleep ? "맨 뒷좌석에 부착 · 운행 종료 후 스캔" : "차량에 부착 · 탑승 시 스캔";
-    w.document.write(
-      '<!doctype html><html><head><meta charset="utf-8"><title>' + plate + ' ' + title + '</title></head>'
-      + '<body onload="window.print()" style="margin:0;font-family:sans-serif;text-align:center;padding:40px">'
-      + '<h1 style="font-size:30px;margin:0 0 8px">' + plate + '</h1>'
-      + '<div style="font-size:20px;font-weight:700;margin-bottom:6px">' + title + '</div>'
-      + '<div style="font-size:15px;color:#555;margin-bottom:28px">' + sub + '</div>'
-      + '<img src="' + img + '" style="width:340px;height:340px"/>'
-      + '<div style="font-size:12px;color:#888;margin-top:18px;word-break:break-all">' + url + '</div>'
-      + '</body></html>'
-    );
+    w.document.write(buildQrPrintHtml({
+      plate, tone, img, url,
+      title: isSleep ? "빈 차 확인 QR" : "탑승 QR",
+      sub: isSleep ? "맨 뒷좌석에 부착 · 운행 종료 후 스캔" : "차량에 부착 · 탑승 시 스캔",
+      bandText: isSleep ? "빈 차 확인 · 뒷좌석에서 스캔해주세요" : "통근 셔틀 · QR을 스캔해 탑승해주세요",
+    }));
     w.document.close();
   };
 
@@ -3902,7 +3902,23 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
           <div style={{fontSize:11,color:"var(--color-label-mute)",wordBreak:"break-all",textAlign:"center",marginTop:8}}>
             {getStaticBoardingUrl({companyId,vehicleId:qrVehicle.id})}
           </div>
-          <div style={{display:"flex",gap:8,marginTop:16}}>
+          {/* 인쇄 톤 — 거래처 테마와 별개다(QR 은 차량 단위라 거래처를 알 수 없다).
+              뽑는 사람이 고른다. 기본은 예전 인쇄물 그대로라 회귀 0. */}
+          <div style={{display:"flex",alignItems:"center",gap:8,marginTop:14,flexWrap:"wrap"}}>
+            <span style={{fontSize:12,fontWeight:700,color:"var(--color-label-mute)"}}>인쇄 톤</span>
+            {Object.entries(QR_TONES).map(([k,v])=>(
+              <button key={k} onClick={()=>setQrTone(k)}
+                style={{display:"inline-flex",alignItems:"center",gap:6,padding:"5px 12px",borderRadius:999,
+                  cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700,
+                  border:`2px solid ${qrTone===k?"var(--color-primary)":"var(--color-line)"}`,
+                  background:qrTone===k?"var(--color-primary-soft)":"var(--color-bg)",
+                  color:"var(--color-label)"}}>
+                <span style={{width:12,height:12,borderRadius:3,background:v.card,border:`1px solid ${v.cardLine}`}}/>
+                {v.label}
+              </button>
+            ))}
+          </div>
+          <div style={{display:"flex",gap:8,marginTop:12}}>
             <button style={{...S.addBtn,flex:1,opacity:qrDataUrl?1:0.6}} onClick={()=>printQr("board")} disabled={!qrDataUrl}>🖨 탑승 QR 인쇄</button>
             <button style={{...S.closeBtn,flex:1}} onClick={()=>setQrVehicle(null)}>닫기</button>
           </div>

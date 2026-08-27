@@ -23,6 +23,7 @@ const OUT = process.argv[2] || path.join(DIR, "..", "out", "버스링크_통근�
 const MAP = {
   login: "login.png", home: "home.png", routes: "routes.png",
   scan: "scan.png", board: "board.png", notices: "notices.png", settings: "settings.png",
+  qrcard: "qrcard.png",
 };
 
 function dataUri(file) {

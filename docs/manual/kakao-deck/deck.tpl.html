@@ -45,7 +45,9 @@
   .phone.tall img{margin-top:-2px}
 
   /* 3컷 슬라이드는 조금 작게 */
-  .cols.four .phone{max-width:250px}
+  .cols.four .phone{max-width:232px}
+  .phone.card{background:transparent;box-shadow:none;border-radius:0}
+  .phone.card img{border-radius:16px;box-shadow:0 18px 44px rgba(0,0,0,.42)}
   .cols.four .ctitle{font-size:25px}
   .cols.four .cdesc{font-size:20.5px}
 
@@ -74,7 +76,7 @@
   <p class="sub">임직원의 편안하고 안전한 출퇴근길을 책임지는</p>
   <h1>통근셔틀 이용 안내서</h1>
   <p class="meta">스마트폰만 있으면 됩니다 · 앱 설치 없이 링크 하나로<br>노선 확인 · 실시간 차량 위치 · QR 탑승까지</p>
-  <div class="brand">BusLink · 동영관광</div>
+  <div class="brand">BusLink</div>
 </section>
 
 <!-- 2. 로그인 -->
@@ -97,7 +99,7 @@
     <div class="tip"><b>초기 비밀번호는 000000</b><p>안내문에 다른 번호가 적혀 있으면 그 번호를 쓰세요. 첫 로그인에서 본인만 아는 번호로 바꾸게 됩니다.</p></div>
     <div class="tip"><b>로그인 상태는 유지됩니다</b><p>매번 다시 로그인하지 않아도 됩니다. 공용 휴대폰이라면 설정에서 로그아웃하세요.</p></div>
   </div>
-  <div class="brand">BusLink · 동영관광</div><div class="pageno">2</div>
+  <div class="brand">BusLink</div><div class="pageno">2</div>
 </section>
 
 <!-- 3. 노선·위치 -->
@@ -120,30 +122,35 @@
     <div class="tip"><b>내 정류장을 지정하세요</b><p>노선도에서 정류장을 누르면 지정됩니다. 버스가 <b>두 정거장 전</b>에 오면 알림이 옵니다.</p></div>
     <div class="tip"><b>도착 예정시각은 실제 위치 기준</b><p>정류장마다 계획시각과 실제 도착시각을 함께 보여드립니다.</p></div>
   </div>
-  <div class="brand">BusLink · 동영관광</div><div class="pageno">3</div>
+  <div class="brand">BusLink</div><div class="pageno">3</div>
 </section>
 
 <!-- 4. QR 탑승 -->
 <section class="slide">
   <p class="eyebrow">1) 임직원 이용방법 안내</p>
-  <h2>QR 하나로 <span class="w">탑승이 기록됩니다.</span></h2>
-  <div class="cols">
+  <h2>차량에 부착된 QR 하나로 <span class="w">탑승이 기록됩니다.</span></h2>
+  <div class="cols four">
     <div class="col">
-      <p class="ctitle">[01. 앱에서 스캔]</p>
-      <div class="phone"><img src="{{scan}}" alt="앱 안 QR 스캔 화면"></div>
-      <p class="cdesc">앱 하단 <b>탑승</b> 탭에서 카메라를 열어<br>차량 QR을 찍습니다.</p>
+      <p class="ctitle">[01. 차량 부착 QR]</p>
+      <div class="phone card"><img src="{{qrcard}}" alt="차량에 부착하는 탑승 QR 카드"></div>
+      <p class="cdesc">차량마다 <b>고정 QR</b>을 발급해 부착합니다.<br>매일 바뀌지 않습니다.</p>
     </div>
     <div class="col">
-      <p class="ctitle">[02. 휴대폰 카메라로]</p>
-      <div class="phone"><img src="{{board}}" alt="고정 QR 탑승 확인 화면"></div>
-      <p class="cdesc">차량에 붙은 QR을 기본 카메라로 찍어도 됩니다.<br>사번·비밀번호로 본인 확인 후 기록됩니다.</p>
+      <p class="ctitle">[02. 스캔]</p>
+      <div class="phone"><img src="{{scan}}" alt="앱 안 QR 스캔 화면"></div>
+      <p class="cdesc">앱 하단 <b>탑승</b> 탭에서 카메라를 열거나,<br>휴대폰 기본 카메라로 찍어도 됩니다.</p>
+    </div>
+    <div class="col">
+      <p class="ctitle">[03. 본인 확인]</p>
+      <div class="phone"><img src="{{board}}" alt="탑승 확인 화면"></div>
+      <p class="cdesc">사번·비밀번호로 본인 확인 후<br>탑승이 기록됩니다.</p>
     </div>
   </div>
   <div class="tips">
     <div class="tip"><b>두 번째부터는 버튼 한 번</b><p>한 번 확인하면 그 휴대폰에 기억해 둡니다. 다른 분이 타실 때는 <b>다른 사람</b>을 누르세요.</p></div>
-    <div class="tip"><b>같은 차량 중복 태깅은 무시</b><p>실수로 두 번 찍어도 탑승은 한 번만 기록됩니다.</p></div>
+    <div class="tip"><b>중복 태깅은 무시</b><p>실수로 두 번 찍어도 탑승은 한 번만 기록됩니다.</p></div>
   </div>
-  <div class="brand">BusLink · 동영관광</div><div class="pageno">4</div>
+  <div class="brand">BusLink</div><div class="pageno">4</div>
 </section>
 
 <!-- 5. 공지·알림 -->
@@ -166,7 +173,7 @@
     <div class="tip"><b>긴급 공지는 화면을 덮습니다</b><p>당일 운행 변경처럼 꼭 보셔야 하는 공지는 앱을 열 때 전체 화면으로 뜹니다.</p></div>
     <div class="tip"><b>알림이 안 온다면</b><p>휴대폰 설정에서 이 사이트의 알림이 허용되어 있는지, <b>내 정류장</b>을 지정했는지 확인해 주세요.</p></div>
   </div>
-  <div class="brand">BusLink · 동영관광</div><div class="pageno">5</div>
+  <div class="brand">BusLink</div><div class="pageno">5</div>
 </section>
 
 <!-- 6. 담당자 안내 -->
@@ -180,13 +187,13 @@
       <tr><td class="k">안내문 배부</td><td>등록 직후 <b>1인 1장 안내문</b>(이름·아이디·비밀번호·접속 QR)을 A4로 인쇄해 배부합니다. 나중에 다시 뽑을 수도 있습니다.</td></tr>
       <tr><td class="k">운행 현황</td><td>담당자 포털에서 자사 노선의 <b>실시간 차량 위치</b>와 노선도, 탑승 통계를 봅니다.</td></tr>
       <tr><td class="k">공지 발송</td><td>자사 임직원에게만 공지를 보낼 수 있습니다(시간당 5건).</td></tr>
-      <tr><td class="k">문의</td><td>운행·차량 문의는 동영관광 배차실로, 시스템 문의는 담당자 포털을 통해 접수됩니다.</td></tr>
+      <tr><td class="k">문의</td><td>운행·차량 문의는 <b>배차실</b>로, 시스템 문의는 담당자 포털을 통해 접수됩니다.</td></tr>
     </tbody>
   </table>
   <div class="tips">
     <div class="tip"><b>고객사 전용 화면</b><p>이 안내서의 색·로고는 <span class="badge">고객사 단위</span> 로 지정합니다. 다른 고객사 화면에는 영향을 주지 않습니다.</p></div>
   </div>
-  <div class="brand">BusLink · 동영관광</div><div class="pageno">6</div>
+  <div class="brand">BusLink</div><div class="pageno">6</div>
 </section>
 
 </body></html>
