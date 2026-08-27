@@ -3701,14 +3701,29 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
   // 인쇄 톤 — 기본은 예전 인쇄물 그대로. 거래처가 카카오 프리셋이면 그 톤으로 뽑는다.
   const [qrTone, setQrTone] = useState("default");
   const [qrDataUrl, setQrDataUrl] = useState("");
+  // 이 QR 을 붙일 차량이 **한 거래처 전용**일 때만 고른다(부재=없음). 고르면 QR 주소에
+  // `pc` 가 실려 스캔한 첫 화면부터 그 거래처 톤으로 열린다.
+  // 🔴 여러 거래처를 뛰는 차량에는 고르지 말 것 — 인쇄물이 한 거래처 색으로 굳는다.
+  const [qrPartner, setQrPartner] = useState("");
+  const [qrPartnerList, setQrPartnerList] = useState([]);
   // 슬리핑 차일드 확인용 뒷좌석 QR(2026-08-18) — 탑승 QR 과 **다른 경로**(/sleep)여야 한다.
   // 같은 QR 로 두면 승객이 찍었을 때 탑승이 적재된다.
   const [sleepQrDataUrl, setSleepQrDataUrl] = useState("");
 
+  // 거래처 목록은 **모달을 열 때 1회만** 읽는다(상시 구독을 늘리지 않는다).
+  useEffect(() => {
+    if (!qrVehicle) return;
+    let alive = true;
+    getDocs(query(collection(db, "partnerCodes"), where("companyId", "==", companyId), where("active", "==", true)))
+      .then(s => { if (alive) setQrPartnerList(s.docs.map(d => ({ code: d.id, ...(d.data() || {}) }))); })
+      .catch(() => { if (alive) setQrPartnerList([]); });
+    return () => { alive = false; };
+  }, [qrVehicle, companyId]);
+
   useEffect(() => {
     if (!qrVehicle) { setQrDataUrl(""); return; }
     let alive = true;
-    const url = getStaticBoardingUrl({ companyId, vehicleId: qrVehicle.id });
+    const url = getStaticBoardingUrl({ companyId, vehicleId: qrVehicle.id, partnerCode: qrPartner || undefined });
     QRCode.toDataURL(url, { width: 280, margin: 1 })
       .then(d => { if (alive) setQrDataUrl(d); })
       .catch(() => { if (alive) setQrDataUrl(""); });
@@ -3716,7 +3731,7 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
       .then(d => { if (alive) setSleepQrDataUrl(d); })
       .catch(() => { if (alive) setSleepQrDataUrl(""); });
     return () => { alive = false; };
-  }, [qrVehicle, companyId]);
+  }, [qrVehicle, companyId, qrPartner]);
 
   // 새 창에 인쇄용 최소 HTML(차량번호 + QR + URL) → 로드 시 자동 인쇄. 팝업 차단 시 안내.
   // kind="board"=탑승용(차량 입구) · kind="sleep"=빈 차 확인용(맨 뒷좌석).
@@ -3732,7 +3747,7 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
     const plate = qrVehicle.plateNo || qrVehicle.id;
     const url = isSleep
       ? getSleepCheckUrl({ companyId, vehicleId: qrVehicle.id })
-      : getStaticBoardingUrl({ companyId, vehicleId: qrVehicle.id });
+      : getStaticBoardingUrl({ companyId, vehicleId: qrVehicle.id, partnerCode: qrPartner || undefined });
     w.document.write(buildQrPrintHtml({
       plate, tone, img, url,
       title: isSleep ? "빈 차 확인 QR" : "탑승 QR",
@@ -3900,10 +3915,35 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
               : <div style={{width:240,height:240,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--color-label-mute)"}}>QR 생성 중…</div>}
           </div>
           <div style={{fontSize:11,color:"var(--color-label-mute)",wordBreak:"break-all",textAlign:"center",marginTop:8}}>
-            {getStaticBoardingUrl({companyId,vehicleId:qrVehicle.id})}
+            {getStaticBoardingUrl({companyId,vehicleId:qrVehicle.id,partnerCode:qrPartner||undefined})}
           </div>
-          {/* 인쇄 톤 — 거래처 테마와 별개다(QR 은 차량 단위라 거래처를 알 수 없다).
-              뽑는 사람이 고른다. 기본은 예전 인쇄물 그대로라 회귀 0. */}
+          {/* 거래처(선택) — 이 차량이 한 거래처 전용일 때만 고른다.
+              🔴 고르면 QR 주소에 `pc` 가 실려 **스캔한 첫 화면부터** 그 거래처 톤으로 열린다.
+                 여러 거래처를 뛰는 차량에는 고르지 말 것(인쇄물이 한 색으로 굳는다).
+              ⚠ `pc` 는 표시 전용이다 — 탑승 판정은 서버가 토큰의 사번과 오늘 배차로만 한다. */}
+          <div style={{marginTop:14}}>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--color-label-mute)",marginBottom:6}}>
+              거래처 (선택 — 이 차량이 한 거래처 전용일 때만)
+            </div>
+            <select value={qrPartner} style={{...S.input,marginBottom:0}}
+              onChange={e=>{
+                const c=e.target.value; setQrPartner(c);
+                // 고른 거래처가 프리셋을 쓰면 인쇄 톤도 그쪽으로 맞춘다(따로 고를 일이 줄어든다).
+                const p=qrPartnerList.find(x=>x.code===c);
+                const preset=p&&p.theme&&p.theme.preset;
+                if (QR_TONES[preset]) setQrTone(preset);
+              }}>
+              <option value="">지정 안 함 (여러 거래처 공용)</option>
+              {qrPartnerList.map(p=>(
+                <option key={p.code} value={p.code}>
+                  {p.partnerName||p.code}{p.theme&&p.theme.preset?` · ${p.theme.preset} 톤`:""}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* 인쇄 톤 — 거래처를 고르면 그 프리셋으로 맞춰지지만, 뽑는 사람이 바꿀 수 있다.
+              기본은 예전 인쇄물 그대로라 회귀 0. */}
           <div style={{display:"flex",alignItems:"center",gap:8,marginTop:14,flexWrap:"wrap"}}>
             <span style={{fontSize:12,fontWeight:700,color:"var(--color-label-mute)"}}>인쇄 톤</span>
             {Object.entries(QR_TONES).map(([k,v])=>(
@@ -3920,7 +3960,7 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
           </div>
           <div style={{display:"flex",gap:8,marginTop:12}}>
             <button style={{...S.addBtn,flex:1,opacity:qrDataUrl?1:0.6}} onClick={()=>printQr("board")} disabled={!qrDataUrl}>🖨 탑승 QR 인쇄</button>
-            <button style={{...S.closeBtn,flex:1}} onClick={()=>setQrVehicle(null)}>닫기</button>
+            <button style={{...S.closeBtn,flex:1}} onClick={()=>{setQrVehicle(null);setQrPartner("");setQrTone("default");}}>닫기</button>
           </div>
           {/* 슬리핑 차일드 — 맨 뒷좌석 확인 QR(2026-08-18 건의). 탑승 QR 과 경로가 다르다. */}
           <div style={{marginTop:18,paddingTop:16,borderTop:"1px solid var(--color-line)"}}>

@@ -229,9 +229,16 @@ export function getBoardingUrl(tokenId) {
 // 관리자가 차량에 붙일 고정 QR(만료/소각 없음·재사용)을 인쇄 → 직원이 스캔하면 탑승 기록.
 // URL은 토큰(`?t=`) 대신 차량ID만 인코딩(`?c={companyId}&v={vehicleId}`) → BoardingApp 이
 // "오늘 배차"로 routeId 를 해석한다. 유비칸 차량 보안 완화 수용(동적 QR 대체·회의 결정).
-export function getStaticBoardingUrl({ companyId, vehicleId }) {
+export function getStaticBoardingUrl({ companyId, vehicleId, partnerCode }) {
   const base = window.location.origin;
-  return `${base}/board?c=${encodeURIComponent(companyId)}&v=${encodeURIComponent(vehicleId)}`;
+  let url = `${base}/board?c=${encodeURIComponent(companyId)}&v=${encodeURIComponent(vehicleId)}`;
+  // 🔴 `pc`(거래처 코드)는 **표시 전용**이다 — 이걸 넣으면 QR 을 찍은 첫 화면부터 그 거래처
+  //    톤으로 열린다. 탑승 판정에는 쓰지 않는다(서버는 여전히 토큰의 사번과 오늘 배차로만
+  //    판정한다). 그러므로 값이 틀려도 잘못 탑승되지 않고 색만 달라진다.
+  // ⚠ **한 차량이 여러 거래처를 뛰면 넣지 말 것** — 인쇄물이 한 거래처 색으로 굳는다.
+  //    그래서 관리자 화면에서 «선택»으로 두었고 기본값은 없음이다.
+  if (partnerCode) url += `&pc=${encodeURIComponent(partnerCode)}`;
+  return url;
 }
 
 // 슬리핑 차일드 — 맨 뒷좌석 확인 QR 주소(2026-08-18).

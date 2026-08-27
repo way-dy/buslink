@@ -62,6 +62,17 @@ export default function BoardingApp() {
     fetchPartnerCodeData(pc).then(applyPartnerTheme).catch(() => {});
   };
 
+  // 🔴 신원이 생기기 «전»에도, 인쇄된 QR 이 거래처를 실어 왔으면 그 톤으로 연다(2026-08-27).
+  //    한 거래처 전용 차량에만 관리자가 넣는 값이고(`?pc=`), 없으면 예전처럼 기본 테마다.
+  //    로그인이 끝나면 위 `themeFor` 가 **토큰의 거래처**로 덮으므로 값이 틀려도 바로잡힌다.
+  useEffect(() => {
+    const pc = getParam("pc");
+    if (!pc) return;
+    let alive = true;
+    fetchPartnerCodeData(pc).then(d => { if (alive) applyPartnerTheme(d); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
   useEffect(() => {
     if (!tokenId && !isStatic) {
       setErrMsg("QR코드가 올바르지 않습니다.\n버스 내 QR코드를 다시 스캔해주세요.");
