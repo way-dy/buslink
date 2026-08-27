@@ -71,8 +71,11 @@ function dataUri(file) {
     document.querySelectorAll(".slide").forEach((s, i) => {
       const sr = s.getBoundingClientRect();
       const padB = parseFloat(getComputedStyle(s).paddingBottom);
+      // 푸터 요소(brand·pageno·sampletag)는 안쪽 여백 안에 **일부러** 앉힌 절대배치라 제외한다.
+      // ⚠ 자손까지 제외해야 한다 — 안의 `<b>` 만 따로 걸려 거짓 실패가 난다(실제로 그랬다).
+      const FOOT = ".brand, .pageno, .sampletag";
       s.querySelectorAll("*").forEach((c) => {
-        if (c.classList.contains("brand") || c.classList.contains("pageno")) return;
+        if (c.closest(FOOT)) return;
         const over = Math.round(c.getBoundingClientRect().bottom - (sr.bottom - padB));
         if (over > 1) out.push({ slide: i + 1, el: c.className || c.tagName, over });
       });

@@ -31,28 +31,55 @@ const NAME = "삼성전자 (샘플)";
 const EMP = "SAMPLE-SEC";
 const SAMPLE_PIN = "112233";   // 샘플 전용 — 실제 승객 PIN 아님
 
-// 노선 3개 — 출근 2 · 퇴근 1. 정류장은 실제 좌표(기흥·동탄 일대)라 지도가 정상으로 그려진다.
+// 정류장 좌표 — 지도에 좌표 격자를 얹어 **실제 지도에서 읽은 값**이다(눈대중 지명 좌표는
+// 크게 빗나간다: 처음 넣은 삼성전자 기흥캠퍼스가 3km 서쪽이었다).
+const P = {
+  기흥역:   { lat: 37.27546, lng: 127.11594 },
+  청명역:   { lat: 37.26086, lng: 127.09153 },
+  캠퍼스:   { lat: 37.22925, lng: 127.08675 },
+  동탄역:   { lat: 37.19981, lng: 127.09674 },
+  기흥동탄: { lat: 37.21543, lng: 127.09692 },
+};
+
+// 🔴 `routePath` = 운영자가 관리자에서 **직접 그리는** 폴리라인이다. 여기 값은 카카오 길찾기
+//    응답이 아니라 **지도를 보고 도로 위 좌표를 읽어 찍은 것**이다 — 카카오모빌리티 길찾기
+//    응답은 "자체 DB 저장·재사용 금지"(카카오 공식 답변)라 저장할 수 없다(issues.md 길안내 항목).
+// ⚠ 샘플이라 도로를 **근사**한다(정확도 ±100m 수준). 실고객 노선은 관리자에서 직접 그린다.
+const PATH_기흥 = [
+  { lat: 37.27546, lng: 127.11594 }, { lat: 37.27274, lng: 127.11088 }, { lat: 37.26986, lng: 127.10548 },
+  { lat: 37.26734, lng: 127.10008 }, { lat: 37.26590, lng: 127.09468 }, { lat: 37.26374, lng: 127.09288 },
+  { lat: 37.26086, lng: 127.09153 }, { lat: 37.25654, lng: 127.09108 }, { lat: 37.25366, lng: 127.09288 },
+  { lat: 37.24790, lng: 127.09198 }, { lat: 37.24214, lng: 127.09108 }, { lat: 37.23638, lng: 127.09018 },
+  { lat: 37.23062, lng: 127.08910 }, { lat: 37.22925, lng: 127.08675 },
+];
+const PATH_동탄 = [
+  { lat: 37.19981, lng: 127.09674 }, { lat: 37.20535, lng: 127.09692 }, { lat: 37.21039, lng: 127.09719 },
+  { lat: 37.21543, lng: 127.09692 }, { lat: 37.21903, lng: 127.09467 }, { lat: 37.22191, lng: 127.09242 },
+  { lat: 37.22515, lng: 127.08972 }, { lat: 37.22767, lng: 127.08792 }, { lat: 37.22925, lng: 127.08675 },
+];
+
+// 노선 3개 — 출근 2 · 퇴근 1.
 const ROUTES = [
   { id: "sample-sec-01", name: "[기흥] 출근 / To Work (Mon–Fri)", code: "S1", type: "출근", shift: null,
-    departTime: "07:10", seats: 45,
+    departTime: "07:10", seats: 45, routePath: PATH_기흥,
     stops: [
-      { name: "기흥역 5번출구", lat: 37.27546, lng: 127.11594, offsetMin: 0 },
-      { name: "신갈오거리 정류장", lat: 37.28497, lng: 127.11090, offsetMin: 9 },
-      { name: "삼성전자 기흥캠퍼스 정문", lat: 37.22884, lng: 127.05316, offsetMin: 34 },
+      { name: "기흥역 5번출구", ...P.기흥역, offsetMin: 0 },
+      { name: "청명역 1번출구", ...P.청명역, offsetMin: 12 },
+      { name: "삼성전자 기흥캠퍼스 정문", ...P.캠퍼스, offsetMin: 34 },
     ] },
   { id: "sample-sec-02", name: "[동탄] 출근 / To Work (Mon–Fri)", code: "S2", type: "출근", shift: null,
-    departTime: "07:00", seats: 45,
+    departTime: "07:00", seats: 45, routePath: PATH_동탄,
     stops: [
-      { name: "동탄역 3번출구", lat: 37.20140, lng: 127.09750, offsetMin: 0 },
-      { name: "능동사거리 버스정류장", lat: 37.20821, lng: 127.07240, offsetMin: 11 },
-      { name: "삼성전자 기흥캠퍼스 정문", lat: 37.22884, lng: 127.05316, offsetMin: 28 },
+      { name: "동탄역 3번출구", ...P.동탄역, offsetMin: 0 },
+      { name: "기흥동탄IC 정류장", ...P.기흥동탄, offsetMin: 10 },
+      { name: "삼성전자 기흥캠퍼스 정문", ...P.캠퍼스, offsetMin: 26 },
     ] },
   { id: "sample-sec-03", name: "[기흥] 퇴근 / To Home (Mon–Fri)", code: "S3", type: "퇴근", shift: null,
-    departTime: "18:20", seats: 45,
+    departTime: "18:20", seats: 45, routePath: [...PATH_기흥].reverse(),
     stops: [
-      { name: "삼성전자 기흥캠퍼스 정문", lat: 37.22884, lng: 127.05316, offsetMin: 0 },
-      { name: "신갈오거리 정류장", lat: 37.28497, lng: 127.11090, offsetMin: 22 },
-      { name: "기흥역 5번출구", lat: 37.27546, lng: 127.11594, offsetMin: 31 },
+      { name: "삼성전자 기흥캠퍼스 정문", ...P.캠퍼스, offsetMin: 0 },
+      { name: "청명역 1번출구", ...P.청명역, offsetMin: 20 },
+      { name: "기흥역 5번출구", ...P.기흥역, offsetMin: 32 },
     ] },
 ];
 
@@ -96,6 +123,8 @@ const routeRef = (id) => db.collection("companies").doc(CID).collection("routes"
     await routeRef(r.id).set({
       companyId: CID, partnerCode: CODE, name: r.name, code: r.code, type: r.type,
       shift: r.shift, departTime: r.departTime, seats: r.seats, order: i + 1, active: true,
+      // 🔴 plain number 배열이어야 한다(GeoPoint 아님) — 소비측이 `p.lat`/`p.lng` 를 그대로 읽는다.
+      routePath: r.routePath.map((p) => ({ lat: p.lat, lng: p.lng })),
     }, { merge: true });
     for (const [j, s] of r.stops.entries()) {
       await routeRef(r.id).collection("stops").doc(`s${j + 1}`).set({
