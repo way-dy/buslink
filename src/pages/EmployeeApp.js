@@ -32,7 +32,7 @@ import PermissionGate from "../components/PermissionGate";
 import HelpSheet from "../components/HelpSheet";
 import { resolveCompanyIdForAnon } from "../lib/companyResolver";
 // 거래처 브랜딩(2026-07-16 회의 #5) — 메인 컬러 CSS 변수 + 헤더 로고. 미설정=기본 테마.
-import { applyPartnerBranding, clearPartnerBranding, fetchPartnerCodeData, logoHeightOf, brandBand } from "../lib/partnerBranding";
+import { applyPartnerTheme, clearPartnerBranding, fetchPartnerCodeData, logoHeightOf, brandBand } from "../lib/partnerBranding";
 // 문의 게시판(2026-08-06 미팅) — dycs CS 위젯 연동. 거래처별 opt-in.
 import { resolveInquiryConfig, buildInquiryUrl } from "../lib/inquiry";
 import { resolveHomepageConfig, homepageDisplayHost } from "../lib/homepage";
@@ -457,6 +457,8 @@ export default function EmployeeApp() {
   //   브랜딩(2026-07-16 회의 #5) + 문의 게시판(2026-08-06 미팅)이 같은 문서에서 나오므로
   //   읽기는 한 번(`fetchPartnerCodeData`)만 하고 각 헬퍼가 필요한 필드만 뽑는다.
   const [branding, setBranding] = useState(null);
+  // 거래처 테마(2026-08-27). null = 테마 미사용 → 예전 branding 경로가 그대로 돈다(현행 100%).
+  const [theme, setTheme] = useState(null);
   const [inquiry, setInquiry] = useState(null); // {enabled,tenantId,token} | null(=미조회/거래처 없음)
   const [homepage, setHomepage] = useState(null); // {enabled,url} | null (2026-08-25)
   useEffect(() => {
@@ -464,14 +466,16 @@ export default function EmployeeApp() {
     const pc = session?.partnerCode;
     if (!pc) {
       clearPartnerBranding(); clearTagSoundPolicy();
-      setBranding(null); setInquiry(null); setHomepage(null);
+      setBranding(null); setTheme(null); setInquiry(null); setHomepage(null);
       return;
     }
     fetchPartnerCodeData(pc).then(d => {
       if (cancelled) return;
       const b = d ? (d.branding || null) : null;
       setBranding(b);
-      applyPartnerBranding(b);
+      // 🔴 `applyPartnerTheme` 은 테마가 없으면 스스로 옛 `applyPartnerBranding` 경로로 내려간다.
+      //    그래서 여기서 분기하지 않는다 — 분기를 두면 한쪽만 고쳐 어긋난다.
+      setTheme(applyPartnerTheme(d));
       setInquiry(resolveInquiryConfig(d)); // 부재·모르는 값 = 꺼짐(회귀 0)
       setHomepage(resolveHomepageConfig(d));
       // 태깅 소리 강제 여부(2026-08-25). 프롭으로 여러 겹 내려보내지 않는 이유 =
@@ -594,7 +598,7 @@ export default function EmployeeApp() {
             예전엔 여기 밴드보다 위에 있어서 앱을 처음 여는 사람이 브랜드가 아니라
             회색 카드부터 봤다. 🔴 위치만 바꿨고 **노출 조건은 그대로**다(권한 메시지 누락 금지). */}
         {tab === "home"     && (
-          <HomeTab companyId={companyId} session={session} branding={branding} onScanTab={() => setTab("scan")} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />
+          <HomeTab companyId={companyId} session={session} branding={branding} theme={theme} onScanTab={() => setTab("scan")} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />
         )}
         {tab === "routes"   && <RoutesTab companyId={companyId} session={session} onSessionUpdate={(s) => { saveSession({...session,...s}); setSession(p=>({...p,...s})); }} />}
         {tab === "notices"  && <NoticesTab notices={notices} unreadCount={unreadCount} />}
@@ -630,13 +634,14 @@ export default function EmployeeApp() {
             onClick={() => { setTab(t.id); if (t.id === "notices") markNoticesRead(); }}
             style={{ ...S.tabBtn, color: tab === t.id ? "var(--color-primary)" : "var(--color-label-mute)" }}>
             {/* 선택 탭 = 채움 아이콘 + 브랜드 톤 알약(2026-08-05 way "감각적인 것으로").
-                알약색 `--color-primary-soft` 는 거래처 브랜드색에서 자동 파생되므로
-                (partnerBranding 이 primary 를 흰색과 90% 섞어 만든다) 거래처마다 톤이 맞는다.
+                알약색은 `--color-accent-soft`(2026-08-27 테마 확장) — tokens.css 기본값이
+                `var(--color-primary-soft)` 라 테마를 안 쓰는 거래처는 **예전과 같은 색**이고,
+                카카오처럼 포인트색이 따로 있는 거래처만 그 톤으로 바뀐다.
                 🔴 비선택은 라인 유지 — 전부 채우면 무엇이 선택인지 안 읽힌다. */}
             <span style={{
               position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center",
               width: 34, height: 30, borderRadius: 11,
-              background: tab === t.id ? "var(--color-primary-soft)" : "transparent",
+              background: tab === t.id ? "var(--color-accent-soft)" : "transparent",
               transition: "background .15s ease",
             }}>
               <Icon name={t.icon} size={21} solid={tab === t.id} />
@@ -812,9 +817,11 @@ function FirstPinSetup({ companyId, session, onDone, onLogout }) {
 // ════════════════════════════════════════════════════════
 // 홈 탭 — 내 노선 버스 위치 + ETA
 // ════════════════════════════════════════════════════════
-function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
+function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpdate }) {
   // 상단 브랜드 밴드 색 — 거래처 색에서 파생하고 글자색은 휘도로 정한다(순수 함수).
-  const band = brandBand(branding);
+  // 🔴 테마가 오면 밴드색을 primary 에서 파생하지 않는다 — 카카오 톤은 밴드(곤색)와
+  //    CTA(파랑)가 서로 다른 색이라 파생으로 만들 수 없다(`partnerBranding.brandBand`).
+  const band = brandBand(branding, theme);
   const [routes, setRoutes]         = useState([]);
   const [activeRouteId, setActiveRouteId] = useState(session.routeId || null);
   // 첫 노선 로드에서 한 번만 활성 노선을 홈 목록 안으로 맞춘다(2026-08-18) — 아래 주석 참조.
@@ -1896,7 +1903,7 @@ function HomeTab({ companyId, session, branding, onScanTab, onSessionUpdate }) {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, flexWrap: 'wrap' }}>
                         <span style={{ fontSize: 10, padding: '3px 9px', borderRadius: 'var(--radius-pill)', fontWeight: 600,
-                          background: r.type === '출근' ? 'var(--color-primary-soft)' : 'var(--color-atomic-orange-90)',
+                          background: r.type === '출근' ? 'var(--color-accent-soft)' : 'var(--color-atomic-orange-90)',
                           color: r.type === '출근' ? 'var(--color-primary-deep)' : '#B95300' }}>
                           {r.type || '노선'}
                         </span>
@@ -2248,7 +2255,7 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
             <div key={g.type} style={{ marginBottom: 18 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
                 <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: "var(--radius-pill)", fontWeight: 700,
-                  background: g.type === "출근" ? "var(--color-primary-soft)" : "var(--color-atomic-orange-90)",
+                  background: g.type === "출근" ? "var(--color-accent-soft)" : "var(--color-atomic-orange-90)",
                   color: g.type === "출근" ? "var(--color-primary-deep)" : "#B95300" }}>
                   {g.type}
                 </span>
@@ -2291,7 +2298,9 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
                     "선택된 협력사: OOO" 를 띄우고 그 거래처 노선만 보여준다. 카드마다
                     같은 이름을 또 다는 건 중복이고, 칩이 늘어날수록 화면이 어수선해진다. */}
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 10.5, padding: "3px 9px", borderRadius: "var(--radius-pill)", background: r.type === "출근" ? "var(--color-primary-soft)" : "var(--color-atomic-orange-90)", color: r.type === "출근" ? "var(--color-primary-deep)" : "#B95300", fontWeight: 700 }}>
+                  {/* 🔴 운행 구분 배지는 4개 화면(홈 카드·노선 목록·노선 그룹·정류장 시트)에
+                      같은 규칙으로 그린다 — 한 곳만 accent 로 바꾸면 화면마다 색이 갈린다. */}
+                  <span style={{ fontSize: 10.5, padding: "3px 9px", borderRadius: "var(--radius-pill)", background: r.type === "출근" ? "var(--color-accent-soft)" : "var(--color-atomic-orange-90)", color: r.type === "출근" ? "var(--color-primary-deep)" : "#B95300", fontWeight: 700 }}>
                     {r.type}
                   </span>
                   {r.shift && <span style={{ fontSize: 10.5, color: "var(--color-label-mute)" }}>{r.shift}</span>}
@@ -2367,7 +2376,7 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3, flexWrap:"wrap" }}>
                     <span style={{ fontSize:10, padding:"3px 9px", borderRadius:"var(--radius-pill)",
-                      background: stopModal.type==="출근"?"var(--color-primary-soft)":"var(--color-atomic-orange-90)",
+                      background: stopModal.type==="출근"?"var(--color-accent-soft)":"var(--color-atomic-orange-90)",
                       color: stopModal.type==="출근"?"var(--color-primary-deep)":"#B95300", fontWeight:600 }}>
                       {stopModal.type}
                     </span>

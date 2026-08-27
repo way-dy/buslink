@@ -6,10 +6,60 @@
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 
-const BRAND_VARS = ["--color-primary", "--color-primary-deep", "--color-primary-soft"];
+const BRAND_VARS = [
+  "--color-primary", "--color-primary-deep", "--color-primary-soft",
+  // 2026-08-27 테마 확장분 — clear 에서 빠뜨리면 거래처를 옮겨도 색이 남는다.
+  "--color-band", "--color-band-fg", "--color-accent", "--color-accent-soft",
+];
 
 export function isValidHexColor(s) {
   return typeof s === "string" && /^#[0-9a-fA-F]{6}$/.test(s.trim());
+}
+
+// ── 거래처 테마 (2026-08-27, 카카오 톤 요청에서 도출) ────────────────────────
+// 여태 거래처가 정할 수 있는 색은 **하나**(primaryColor)뿐이었고 밴드·soft 는 거기서
+// 파생(mixHex)했다. 그런데 카카오 톤앤매너는 **상단 밴드(곤색)와 주 버튼(파랑)이 서로 다른
+// 색**이라 파생으로는 만들 수 없다 → 밴드·포인트를 독립 필드로 올린다.
+//
+// 🔴 **부재·모르는 값 = 현행**. theme 이 없으면 예전 `branding.primaryColor` 경로가 그대로
+//    돌고, 그마저 없으면 기본 테마다. 이 폴백을 빼면 색을 설정해 둔 거래처가 한꺼번에 흔들린다.
+// 🔴 값을 자유 입력이 아니라 **프리셋**으로 두는 이유 = 세 색이 서로 맞물려야 하고 한 칸만
+//    어긋나면 오히려 조잡해 보인다. 개별 필드 덮어쓰기는 남겨 두되(예외 대응) 기본은 프리셋.
+//
+// theme = { preset?: "kakao", band?, accent?, accentSoft?, primary? }  (전부 "#RRGGBB")
+export const THEME_PRESETS = {
+  // 🔴 이 값들은 짐작이 아니라 카카오모빌리티 통근셔틀 소개서(`file/20260827/*.pdf`) 7쪽을
+  //    렌더해 픽셀에서 읽은 것이다. 카카오 **공식** 옐로우(#FEE500)가 아니라 그 문서가
+  //    실제로 쓰는 값(#FFCD00)을 따른다 — 상표가 아니라 톤을 맞추는 게 요청이었다.
+  kakao: { band: "#1E233D", accent: "#FFCD00", accentSoft: "#FFF3C4", primary: "#4088FE" },
+};
+
+const THEME_KEYS = ["band", "accent", "accentSoft", "primary"];
+
+/**
+ * partnerCodes/{code} 문서에서 테마를 해석한다. 프리셋을 바탕으로 유효한 개별 필드만 덮어쓴다.
+ * 테마가 없거나 알아볼 수 없으면 **null**(= 호출부가 기존 branding 경로로 내려간다).
+ * 순수 함수(DOM·Firebase 접근 0).
+ */
+export function resolveTheme(codeData) {
+  const t = codeData && codeData.theme;
+  if (!t || typeof t !== "object") return null;
+  const base = THEME_PRESETS[t.preset];
+  // 프리셋도 없고 밴드·포인트도 없으면 테마라고 볼 근거가 없다(primary 하나면 옛 경로가 맞다).
+  if (!base && !isValidHexColor(t.band) && !isValidHexColor(t.accent)) return null;
+  const out = { ...(base || {}) };
+  THEME_KEYS.forEach((k) => { if (isValidHexColor(t[k])) out[k] = t[k].trim(); });
+  if (!isValidHexColor(out.primary)) out.primary = "#0066FF";
+  if (!isValidHexColor(out.band)) out.band = mixHex(out.primary, "#000000", 0.25);
+  if (!isValidHexColor(out.accent)) out.accent = out.primary;
+  if (!isValidHexColor(out.accentSoft)) out.accentSoft = mixHex(out.accent, "#ffffff", 0.86);
+  return out;
+}
+
+/** 어떤 배경색 위에 글자를 얹을 때 흑/백 중 읽히는 쪽. 밴드·배지 공용. */
+export function readableOn(hex) {
+  // 0.45 = 흰 글씨가 편안한 경계(순수 노랑 #FFD400 도 여기서 어두운 글씨로 떨어진다)
+  return relativeLuminance(hex) > 0.45 ? "#0B1020" : "#ffffff";
 }
 
 // 두 hex 색을 ratio 비율로 혼합(0=hex 그대로, 1=target). deep/soft 파생용 순수 함수.
@@ -32,11 +82,17 @@ export function relativeLuminance(hex) {
   return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
 }
 
-/** 홈 브랜드 밴드에 쓸 배경·전경색. branding 없으면 기본 테마(#003DCC). */
-export function brandBand(branding) {
+/**
+ * 홈 브랜드 밴드에 쓸 배경·전경색. branding 없으면 기본 테마(#003DCC).
+ * `theme`(resolveTheme 결과)가 오면 **밴드색을 파생하지 않고 그 값을 그대로 쓴다** —
+ * 밴드(곤색)와 CTA(파랑)가 다른 톤앤매너는 파생으로 만들 수 없다는 게 이 인자의 존재 이유다.
+ * 🔴 글자색은 여전히 휘도로 정한다(하드코딩 금지) — 노랑을 밴드로 고른 거래처가 나오면
+ *    흰 글씨가 안 읽힌다.
+ */
+export function brandBand(branding, theme) {
   const raw = branding && branding.primaryColor;
-  const base = isValidHexColor(raw) ? mixHex(raw.trim(), "#000000", 0.25) : "#003DCC";
-  // 0.45 = 흰 글씨가 편안한 경계(순수 노랑 #FFD400 의 deep 도 여기서 어두운 글씨로 떨어진다)
+  const base = (theme && isValidHexColor(theme.band)) ? theme.band
+    : (isValidHexColor(raw) ? mixHex(raw.trim(), "#000000", 0.25) : "#003DCC");
   const dark = relativeLuminance(base) > 0.45;
   return {
     bg: base,
@@ -62,6 +118,29 @@ export function applyPartnerBranding(branding) {
   root.style.setProperty("--color-primary-deep", mixHex(color, "#000000", 0.25));
   root.style.setProperty("--color-primary-soft", mixHex(color, "#ffffff", 0.9));
   return true;
+}
+
+/**
+ * 거래처 문서 하나로 테마·브랜딩을 한 번에 적용하는 **정본 진입점**(2026-08-27).
+ * 반환 = 적용된 테마 객체(없으면 null) — 호출부가 `brandBand(branding, theme)` 에 그대로 넘긴다.
+ *
+ * 🔴 테마가 없으면 기존 `applyPartnerBranding` 경로로 내려간다(현행 100% 보존).
+ * 🔴 `--color-accent` 기본값은 tokens.css 에서 `var(--color-primary)` 다 — 즉 테마를 안 쓰는
+ *    거래처에서는 accent 를 읽는 자리도 지금과 **같은 색**이 나온다. 이 기본값을 지우면
+ *    설정 안 한 8개 거래처의 배지·칩이 한꺼번에 빈 색이 된다.
+ */
+export function applyPartnerTheme(codeData) {
+  const theme = resolveTheme(codeData);
+  if (!theme) { applyPartnerBranding(codeData && codeData.branding); return null; }
+  const root = document.documentElement;
+  root.style.setProperty("--color-primary", theme.primary);
+  root.style.setProperty("--color-primary-deep", mixHex(theme.primary, "#000000", 0.25));
+  root.style.setProperty("--color-primary-soft", mixHex(theme.primary, "#ffffff", 0.9));
+  root.style.setProperty("--color-band", theme.band);
+  root.style.setProperty("--color-band-fg", readableOn(theme.band));
+  root.style.setProperty("--color-accent", theme.accent);
+  root.style.setProperty("--color-accent-soft", theme.accentSoft);
+  return theme;
 }
 
 export function clearPartnerBranding() {

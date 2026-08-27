@@ -4,7 +4,8 @@ import { passengerLogin, passengerResume, passengerMigrate } from "../lib/passen
 import { unlockTagSound, playTagBeep } from "../lib/tagSound";
 import { auth } from "../firebase";
 import { signInAnonymously } from "firebase/auth";
-import { Icon } from "../components/ui";
+import { BusLinkLogo, Icon } from "../components/ui";
+import { fetchPartnerCodeData, applyPartnerTheme } from "../lib/partnerBranding";
 
 function getParam(key) {
   return new URLSearchParams(window.location.search).get(key);
@@ -50,6 +51,17 @@ export default function BoardingApp() {
   const [errMsg, setErrMsg] = useState("");
   const [authReady, setAuthReady] = useState(false);
 
+  // ── 거래처 테마 (2026-08-27) ──────────────────────────────────────────────
+  // 🔴 이 화면은 URL 에 거래처가 없다(`?c=회사&v=차량`). 신원이 생긴 뒤에야 누구 화면인지
+  //    알 수 있으므로, 로그인·복원이 돌려주는 `passenger.partnerCode` 로 한 번 조회한다.
+  //    그 전(사번·비밀번호 입력 화면)은 기본 테마다 — 아직 누구인지 모르니 당연하다.
+  // ⚠ 조회 실패·거래처 없음은 조용히 기본 테마(현행). 탑승은 테마와 무관하게 진행돼야 한다.
+  const themeFor = (passenger) => {
+    const pc = passenger && passenger.partnerCode;
+    if (!pc) return;
+    fetchPartnerCodeData(pc).then(applyPartnerTheme).catch(() => {});
+  };
+
   useEffect(() => {
     if (!tokenId && !isStatic) {
       setErrMsg("QR코드가 올바르지 않습니다.\n버스 내 QR코드를 다시 스캔해주세요.");
@@ -76,12 +88,15 @@ export default function BoardingApp() {
     const r = remembered;
     let p;
     if (isStatic && r && r.resumeToken) {
-      p = passengerResume({ companyId: cId, resumeToken: r.resumeToken }).catch(e => drop(e && e.message));
+      p = passengerResume({ companyId: cId, resumeToken: r.resumeToken })
+        .then(({ passenger }) => { if (alive) themeFor(passenger); })
+        .catch(e => drop(e && e.message));
     } else if (isStatic && r && r.pinHash && r.empNo) {
       // 🔴 이 배포 이전에 기억된 기기 — 승계표가 없다. 한 번만 승계한다(서버에 만료일 있음).
       p = passengerMigrate({ companyId: cId, empNo: r.empNo, pinHash: r.pinHash })
-        .then(({ resumeToken }) => {
+        .then(({ resumeToken, passenger }) => {
           if (!alive) return;
+          themeFor(passenger);
           const nr = { companyId: cId, empNo: r.empNo, name: r.name || "", resumeToken };
           saveRemembered(nr); setRemembered(nr);
         })
@@ -115,6 +130,7 @@ export default function BoardingApp() {
       //    `pinHash` 를 증거로 보냈는데 그 값은 명부에서 누구나 읽을 수 있어 증거가 못 됐다.
       if (isStatic && !remembered) {
         const issued = await passengerLogin({ companyId: cId, empNo: useEmpNo, pin });
+        themeFor(issued.passenger);   // 이제 누구인지 안다 → 그 거래처 테마로
         // 로그인 성공이 곧 본인 확인 성공이다 → **여기서** 기억한다. 탑승이 뒤에서
         // 실패해도(그 시간에 배차가 없다 등) 신원은 맞았으므로 PIN 을 다시 칠 이유가 없다.
         // (틀린 값을 굳혀 두면 매번 실패하므로 로그인 전에는 기억하지 않는다.)
@@ -156,12 +172,9 @@ export default function BoardingApp() {
     <div style={S.wrap}>
       <div style={S.card}>
         {/* 헤더 */}
+        {/* 워드마크는 다른 화면과 같은 `BusLinkLogo`. 색을 CSS 변수로 넘겨 거래처 테마를 따라간다. */}
         <div style={S.header}>
-          <div style={S.logo}>BL</div>
-          <div>
-            <div style={S.logoText}>BusLink</div>
-            <div style={S.logoSub}>{isStatic ? "고정 QR 탑승" : "탑승 확인"}</div>
-          </div>
+          <BusLinkLogo size={24} color="var(--color-primary)" sub={isStatic ? "고정 QR 탑승" : "탑승 확인"} />
         </div>
 
         {/* ─ 입력 단계 ─ */}
@@ -178,7 +191,7 @@ export default function BoardingApp() {
               {!isStatic && (
                 <>
                   <br/>
-                  QR코드는 <span style={{ color: "#FFD166", fontWeight: 600 }}>5분</span> 후 만료됩니다.
+                  QR코드는 <span style={{ color: "var(--color-cautionary)", fontWeight: 700 }}>5분</span> 후 만료됩니다.
                 </>
               )}
             </div>
@@ -192,7 +205,7 @@ export default function BoardingApp() {
                     {remembered.name ? `${remembered.name} · ` : ""}{remembered.empNo}
                   </span>
                   <button onClick={handleSwitchUser}
-                    style={{ background: "none", border: "none", color: "#9FB6FF", fontSize: 12, fontFamily: "inherit", cursor: "pointer", textDecoration: "underline", flexShrink: 0 }}>
+                    style={{ background: "none", border: "none", color: "var(--color-primary)", fontSize: 12, fontFamily: "inherit", cursor: "pointer", textDecoration: "underline", flexShrink: 0 }}>
                     다른 사람
                   </button>
                 </div>
@@ -249,7 +262,7 @@ export default function BoardingApp() {
         {step === STEPS.LOADING && (
           <div style={S.centerBox}>
             <div style={S.spinner} />
-            <div style={{ color: "#8896AA", fontSize: 14, marginTop: 16 }}>탑승 확인 중...</div>
+            <div style={{ color: "var(--color-label-mute)", fontSize: 14, marginTop: 16 }}>탑승 확인 중...</div>
           </div>
         )}
 
@@ -257,41 +270,41 @@ export default function BoardingApp() {
         {step === STEPS.SUCCESS && result && (
           <div style={S.centerBox}>
             <div style={S.successIcon}>✓</div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: "#00C48C", marginBottom: 8 }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: "var(--color-positive)", marginBottom: 8 }}>
               {result.alreadyBoarded ? "이미 탑승 처리됨" : "탑승 완료!"}
             </div>
             {result.alreadyBoarded && (
-              <div style={{ fontSize: 13, color: "#FFD166", marginBottom: 8, textAlign: "center" }}>
+              <div style={{ fontSize: 13, color: "var(--color-cautionary)", marginBottom: 8, textAlign: "center" }}>
                 이미 탑승 처리된 QR입니다.
               </div>
             )}
-            <div style={{ fontSize: 15, color: "#F0F4FF", fontWeight: 600, marginBottom: 4, textAlign: "center" }}>
+            <div style={{ fontSize: 15, color: "var(--color-label)", fontWeight: 700, marginBottom: 4, textAlign: "center", wordBreak: "keep-all" }}>
               {result.routeName}
             </div>
-            <div style={{ fontSize: 13, color: "#8896AA", marginBottom: 20, textAlign: "center" }}>
+            <div style={{ fontSize: 13, color: "var(--color-label-mute)", marginBottom: 20, textAlign: "center" }}>
               {result.vehicleNo} · {result.dispatchDate}
             </div>
 
-            <div style={{ background: "#0B1A2E", borderRadius: 12, padding: "14px 20px", width: "100%", marginBottom: 20 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                <span style={{ fontSize: 12, color: "#8896AA" }}>사번</span>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "#F0F4FF" }}>{empNo}</span>
+            <div style={S.detail}>
+              <div style={{ ...S.detailRow, marginBottom: 8 }}>
+                <span style={S.detailKey}>사번</span>
+                <span style={S.detailVal}>{empNo}</span>
               </div>
               {name && (
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                  <span style={{ fontSize: 12, color: "#8896AA" }}>이름</span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#F0F4FF" }}>{name}</span>
+                <div style={{ ...S.detailRow, marginBottom: 8 }}>
+                  <span style={S.detailKey}>이름</span>
+                  <span style={S.detailVal}>{name}</span>
                 </div>
               )}
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 12, color: "#8896AA" }}>탑승 시각</span>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "#00C48C" }}>
+              <div style={S.detailRow}>
+                <span style={S.detailKey}>탑승 시각</span>
+                <span style={{ ...S.detailVal, color: "var(--color-positive)" }}>
                   {new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                 </span>
               </div>
             </div>
 
-            <div style={{ fontSize: 12, color: "#4A6FA5", textAlign: "center" }}>
+            <div style={{ fontSize: 12, color: "var(--color-label-alt)", textAlign: "center" }}>
               창을 닫아도 됩니다
             </div>
           </div>
@@ -301,17 +314,17 @@ export default function BoardingApp() {
         {step === STEPS.ERROR && (
           <div style={S.centerBox}>
             <div style={S.errorIcon}>✕</div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: "#FF4D6A", marginBottom: 12 }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "var(--color-destructive)", marginBottom: 12 }}>
               탑승 실패
             </div>
-            <div style={{ fontSize: 14, color: "#8896AA", textAlign: "center", whiteSpace: "pre-line", lineHeight: 1.6, marginBottom: 24 }}>
+            <div style={{ fontSize: 14, color: "var(--color-label-mute)", textAlign: "center", whiteSpace: "pre-line", lineHeight: 1.6, marginBottom: 24 }}>
               {errMsg}
             </div>
             {/* 만료성 오류(QR 5분 만료)는 재시도해도 무의미 → 버튼 숨김.
                 그 외 복구 가능한 오류(잘못된/사용된 QR, 사번 미입력 등)는 재시도 노출 */}
             {errMsg.includes("만료") ? null : (
               <button
-                style={{ ...S.btn, background: "#1E3A5F", fontSize: 14 }}
+                style={{ ...S.btn, background: "var(--color-bg-soft)", color: "var(--color-label)", fontSize: 14 }}
                 onClick={() => { setStep(STEPS.INPUT); setErrMsg(""); }}
               >
                 다시 시도
@@ -324,61 +337,71 @@ export default function BoardingApp() {
   );
 }
 
+// ─── 스타일 (2026-08-27 라이트 리스킨 + 토큰화) ─────────────────────────────
+// 🔴 이 화면은 2026-05-16 리디자인 0~7단계에서 **통째로 빠져 있었다**(redesign.md 목록에
+//    Login/Driver/Passenger/Admin/Employee/Partner 만 있다). 그래서 앱 안 탑승 탭(`/p`)은
+//    흰 화면인데 고정 QR 로 들어온 같은 사람은 **남색 화면 + 다른 글꼴**을 봤다 —
+//    `'Noto Sans KR'` 은 이 저장소 어디에서도 로드하지 않으므로(Pretendard 만 self-host)
+//    실제로는 기기 기본 산세리프로 떨어지고 있었다.
+// 🔴 색은 전부 tokens.css 변수로 — 이래야 거래처 테마(`applyPartnerTheme`)가 이 화면에도 걸린다.
+//    하드코딩 hex 40곳이 이 화면만 테마를 못 따라오게 만들던 원인이었다.
+// ⚠ **의도적으로 남긴 것 없음** — 카메라 뷰파인더 같은 "검정이 곧 기능"인 요소가 이 화면엔 없다.
 const S = {
   wrap: {
-    minHeight: "100vh", background: "#0B1A2E",
+    minHeight: "100vh", background: "var(--color-bg-alt)",
     display: "flex", alignItems: "center", justifyContent: "center",
-    padding: 20, fontFamily: "'Noto Sans KR',sans-serif",
+    padding: 20, fontFamily: "var(--font-base)",
   },
   card: {
-    background: "#112240", borderRadius: 24, padding: "32px 28px",
+    background: "var(--color-bg)", borderRadius: "var(--radius-24)", padding: "32px 28px",
     width: "100%", maxWidth: 380, display: "flex", flexDirection: "column",
-    gap: 16, boxShadow: "0 24px 64px rgba(0,0,0,0.5)",
+    gap: 16, boxShadow: "var(--shadow-strong)",
   },
   header: { display: "flex", alignItems: "center", gap: 12, marginBottom: 4 },
-  logo: {
-    width: 36, height: 36, borderRadius: 10,
-    background: "linear-gradient(135deg,#1A6BFF,#00C2FF)",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    fontWeight: 800, fontSize: 14, color: "#fff", flexShrink: 0,
-  },
-  logoText: { fontSize: 18, fontWeight: 800, background: "linear-gradient(90deg,#1A6BFF,#00C2FF)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" },
-  logoSub: { fontSize: 11, color: "#8896AA" },
   iconWrap: { display: "flex", justifyContent: "center", margin: "8px 0" },
   busIcon: { fontSize: 48, lineHeight: 1 },
-  title: { fontSize: 22, fontWeight: 800, color: "#F0F4FF", textAlign: "center" },
-  desc: { fontSize: 13, color: "#8896AA", textAlign: "center", lineHeight: 1.6 },
+  title: { fontSize: 22, fontWeight: 800, color: "var(--color-label)", textAlign: "center" },
+  desc: { fontSize: 13, color: "var(--color-label-mute)", textAlign: "center", lineHeight: 1.6 },
   inputGroup: { display: "flex", flexDirection: "column", gap: 6 },
-  inputLabel: { fontSize: 12, color: "#8896AA", fontWeight: 600, letterSpacing: "0.03em" },
+  inputLabel: { fontSize: 12, color: "var(--color-label-mute)", fontWeight: 600, letterSpacing: "0.03em" },
   input: {
-    background: "#0B1A2E", border: "1px solid #1E3A5F", borderRadius: 10,
-    padding: "13px 16px", color: "#F0F4FF", fontSize: 16, outline: "none",
+    background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: "var(--radius-12)",
+    // 🔴 16px 미만으로 줄이지 말 것 — iOS 사파리가 입력 포커스 때 화면을 확대해 버린다.
+    padding: "13px 16px", color: "var(--color-label)", fontSize: 16, outline: "none",
     fontFamily: "inherit", width: "100%", boxSizing: "border-box",
     transition: "border .2s",
   },
   btn: {
-    background: "linear-gradient(135deg,#1A6BFF,#00C2FF)", border: "none",
-    borderRadius: 12, padding: "15px", color: "#fff", fontSize: 16,
+    background: "var(--color-primary)", border: "none",
+    borderRadius: "var(--radius-12)", padding: "15px", color: "#fff", fontSize: 16,
     fontWeight: 800, cursor: "pointer", fontFamily: "inherit", width: "100%",
     letterSpacing: "0.02em",
   },
-  notice: { fontSize: 11, color: "#4A6FA5", textAlign: "center", lineHeight: 1.6 },
+  notice: { fontSize: 11, color: "var(--color-label-alt)", textAlign: "center", lineHeight: 1.6 },
   centerBox: { display: "flex", flexDirection: "column", alignItems: "center", padding: "20px 0", gap: 8 },
   successIcon: {
     width: 72, height: 72, borderRadius: "50%",
-    background: "rgba(0,196,140,.15)", border: "2px solid #00C48C",
+    background: "var(--color-atomic-green-90)", border: "2px solid var(--color-positive)",
     display: "flex", alignItems: "center", justifyContent: "center",
-    fontSize: 32, color: "#00C48C", fontWeight: 700, marginBottom: 12,
+    fontSize: 32, color: "var(--color-positive)", fontWeight: 700, marginBottom: 12,
   },
   errorIcon: {
     width: 72, height: 72, borderRadius: "50%",
-    background: "rgba(255,77,106,.15)", border: "2px solid #FF4D6A",
+    background: "var(--color-atomic-red-90)", border: "2px solid var(--color-destructive)",
     display: "flex", alignItems: "center", justifyContent: "center",
-    fontSize: 32, color: "#FF4D6A", fontWeight: 700, marginBottom: 12,
+    fontSize: 32, color: "var(--color-destructive)", fontWeight: 700, marginBottom: 12,
   },
+  // 결과 상세 상자 — 카드(흰색) 안에 한 단계 눌린 면.
+  detail: {
+    background: "var(--color-bg-alt)", border: "1px solid var(--color-line-soft)",
+    borderRadius: "var(--radius-12)", padding: "14px 20px", width: "100%", marginBottom: 20,
+  },
+  detailRow: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 },
+  detailKey: { fontSize: 12, color: "var(--color-label-mute)" },
+  detailVal: { fontSize: 13, fontWeight: 600, color: "var(--color-label)" },
   spinner: {
     width: 40, height: 40, borderRadius: "50%",
-    border: "3px solid #1E3A5F", borderTopColor: "#00C2FF",
+    border: "3px solid var(--color-line)", borderTopColor: "var(--color-primary)",
     animation: "spin 0.8s linear infinite",
   },
 };

@@ -3,6 +3,8 @@
 //   node scripts/set_partner_app_options.cjs                      (전 거래처 현황만 — 쓰기 0)
 //   node scripts/set_partner_app_options.cjs <코드일부>            (그 거래처 dry-run — 쓰기 0)
 //   node scripts/set_partner_app_options.cjs <코드일부> --homepage <URL> --sound-forced
+//   node scripts/set_partner_app_options.cjs <코드일부> --theme kakao      (테마 프리셋 켜기)
+//   node scripts/set_partner_app_options.cjs <코드일부> --theme-off        (기본 테마로 되돌리기)
 //   node scripts/set_partner_app_options.cjs <코드일부> ... --apply   ← 이때만 실제로 쓴다
 //
 // 🔴 **`--apply` 없이는 아무것도 쓰지 않는다.** 관리자 화면(협력사 관리 → ⚙️ 포탈 설정)에서도
@@ -27,7 +29,12 @@ const SOUND_FREE = argv.includes("--sound-free"); // 강제 해제
 const hpIdx = argv.indexOf("--homepage");
 const HOMEPAGE = hpIdx >= 0 ? argv[hpIdx + 1] : null;
 const HOMEPAGE_OFF = argv.includes("--homepage-off");
-const needle = argv.find((a) => !a.startsWith("--") && a !== HOMEPAGE) || null;
+// 거래처 테마(2026-08-27). 프리셋 이름만 받는다 — 자유 색 조합은 관리자 화면에서.
+const THEME_PRESETS = ["kakao"];
+const thIdx = argv.indexOf("--theme");
+const THEME = thIdx >= 0 ? argv[thIdx + 1] : null;
+const THEME_OFF = argv.includes("--theme-off");
+const needle = argv.find((a) => !a.startsWith("--") && a !== HOMEPAGE && a !== THEME) || null;
 
 function validUrl(v) {
   if (typeof v !== "string" || !v.trim()) return false;
@@ -40,9 +47,12 @@ const show = (d) => {
   const hp = d.homepage || {};
   const ts = d.tagSound || {};
   const inq = d.inquiry || {};
+  const th = d.theme || {};
+  const br = d.branding || {};
   return `홈페이지 ${hp.enabled === true ? "켜짐 · " + (hp.url || "(주소없음)") : "꺼짐"}`
     + ` | 소리강제 ${ts.forced === true ? "켜짐" : "꺼짐"}`
-    + ` | 문의 ${inq.enabled === true ? "켜짐(" + (inq.tenantId || "?") + ")" : "꺼짐"}`;
+    + ` | 문의 ${inq.enabled === true ? "켜짐(" + (inq.tenantId || "?") + ")" : "꺼짐"}`
+    + ` | 테마 ${th.preset ? th.preset : (br.primaryColor ? "색만(" + br.primaryColor + ")" : "기본")}`;
 };
 
 (async () => {
@@ -82,11 +92,24 @@ const show = (d) => {
   if (SOUND_FORCED) patch.tagSound = { forced: true };
   if (SOUND_FREE) patch.tagSound = { forced: false };
 
+  // 🔴 테마를 끄는 것은 필드 삭제가 아니라 **빈 객체**다 — `resolveTheme` 이 preset 을 못 찾으면
+  //    null 을 돌려주고 앱은 기존 `branding.primaryColor` 경로로 내려간다(그 거래처가 색을
+  //    설정해 뒀다면 그 색이 그대로 살아난다). 필드를 지우면 되돌릴 때 흔적이 없다.
+  if (THEME_OFF) {
+    patch.theme = {};
+  } else if (THEME != null) {
+    if (!THEME_PRESETS.includes(THEME)) {
+      console.log(`\n🔴 모르는 프리셋: ${THEME} — 가능한 값: ${THEME_PRESETS.join(", ")}`);
+      process.exit(1);
+    }
+    patch.theme = { preset: THEME };
+  }
+
   console.log(`\n대상: ${ref.id}`);
   console.log(`      ${before.partnerName || "(이름없음)"}`);
   console.log(`\n  지금 : ${show(before)}`);
   if (!Object.keys(patch).length) {
-    console.log("\n바꿀 것이 지정되지 않았다(--homepage / --homepage-off / --sound-forced / --sound-free).");
+    console.log("\n바꿀 것이 지정되지 않았다(--homepage / --homepage-off / --sound-forced / --sound-free / --theme <프리셋> / --theme-off).");
     return;
   }
   console.log(`  바뀜 : ${show({ ...before, ...patch })}`);

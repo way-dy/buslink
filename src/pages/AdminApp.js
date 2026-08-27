@@ -46,7 +46,7 @@ import { PartnerFilter } from "../components/PartnerFilter";
 // Phase B(2026-06-08) admin별 협력사 권한 게이팅 헬퍼(순수)
 import { resolveAllowed, isAllAccess, partnerCodeAllowed, SEAT_MODES, SEAT_MODE_LABELS, seatReservationMode, canEnableSeatReservation } from "../lib/partnerAccess";
 // 포탈 설정 모달(협력사 브랜딩 검증·미리보기) — 2026-07-16 회의 #3·#5
-import { isValidHexColor, mixHex } from "../lib/partnerBranding";
+import { isValidHexColor, mixHex, THEME_PRESETS, resolveTheme, readableOn } from "../lib/partnerBranding";
 // 문의 게시판(2026-08-06 미팅) — 거래처별 dycs CS 위젯 매핑.
 import { resolveInquiryConfig, isValidTenantId, buildInquiryPreviewUrl } from "../lib/inquiry";
 import { isValidHomepageUrl, resolveHomepageConfig } from "../lib/homepage";
@@ -4962,6 +4962,8 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
   const [pHomeOn, setPHomeOn] = useState(false);
   const [pHomeUrl, setPHomeUrl] = useState("");
   const [pSoundForced, setPSoundForced] = useState(false);
+  // 2026-08-27 거래처 테마 — "" = 프리셋 미사용(아래 메인 컬러 경로가 그대로 돈다)
+  const [pTheme, setPTheme] = useState("");
   const [pColor, setPColor] = useState("");        // "" = 기본 테마
   const [pLogo, setPLogo] = useState(null);         // data URI | null
   const [pLogoHeight, setPLogoHeight] = useState(28);
@@ -5034,6 +5036,10 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
     setPortalEditTarget(code);
     setPOps(code.opsControlEnabled !== false); // 부재=true(현행 유지)
     setPSeat(seatReservationMode(code));       // 부재·모르는 값=off(신규 기능이라 회귀 0)
+    // 프리셋은 **아는 이름일 때만** 폼에 싣는다 — 모르는 값이면 앱도 기본으로 떨어지므로
+    // 화면과 실제 동작을 맞춰야 한다(모르는 값을 그대로 보여주면 "켜져 있다"고 오해한다).
+    const th = (code.theme && typeof code.theme === "object") ? code.theme : {};
+    setPTheme(THEME_PRESETS[th.preset] ? th.preset : "");
     const b = code.branding || {};
     setPColor(isValidHexColor(b.primaryColor) ? b.primaryColor : "");
     setPLogo(b.logo || null);
@@ -5106,6 +5112,12 @@ ${chk.missing.slice(0,8).join(", ")}
         tagSound: {
           forced: pSoundForced,
         },
+        // 🔴 프리셋을 끄는 것은 필드 삭제가 아니라 **빈 객체**다 — `resolveTheme` 이 null 을
+        //    돌려주면 앱은 아래 `branding.primaryColor` 경로로 내려간다(그 색이 그대로 살아난다).
+        //    필드를 지우면 되돌릴 흔적이 없다(`set_partner_app_options.cjs --theme-off` 와 같은 규칙).
+        theme: pTheme ? { preset: pTheme } : {},
+        // 🔴 프리셋을 써도 `branding` 은 **지우지 않는다** — 프리셋을 껐을 때 예전 색으로
+        //    정확히 돌아가야 하고, 로고는 프리셋과 무관하게 계속 쓰인다.
         branding: {
           primaryColor: pColor || null,
           logo: pLogo || null,
@@ -5468,8 +5480,49 @@ ${chk.missing.slice(0,8).join(", ")}
             ⚠ 휴대폰이 <b>무음 모드</b>이거나 미디어 볼륨이 0이면 소리는 나지 않습니다(웹이 넘을 수 없는 벽입니다). 진동은 항상 울립니다.
           </div>
 
-          <label style={{ ...S.label, marginTop: 12 }}>메인 컬러 (선택 — 비우면 기본 테마)</label>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* ── 테마 프리셋 (2026-08-27 카카오 톤 요청) ──────────────────────
+              🔴 색을 하나씩 고르게 하지 않는 이유 = 밴드·포인트·버튼 세 색이 서로 맞물려야
+                 하고 한 칸만 어긋나면 오히려 조잡해 보인다. 자유 색(아래 메인 컬러)은
+                 하위호환으로 남겨 두되, 프리셋을 고르면 그쪽이 이긴다. */}
+          <label style={{ ...S.label, marginTop: 12 }}>테마 프리셋</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {[{ id: "", name: "기본", desc: "아래 메인 컬러를 씁니다" },
+              ...Object.keys(THEME_PRESETS).map(k => ({ id: k, name: k === "kakao" ? "카카오 톤" : k, desc: "곤색 + 노랑 포인트" }))
+            ].map(opt => {
+              const on = pTheme === opt.id;
+              const pv = opt.id ? resolveTheme({ theme: { preset: opt.id } }) : null;
+              return (
+                <button key={opt.id || "default"} onClick={() => setPTheme(opt.id)}
+                  style={{
+                    flex: "1 1 150px", textAlign: "left", cursor: "pointer", fontFamily: "inherit",
+                    border: `2px solid ${on ? "var(--color-primary)" : "var(--color-line)"}`,
+                    background: on ? "var(--color-primary-soft)" : "var(--color-bg)",
+                    borderRadius: 10, padding: "9px 12px",
+                  }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {/* 색 견본 3개 = 밴드·포인트·버튼. 기본은 현재 primary 하나. */}
+                    {(pv ? [pv.band, pv.accent, pv.primary] : ["var(--color-primary-deep)", "var(--color-primary)", "var(--color-primary)"])
+                      .map((c, i) => (
+                        <span key={i} style={{ width: 14, height: 14, borderRadius: 4, background: c, border: "1px solid rgba(0,0,0,.12)", flexShrink: 0 }} />
+                      ))}
+                    <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--color-label)" }}>{opt.name}</span>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: "var(--color-label-mute)", marginTop: 3 }}>{opt.desc}</div>
+                </button>
+              );
+            })}
+          </div>
+          {pTheme && (
+            <div style={{ marginTop: 6, background: "#FFF8E1", border: "1px solid #FFE08A", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#7A5D00", lineHeight: 1.6 }}>
+              ⓘ 프리셋을 쓰는 동안 <b>아래 메인 컬러는 적용되지 않습니다</b>(값은 그대로 보관되어 프리셋을 끄면 되돌아갑니다).<br />
+              로고는 프리셋과 무관하게 계속 쓰입니다.
+            </div>
+          )}
+
+          <label style={{ ...S.label, marginTop: 12 }}>
+            메인 컬러 (선택 — 비우면 기본 테마){pTheme && <span style={{ color: "var(--color-label-alt)", fontWeight: 500 }}> · 프리셋 사용 중이라 지금은 미적용</span>}
+          </label>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, opacity: pTheme ? 0.5 : 1 }}>
             <input type="color" value={isValidHexColor(pColor) ? pColor : "#0066FF"}
               onChange={e => setPColor(e.target.value)}
               style={{ width: 42, height: 34, padding: 2, border: "1px solid var(--color-line)", borderRadius: 6, background: "var(--color-bg)", cursor: "pointer" }} />
@@ -5497,15 +5550,40 @@ ${chk.missing.slice(0,8).join(", ")}
             </>
           )}
 
-          {/* 미리보기 — 승객 앱 헤더 근사 */}
+          {/* 미리보기 — 승객 앱 상단 밴드 근사.
+              🔴 밴드 글자색은 하드코딩하지 않고 휘도로 정한다(`readableOn`) — 승객 앱과 같은
+                 규칙이어야 한다. 밝은 색을 밴드로 고른 거래처에서 흰 글씨는 안 읽힌다. */}
           <label style={{ ...S.label, marginTop: 12 }}>미리보기</label>
-          <div style={{ border: "1px solid var(--color-line)", borderRadius: 10, padding: "10px 14px", background: "#fff" }}>
-            {pLogo && <img src={pLogo} alt="" style={{ height: pLogoHeight, maxWidth: 140, objectFit: "contain", display: "block", marginBottom: 6 }} />}
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#111" }}>홍길동 <span style={{ fontSize: 11, color: "#888", fontWeight: 500 }}>운영팀</span></div>
-            <div style={{ marginTop: 8, display: "inline-block", padding: "5px 13px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: isValidHexColor(pColor) ? mixHex(pColor, "#ffffff", 0.9) : "var(--color-primary-soft)", color: isValidHexColor(pColor) ? mixHex(pColor, "#000000", 0.25) : "var(--color-primary-deep)", border: `1px solid ${isValidHexColor(pColor) ? pColor : "var(--color-primary)"}` }}>
-              🔄 노선 변경
-            </div>
-          </div>
+          {(() => {
+            const pv = pTheme ? resolveTheme({ theme: { preset: pTheme } }) : null;
+            const bandBg = pv ? pv.band
+              : (isValidHexColor(pColor) ? mixHex(pColor, "#000000", 0.25) : "#003DCC");
+            const bandFg = readableOn(bandBg);
+            const chipBg = pv ? pv.accentSoft
+              : (isValidHexColor(pColor) ? mixHex(pColor, "#ffffff", 0.9) : "var(--color-primary-soft)");
+            const btnBg = pv ? pv.primary : (isValidHexColor(pColor) ? pColor : "var(--color-primary)");
+            return (
+              <div style={{ border: "1px solid var(--color-line)", borderRadius: 10, overflow: "hidden", background: "#fff" }}>
+                <div style={{ background: bandBg, padding: "10px 14px" }}>
+                  {pLogo && (
+                    <span style={{ display: "inline-block", background: "#fff", borderRadius: 999, padding: "3px 8px", marginBottom: 6 }}>
+                      <img src={pLogo} alt="" style={{ height: Math.min(pLogoHeight, 24), maxWidth: 120, objectFit: "contain", display: "block" }} />
+                    </span>
+                  )}
+                  <div style={{ fontSize: 11, color: bandFg, opacity: 0.75 }}>홍길동 · 운영팀</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: bandFg, marginTop: 2 }}>[기흥] 출근</div>
+                </div>
+                <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ padding: "4px 11px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: chipBg, color: "var(--color-primary-deep)" }}>
+                    출근
+                  </span>
+                  <span style={{ padding: "6px 14px", borderRadius: 9, fontSize: 11.5, fontWeight: 800, background: btnBg, color: "#fff" }}>
+                    QR 탑승하기
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
 
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
             <button style={{ ...S.addBtn, flex: 1, opacity: pLoading ? 0.6 : 1 }} onClick={handlePortalSave} disabled={pLoading}>

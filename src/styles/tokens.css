@@ -67,6 +67,15 @@
   --color-primary-deep:   #003DCC;
   --color-primary-soft:   #EAF2FE;
 
+  /* 거래처 테마 (2026-08-27) — partnerBranding.applyPartnerTheme 가 :root 에 덮어쓴다.
+     🔴 여기 기본값은 **지금 화면과 같은 색**이어야 한다. accent 를 primary 로 두었으므로
+        테마를 안 쓰는 거래처(현재 전부)는 이 변수를 읽는 자리도 픽셀 변화가 0 이다.
+        기본값을 지우거나 다른 색으로 바꾸면 설정 안 한 거래처가 한꺼번에 흔들린다. */
+  --color-band:        #003DCC;                  /* 상단 브랜드 밴드 — 기본은 primary-deep 과 같다 */
+  --color-band-fg:     #FFFFFF;                  /* 밴드 위 글자. 테마 적용 시 휘도로 다시 정해진다 */
+  --color-accent:      var(--color-primary);     /* 포인트(배지·현재 정류장) */
+  --color-accent-soft: var(--color-primary-soft);/* 포인트 배경(칩·탭바 알약) */
+
   --color-label:        #171719;
   --color-label-strong: #000000;
   --color-label-mute:   rgba(46,47,51,0.61);
