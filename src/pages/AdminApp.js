@@ -5563,7 +5563,11 @@ ${chk.missing.slice(0,8).join(", ")}
               : (isValidHexColor(pColor) ? mixHex(pColor, "#ffffff", 0.9) : "var(--color-primary-soft)");
             const btnBg = pv ? pv.primary : (isValidHexColor(pColor) ? pColor : "var(--color-primary)");
             return (
-              <div style={{ border: "1px solid var(--color-line)", borderRadius: 10, overflow: "hidden", background: "#fff" }}>
+              // 🔴 `flexShrink:0` 필수 — `S.modal` 은 `display:flex` + `maxHeight:88dvh` 다.
+              //    flex 항목의 자동 최소높이(`min-height:auto`)는 **`overflow` 가 visible 이 아니면
+              //    0 이 된다**(스펙). 밴드 모서리를 둥글리려고 넣은 `overflow:hidden` 때문에
+              //    모달이 넘치는 순간 이 상자만 높이 2px(테두리)로 눌려 미리보기가 통째로 사라졌다.
+              <div style={{ border: "1px solid var(--color-line)", borderRadius: 10, overflow: "hidden", background: "#fff", flexShrink: 0 }}>
                 <div style={{ background: bandBg, padding: "10px 14px" }}>
                   {pLogo && (
                     <span style={{ display: "inline-block", background: "#fff", borderRadius: 999, padding: "3px 8px", marginBottom: 6 }}>
