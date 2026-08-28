@@ -893,7 +893,7 @@ function EmployeeManageMode({ codeData, code, routes }) {
   const handleResetPin = async (emp) => {
     if (!window.confirm(`${emp.name}(${emp.empNo})의 비밀번호를 새로 발급하시겠습니까?\n\n기존 비밀번호는 즉시 사용할 수 없게 됩니다.`)) return;
     setPinBusy(true);
-    const res = await reissuePins({ companyId: codeData.companyId, passengers: [{ empNo: emp.id, name: emp.name, dept: emp.dept, routeCode: emp.routeCode }] });
+    const res = await reissuePins({ companyId: codeData.companyId, partnerCode: code, passengers: [{ empNo: emp.id, name: emp.name, dept: emp.dept, routeCode: emp.routeCode }] });
     setPinBusy(false);
     setPinResult(res);
   };
@@ -906,7 +906,7 @@ function EmployeeManageMode({ codeData, code, routes }) {
     if (targets.length === 0) return alert("아직 시작하지 않은 재직 승객이 없습니다.");
     if (!window.confirm(`아직 앱을 시작하지 않은 ${targets.length}명의 비밀번호를 새로 발급하고 안내문을 인쇄합니다.\n\n이미 본인 비밀번호로 바꿔 사용 중인 승객은 대상에서 제외됩니다.\n계속하시겠습니까?`)) return;
     setPinBusy(true);
-    const res = await reissuePins({ companyId: codeData.companyId, passengers: targets.map(e => ({ empNo: e.id, name: e.name, dept: e.dept, routeCode: e.routeCode })) });
+    const res = await reissuePins({ companyId: codeData.companyId, partnerCode: code, passengers: targets.map(e => ({ empNo: e.id, name: e.name, dept: e.dept, routeCode: e.routeCode })) });
     setPinBusy(false);
     setPinResult(res);
   };

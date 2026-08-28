@@ -2,6 +2,11 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
+> **2026-08-28 — P3-a 완료(승객 PIN 해시 분리) · ✅ prod 배포 + 1단계 백필 완료 · 빌드 `main.272ceee3.js` · CF 6종**: 익명이 명부를 **읽고 고칠 수 있다**는 실측(위 항목)에 대한 첫 조치. `pinHash` 를 `companies/{cid}/passengerSecrets/{empNo}`(rules `read,write:false`)로 옮기고, 서버 읽기 5곳을 `readPinHash`(secrets 우선→명부 폴백)로, 포털의 명부 쓰기를 신규 CF `partnerImportPassengers`·`partnerReissuePins` 로 이관했다. 판정은 순수 모듈 `functions/passengerRoster.js` 로 분리(`index.js` 는 `defineSecret` 이라 격리 테스트 불가). 클라 `partner.js` 에서 `hashPin`·`verifyPassenger`(호출부 0) 제거 = **클라에 해시 코드가 없다**. ⚠ 같은 날 오전에 넣은 클라측 배치(`documentId() in`+`writeBatch`)와 그 테스트 `test_import_employees.cjs` 는 이 이관으로 대상을 잃어 **폐기**했다(지키려던 «왕복하지 않는다»는 `test_passenger_roster.cjs` [9] 로 이었다).
+> **데이터**: 1단계 복사 **16,409건 완료**(재실행 시 대상 0 = 멱등). 🔴 **2단계 `--strip --apply` 는 대기** — 대상 16,409건 전부 준비됐고 **이걸 해야 값 노출이 실제로 사라진다**(1단계만으로도 덮어쓰기 공격은 막힌다 — secrets 가 우선이라 명부 해시를 고쳐도 로그인이 안 된다). 🔴 2단계 뒤에는 `readPinHash` 의 **명부 폴백을 지워야** 한다.
+> **검증**: 격리 41단언 + **실호출 18단언**(익명 클라이언트로 CF 호출 · 샘플 거래처에 시험용 승객 만들고 끝에 삭제) + 규칙을 익명으로 재서 secrets 읽기·쓰기 거부 확인 + 협력사 포털·승객앱 실화면 통과 + 빌드 경고 24→**22**(신규 0). **미검증 = 실제 고객 일괄업로드**(다음 업로드가 첫 실물).
+> **다음**: P3-b(포털 인증) **설계만 완료**(`passenger-auth-design-draft.md`) — 담당자 초기 비밀번호 배부가 선행이라 way 일정 대기. 🔴 한 번에 전 거래처를 켜지 말 것.
+
 > **2026-08-28 — 승객 인증 P1·P2 는 이미 prod 에 있다(문서가 낡았던 것) · 🔴 명부 노출은 258건 → 16,409건으로 커졌다**: 아래 체크박스가 「🚧 배포 전(2026-08-25)」로 남아 있었으나 **실측하면 배포돼 있다** — CF 5종(`passengerLogin`/`Resume`/`Logout`/`Migrate`/`SetPin`) 전부 `functions:list` 에 있고, 세션 시작 시점 prod 번들 `main.4a34b4fd.js` = 커밋 `66475ba` 산출물이며 그 빌드에 `passengerSetPin`/`passengerResume` 호출이 들어 있다. **남은 것은 P3(협력사 포털 명부 CRUD 서버 이관) → P4(명부 닫기)** 다.
 > 🔴 **그런데 P4 를 미룬 대가가 자릿수로 커졌다** — 신규 진단 `scripts/inspect_passenger_exposure.cjs`(읽기 전용·값은 안 찍고 건수와 필드 '이름'만 센다) 로 **익명 로그인 후 실측**: 명부 **16,409건 전건 집계·문서 내용 읽기 모두 성공**, 필드 13개 중 `name·dept·empNo·partnerName·pinHash` 가 그대로 보인다(대조군 `passengerSessions` 는 정상 거부 — 규칙이 통째로 열린 건 아니다). 2026-08-25 에 이 위험을 적을 당시 명부는 258건이었고 지금은 **병원 통근 명부 16,155명**이 들어 있다. 게다가 그중 **미시작 16,141명**이 앞으로 발급 PIN 으로 첫 로그인을 하는데 **`passengerLogin` 에 시도 제한이 없다**(P4 와 함께 넣기로 미뤄 둔 것). ⏳ **레거시 유예 `PASSENGER_LEGACY_UNTIL=2026-09-30` 까지 33일** — 그날 `passengerMigrate` 와 `boardStatic` 의 `pinHash` 경로가 닫힌다. **P3·P4 는 규칙·아키텍처 변경이라 way 승인 후 착수**(이 세션에서는 실측과 기록만).
 

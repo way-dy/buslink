@@ -88,7 +88,17 @@ service cloud.firestore {
 
       match /passengers/{empNo} {
         allow read: if isAuth();
-        allow write: if isAuth(); // 협력사 포털 업로드 허용
+        allow write: if isAuth(); // 협력사 포털 업로드 허용 — 🔴 P4 에서 닫는다(P3-c 선행)
+      }
+
+      // ─── 승객 자격증명 (2026-08-28 P3-a) ──────────────
+      // `pinHash` 만 담는다. 명부(`passengers`)는 read·write 가 `isAuth()` 라
+      // **익명 누구나 읽고 고칠 수 있어서**(2026-08-28 실측) 해시를 거기 두면
+      // ⓐ 값이 새고 ⓑ 남이 덮어써 그 계정으로 로그인된다. 그래서 분리했다.
+      // 🔴 클라 접근 전면 차단 — 읽기·쓰기 모두 Admin SDK(CF) 전용.
+      //    쓰는 곳 = passengerSetPin · partnerImportPassengers · partnerReissuePins.
+      match /passengerSecrets/{empNo} {
+        allow read, write: if false;
       }
 
       // ─── 승객 세션 승계표 (2026-08-25 P1) ─────────────

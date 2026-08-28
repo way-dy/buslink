@@ -1473,6 +1473,7 @@ exports.resolveStaticBoarding = onCall(async (request) => {
 //   유일한 관문이 되므로 그때 시도 제한을 함께 넣어야 한다**(tasks.md 기재).
 // ════════════════════════════════════════════════════════
 const crypto = require("crypto");
+const { planRosterWrites, planReissue } = require("./passengerRoster");
 
 // 클라 `hashPin`(src/lib/partner.js)과 **같은 값이어야 한다**. 한쪽만 바꾸면 전원 로그인 불가.
 const PASSENGER_PIN_SALT = "buslink_salt_2026";
@@ -1491,6 +1492,43 @@ function withinLegacyWindow() {
 
 function hashPinAdmin(pin) {
   return crypto.createHash("sha256").update(String(pin) + PASSENGER_PIN_SALT).digest("hex");
+}
+
+// ── 자격증명 저장소 분리(2026-08-28 P3-a) ────────────────────────────────
+// 🔴 왜: `passengers` 는 read·write 가 `isAuth()` 라 **익명 누구나 읽고 고칠 수 있다**
+//    (2026-08-28 실측: 명부 16,409건 전건 읽힘 · 없는 사번 update 가 permission-denied 가
+//    아니라 not-found = 실재 사번이면 써진다). `pinHash` 가 거기 있으면 ⓐ 값이 새고
+//    ⓑ 남이 덮어써 그 계정으로 로그인할 수 있다. 그래서 **해시만** 클라가 못 닿는
+//    `companies/{cid}/passengerSecrets/{empNo}` 로 옮긴다(rules: read/write false).
+// ⚠ 이관 기간에는 **두 곳을 다 본다** — secrets 우선, 없으면 명부 폴백. 백필이 끝나고
+//    명부에서 `pinHash` 를 걷어낸 뒤에 폴백을 지운다(그 전에 지우면 아직 안 옮겨진
+//    사람이 로그인 불가가 된다).
+function passengerSecretRef(db, companyId, empNo) {
+  return db.collection("companies").doc(companyId).collection("passengerSecrets").doc(String(empNo));
+}
+
+/** 그 승객의 PIN 해시. secrets 우선 → 명부 폴백(이관 기간). 없으면 null. */
+async function readPinHash(db, companyId, empNo, passengerSnap) {
+  try {
+    const sec = await passengerSecretRef(db, companyId, empNo).get();
+    if (sec.exists) {
+      const h = (sec.data() || {}).pinHash;
+      if (h) return String(h);
+    }
+  } catch (e) {
+    // secrets 를 못 읽는 건 설정 사고다 — 조용히 명부로 떨어지면 분리가 무의미해지니 남긴다.
+    console.warn(`[승객인증] secrets 조회 실패 cid=${companyId} emp=${empNo}: ${e.message}`);
+  }
+  const fallback = passengerSnap ? (passengerSnap.data() || {}).pinHash : null;
+  return fallback ? String(fallback) : null;
+}
+
+/** PIN 해시 기록 — **secrets 에만** 쓴다(명부에 다시 남기지 말 것). */
+async function writePinHash(db, companyId, empNo, pinHash) {
+  await passengerSecretRef(db, companyId, empNo).set({
+    companyId, empNo: String(empNo), pinHash,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
 }
 
 function passengerUidOf(companyId, empNo) {
@@ -1584,7 +1622,8 @@ exports.passengerLogin = onCall({ invoker: "public" }, async (request) => {
 
   const db = admin.firestore();
   const snap = await loadActivePassenger(db, companyId, empNo);
-  if ((snap.data() || {}).pinHash !== hashPinAdmin(pin)) {
+  const storedHash = await readPinHash(db, companyId, snap.id, snap);
+  if (!storedHash || storedHash !== hashPinAdmin(pin)) {
     console.warn(`[승객인증:거부] PIN 불일치 cid=${companyId} emp=${snap.id}`);
     throw new HttpsError("permission-denied", "PIN이 올바르지 않습니다");
   }
@@ -1659,7 +1698,8 @@ exports.passengerMigrate = onCall({ invoker: "public" }, async (request) => {
 
   const db = admin.firestore();
   const snap = await loadActivePassenger(db, companyId, empNo);
-  if ((snap.data() || {}).pinHash !== String(pinHash)) {
+  const storedMigrateHash = await readPinHash(db, companyId, snap.id, snap);
+  if (!storedMigrateHash || storedMigrateHash !== String(pinHash)) {
     throw new HttpsError("permission-denied", "다시 로그인해주세요");
   }
   console.log(`[승객인증] 레거시 세션 승계 cid=${companyId} emp=${snap.id}`);
@@ -1690,13 +1730,18 @@ exports.passengerSetPin = onCall({ invoker: "public" }, async (request) => {
     throw new HttpsError("failed-precondition", "공용으로 사용하는 계정이라 PIN을 변경할 수 없습니다");
   }
   if (!p.pinInitial) {
-    if (!currentPin || p.pinHash !== hashPinAdmin(currentPin)) {
+    const cur = await readPinHash(db, claims.companyId, snap.id, snap);
+    if (!currentPin || !cur || cur !== hashPinAdmin(currentPin)) {
       throw new HttpsError("permission-denied", "현재 PIN이 올바르지 않습니다");
     }
   }
 
+  // 🔴 해시는 secrets 에만 남긴다. 명부에 있던 옛 값은 **여기서 지운다** —
+  //    남겨 두면 익명이 그 값을 읽어 오프라인 대입할 수 있고(6자리),
+  //    폴백 경로 때문에 지운 줄 알았던 값으로 계속 로그인이 된다.
+  await writePinHash(db, claims.companyId, snap.id, hashPinAdmin(newPin));
   await snap.ref.update({
-    pinHash: hashPinAdmin(newPin),
+    pinHash: admin.firestore.FieldValue.delete(),
     pinInitial: false,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
@@ -1755,7 +1800,8 @@ exports.boardStatic = onCall(async (request) => {
       console.warn(`[boardStatic:거부] 만료된 레거시 경로 cid=${companyId} emp=${trimmedEmpNo}`);
       throw new HttpsError("failed-precondition", "앱을 새로 고친 뒤 다시 찍어주세요");
     }
-    if (!pinHash || passenger.pinHash !== pinHash) {
+    const legacyStored = await readPinHash(db, companyId, trimmedEmpNo, passSnap);
+    if (!pinHash || !legacyStored || legacyStored !== pinHash) {
       console.warn(`[boardStatic:거부] 본인 확인 실패 cid=${companyId} emp=${trimmedEmpNo} hash=${pinHash ? "불일치" : "없음"}`);
       throw new HttpsError("permission-denied", "본인 확인이 필요합니다\n앱에서 로그인한 뒤 다시 찍어주세요");
     }
@@ -4042,3 +4088,142 @@ exports.onImprovementRequestUpdate = onDocumentUpdated(
     }
   }
 );
+
+// ════════════════════════════════════════════════════════════════════════
+// 협력사 포털 명부 쓰기 — 서버 대행 (2026-08-28 P3-a)
+// ════════════════════════════════════════════════════════════════════════
+// 🔴 왜 서버로 옮기나: PIN 해시가 `passengerSecrets`(rules read/write false)로 갔기 때문에
+//    클라(협력사 포털)는 더 이상 그 값을 쓸 수 없다. 그리고 그게 목적이다 —
+//    명부가 익명에게 열려 있는 동안에도 **자격증명만은 클라가 못 만지게** 한다.
+// ⚠ 인증은 `registerNfcCard` 의 협력사 경로와 **같은 수준**이다(업체코드 검증 + 소속 일치).
+//    🔴 업체코드는 `partnerCodes` read 가 공개라 **비밀이 아니다**(2026-08-28 실측) —
+//    이건 인증이 아니라 **소속 강제와 감사 로그**를 얻는 것이고, 진짜 인증은 P3-b 다.
+
+/** 포털 호출자 검증 — 업체코드가 그 회사의 활성 코드인지. 통과하면 코드 문서를 준다. */
+async function assertPartnerCaller(db, request, companyId, partnerCode) {
+  if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
+  if (!companyId || typeof companyId !== "string") {
+    throw new HttpsError("invalid-argument", "companyId가 필요합니다");
+  }
+  const code = String(partnerCode || "").trim();
+  if (!code) throw new HttpsError("permission-denied", "업체코드가 필요합니다");
+  const snap = await db.collection("partnerCodes").doc(code).get();
+  const cd = snap.exists ? (snap.data() || {}) : null;
+  if (!cd || cd.active === false || cd.companyId !== companyId) {
+    throw new HttpsError("permission-denied", "유효하지 않은 업체코드입니다");
+  }
+  return { code, data: cd };
+}
+
+/** 서버측 초기 PIN — 클라 `accountCards.generateInitialPin` 과 같은 계약(6자리). */
+function generateInitialPinAdmin() {
+  return String(crypto.randomInt(0, 1000000)).padStart(6, "0");
+}
+function isValidInitialPinAdmin(v) {
+  const t = String(v == null ? "" : v).trim();
+  return /^\d{6}$/.test(t) && t !== "000000";
+}
+
+// partnerImportPassengers({ companyId, partnerCode, partnerName, employees })
+//   명부 일괄 등록·갱신. 클라는 조각(권장 500명)으로 나눠 여러 번 부른다 — 진행률을 보여주고
+//   한 번의 페이로드·실행시간을 제한 안에 둔다.
+// 반환은 클라 `importEmployees` 계약 그대로: { added, updated, deactivated, skipped, errors, credentials }
+exports.partnerImportPassengers = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (request) => {
+  const db = admin.firestore();
+  const { companyId, partnerCode, partnerName, employees } = request.data || {};
+  const { code } = await assertPartnerCaller(db, request, companyId, partnerCode);
+
+  const rows = Array.isArray(employees) ? employees : [];
+  if (!rows.length) throw new HttpsError("invalid-argument", "등록할 인원이 없습니다");
+  if (rows.length > 1000) {
+    // 조각을 크게 보내면 실행시간·페이로드가 같이 커진다. 클라가 나눠 보내게 강제한다.
+    throw new HttpsError("invalid-argument", "한 번에 1000명까지 보낼 수 있습니다");
+  }
+
+  const col = db.collection("companies").doc(companyId).collection("passengers");
+
+  // 🔴 기존 문서는 **문서 ID 로 직접** 가져온다(getAll) — 이 협력사 명부만 훑으면
+  //    다른 협력사에 있던 사번(이관자)을 신규로 오판해 PIN 이 새로 발급되고
+  //    그 사람이 로그인하지 못한다. 서버는 소속과 무관하게 전체를 볼 수 있으니 그냥 짚는다.
+  const ids = [...new Set(rows.map((e) => String(e && e.empNo != null ? e.empNo : "").trim()).filter(Boolean))];
+  const existing = new Map();
+  for (let i = 0; i < ids.length; i += 300) {
+    const snaps = await db.getAll(...ids.slice(i, i + 300).map((id) => col.doc(id)));
+    snaps.forEach((sn) => { if (sn.exists) existing.set(sn.id, sn.data() || {}); });
+  }
+
+  // 판정은 순수 모듈이 한다(테스트가 태우는 그 코드).
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  const { ops, results } = planRosterWrites({
+    rows, existing, code, companyId, partnerName, now,
+    makePin: generateInitialPinAdmin,
+    hashPin: hashPinAdmin,
+    validPin: isValidInitialPinAdmin,
+    normNfc: normalizeNfcUidServer,
+  });
+
+  const writer = db.bulkWriter();
+  writer.onWriteError((err) => {
+    if (err.failedAttempts < 3) return true;     // 일시 오류는 재시도
+    results.errors.push(err.documentRef.id + ": " + err.message);
+    return false;
+  });
+  for (const op of ops) {
+    if (op.kind === "set") writer.set(col.doc(op.empNo), op.data);
+    else writer.update(col.doc(op.empNo), op.data);
+    if (op.secret) writer.set(passengerSecretRef(db, companyId, op.empNo), op.secret, { merge: true });
+  }
+  await writer.close();
+
+  console.log("[명부] " + code + " 조각 " + ops.length + "명 — 신규 " + results.added
+    + " 갱신 " + results.updated + " 퇴사 " + results.deactivated + " 오류 " + results.errors.length);
+  return results;
+});
+
+// partnerReissuePins({ companyId, partnerCode, passengers:[{empNo,name,dept,routeCode}] })
+//   안내문 재출력용 PIN 재발급. 평문은 저장하지 않고 반환만 한다(클라 계약 동일).
+exports.partnerReissuePins = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (request) => {
+  const db = admin.firestore();
+  const { companyId, partnerCode, passengers } = request.data || {};
+  const { code } = await assertPartnerCaller(db, request, companyId, partnerCode);
+
+  const rows = Array.isArray(passengers) ? passengers : [];
+  if (!rows.length) throw new HttpsError("invalid-argument", "대상이 없습니다");
+  if (rows.length > 1000) throw new HttpsError("invalid-argument", "한 번에 1000명까지 보낼 수 있습니다");
+
+  const col = db.collection("companies").doc(companyId).collection("passengers");
+
+  // 🔴 대상이 **그 협력사 소속인지** 서버가 확인한다 — 안 하면 업체코드 하나로
+  //    남의 거래처 사람 PIN 을 갈아치울 수 있다(그 사람은 그 순간 로그인 불가가 된다).
+  const ids = [...new Set(rows.map((p) => String((p && (p.empNo || p.id)) || "").trim()).filter(Boolean))];
+  const owned = new Map();
+  for (let i = 0; i < ids.length; i += 300) {
+    const snaps = await db.getAll(...ids.slice(i, i + 300).map((id) => col.doc(id)));
+    snaps.forEach((sn) => { if (sn.exists) owned.set(sn.id, sn.data() || {}); });
+  }
+
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  const { ops, credentials, errors } = planReissue({
+    rows, owned, code, companyId, now,
+    makePin: generateInitialPinAdmin, hashPin: hashPinAdmin,
+  });
+
+  const writer = db.bulkWriter();
+  writer.onWriteError((err) => {
+    if (err.failedAttempts < 3) return true;
+    errors.push(err.documentRef.id + ": " + err.message);
+    return false;
+  });
+  for (const op of ops) {
+    writer.set(passengerSecretRef(db, companyId, op.empNo), op.secret, { merge: true });
+    writer.update(col.doc(op.empNo), {
+      pinInitial: op.patch.pinInitial,
+      pinHash: admin.firestore.FieldValue.delete(),
+      updatedAt: op.patch.updatedAt,
+    });
+  }
+  await writer.close();
+
+  console.log("[명부] " + code + " PIN 재발급 " + credentials.length + "명 · 오류 " + errors.length);
+  return { credentials, errors };
+});

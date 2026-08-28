@@ -108,3 +108,70 @@ EmployeeApp 본인 문서 read/update(즐겨찾기·PIN 변경 — 클레임으�
   이관은 **복사 후 삭제**까지가 한 벌이고, 그 사이 `passengerLogin` 이 **두 곳을 다 보는 기간**이 필요하다
   (secrets 우선 → 없으면 명부 폴백 → 백필 완료 후 폴백 제거).
 - 🔴 **P4 를 P3-c 없이 켜지 말 것** — 포털 목록·수정·삭제가 통째로 죽는다.
+
+---
+
+## P3-a 완료 기록 (2026-08-28 · prod 반영)
+
+**한 일** — PIN 해시를 명부에서 떼어내 클라가 못 닿는 곳으로 옮겼다.
+- 새 컬렉션 `companies/{cid}/passengerSecrets/{empNo}` · rules `allow read, write: if false`
+- 서버 읽기 5곳을 `readPinHash`(**secrets 우선 → 명부 폴백**)로: `passengerLogin`·`passengerMigrate`·
+  `passengerSetPin`·`boardStatic` 레거시 경로. 쓰기는 `writePinHash`(secrets 전용)
+- 신규 CF **`partnerImportPassengers`** · **`partnerReissuePins`** — 포털이 하던 명부 쓰기를 서버가 대행
+- 판정은 순수 모듈 **`functions/passengerRoster.js`** 로 분리(`index.js` 는 `defineSecret` 때문에
+  격리 테스트로 못 태운다 — 아키타입 C playbook). **실행(getAll·BulkWriter)만 index.js**
+- 클라 `partner.js` 의 `importEmployees`·`reissuePins` 는 CF 호출 껍데기로. 같은 날 오전에 넣었던
+  클라측 배치(`documentId() in` + `writeBatch`)는 **통째로 사라졌다** — 서버가 왕복 없이 한다
+- 클라에서 `hashPin`(WebCrypto)·`verifyPassenger`(호출부 0) 제거 = **클라에 해시 코드가 없다**
+
+**데이터 이관** — 1단계(복사) 완료: 16,409건 → `passengerSecrets`(재실행 시 대상 0 = 멱등).
+🔴 **2단계(명부에서 `pinHash` 걷어내기)는 대기 중** — `node scripts/backfill_passenger_secrets.cjs --strip --apply`.
+대상 16,409건 전부 준비됐고(안 옮겨진 0), **이걸 해야 노출이 실제로 사라진다**. 1단계까지만 해도
+*덮어쓰기 공격*은 막힌다(secrets 가 우선이라 명부의 해시를 고쳐도 로그인이 안 된다) — 남은 위험은
+**값이 읽히는 것**(6자리라 오프라인 대입이 쉽다)이다.
+
+**검증** — 격리 41단언(`test_passenger_roster.cjs` · 정본 모듈을 그대로 require) · **실호출 18단언**
+(`test_partner_roster_live.cjs` · 🔴 익명 클라이언트로 부른다 — 서비스 계정은 게이트를 늘 통과한다.
+샘플 거래처에 시험용 승객을 만들어 확인하고 **끝에 지운다**) · 규칙은 익명으로 재서 secrets 읽기·쓰기
+모두 거부 확인(명부는 P4 전이라 열린 채가 정상) · 빌드 경고 24→**22**(신규 0).
+
+**하지 말 것(추가)**
+- 🔴 `readPinHash` 의 **명부 폴백을 2단계 전에 지우지 말 것** — 아직 안 옮겨진 사람이 로그인 불가가 된다.
+  반대로 **2단계 뒤에는 지워야** 한다(폴백이 남아 있으면 명부에 해시를 다시 넣는 코드가 조용히 되살아난다).
+- 🔴 클라에 해시 함수를 다시 만들지 말 것 — 두 벌이 되면 salt 가 갈리는 날 전원 로그인 불가다.
+
+## P3-b 설계 (2026-08-28 · 착수 전 · 운영 선행 필요)
+
+### 무엇을 고치나
+협력사 포털은 지금 **업체코드만 알면 들어간다**. 그런데 그 코드는 `partnerCodes` read 가 공개라
+**익명으로 11개 전부 읽힌다**(실측). 즉 인증이 없는 것과 같다. P3-a 로 자격증명은 지켰지만
+**남의 거래처 명부를 보고 고치는 것**은 그대로다.
+
+### 구조 — 승객 P1 을 그대로 복제한다
+새로 발명하지 않는다. `passengerLogin`/`passengerResume`/`passengerLogout` 세 벌이 이미 돌고 있고,
+포털도 **같은 모양**이면 유지보수가 한 벌로 끝난다.
+
+| 승객(P1, 이미 있음) | 포털(P3-b, 신설) |
+|---|---|
+| `passengerLogin({companyId, empNo, pin})` | `partnerLogin({companyId, code, password})` |
+| 커스텀 토큰 `{role:'passenger', empNo, partnerCode}` | 커스텀 토큰 `{role:'partner', partnerCode, companyId}` |
+| `passengerSessions/{sha256(resumeToken)}` | `partnerSessions/{sha256(resumeToken)}` (rules `if false`) |
+| `pinInitial` → 첫 로그인 시 변경 강제 | `passwordInitial` → 같은 패턴 |
+| 해시 = `passengerSecrets` | 해시 = **`partnerSecrets/{code}`**(rules `if false`) |
+
+- 🔴 **비밀번호를 `partnerCodes` 문서에 넣지 말 것** — 그 컬렉션은 read 가 공개다. P3-a 와 같은 이유로
+  처음부터 별도 컬렉션에 둔다(나중에 옮기는 것보다 싸다).
+- 🔴 **업체코드를 비밀번호로 쓰지 말 것**(현행) — 공개 값이다.
+- 관리자 화면(협력사 관리)에 **초기 비밀번호 발급·재발급** 버튼. 평문은 발급 직후 1회만 보인다
+  (승객 안내문과 같은 계약 — 저장하지 않는다).
+
+### 운영이 선행이다 (way 일정)
+담당자에게 초기 비밀번호를 **배부해야** 켤 수 있다. 대상은 활성 업체코드 11곳.
+권장 순서 = ① 발급 화면부터 배포(끄고) → ② 거래처별로 비밀번호 전달 → ③ 거래처 단위로 켠다
+(`partnerCodes.{code}.authRequired`) → ④ 전부 켜지면 코드-only 진입 경로 제거.
+🔴 **한 번에 전 거래처를 켜지 말 것** — 못 받은 담당자가 그날 업무를 못 한다.
+
+### 그다음(P3-c → P4)에 남는 것
+- P3-c: 목록·수정·삭제·집계를 포털 CF 로(토큰이 생겼으니 인증이 진짜가 된다)
+- P4: `passengers` read 를 신원으로 좁히고 **write 는 `false`** · `partnerCodes` 공개분을
+  `partnerPublic/{code}`(브랜딩만)로 분리 · `passengerLogin` 시도 제한
