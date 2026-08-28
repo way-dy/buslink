@@ -1457,12 +1457,17 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
       })()}
       {/* [/DIAG-ETA] */}
 
-      {/* ── 지도 (상단 55%) ── */}
-      {/* 지도 52% — 2026-08-11 최우석 "노선(차량위치)쪽이 한눈에 보기 힘들다".
-          노선도에 시각·'내 정류장' 줄이 늘면서 라벨 아래끝이 탭바를 17px 넘어 가려졌다(실측).
-          🔴 눈대중이 아니라 `headless_check_home_strip.cjs` 가 **탭바 윗변과 라벨 아래끝을 픽셀로
-             비교**하므로, 이 값을 되돌리면 그 검사가 빨간불이 된다. */}
-      <div style={{ flex: '0 0 52%', minHeight: 0, position: 'relative' }}>
+      {/* ── 지도 ── */}
+      {/* 🔴 지도는 **남는 공간만** 차지한다(2026-08-28 최우석 "홈화면 QR탑승이 한 페이지에").
+          예전엔 `0 0 52%` 고정이라 지도가 먼저 절반을 가져가고 노선도·QR 패널이 그 뒤로
+          밀려 스크롤해야 보였다 — QR 탑승 버튼이 탭바 아래 83px(390x844)·181px(360x640)에 있었다.
+          이제 순서를 뒤집는다: **QR 패널(고정) → 노선도 → 남은 것 전부 지도**.
+          `minHeight`는 지도가 사라지지 않게 하는 바닥값이고, 공간이 모자라면 노선도가
+          스크롤을 지고 지도는 이 값에서 멈춘다.
+          🔴 눈대중이 아니라 `headless_check_home_qr_fold.cjs`(QR 버튼 vs 탭바)와
+             `headless_check_home_strip.cjs`(정류장 라벨 겹침·가림)가 픽셀로 잠근다 —
+             고정 %로 되돌리면 두 검사가 빨간불이 된다. */}
+      <div style={{ flex: '1 1 0', minHeight: 150, position: 'relative' }}>
         {/* onCreate relayout: 이 지도 컨테이너는 100dvh→flex:1→flex:1→flex:'0 0 55%' 체인.
             카카오 맵이 dvh/flex 확정 전 0px로 초기화되면 CSS와 달리 자동 복구 안 함(영구 흰화면).
             생성 직후 + 레이아웃 안정 후 relayout 1회씩 = /bus(고정 100vh)와 동등한 안정성. */}
@@ -1598,8 +1603,13 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
         )}
       </div>
 
-      {/* ── 스크롤 컨테이너: 노선도 스트립 + 하단 ETA/QR 패널 (지도 아래 남은 공간·하단 패널이 tabBar 뒤로 잘리는 것 방지, 2026-07-09 #3) ── */}
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+      {/* ── 스크롤 컨테이너: **노선도 스트립만** ──────────────────────────
+          2026-07-09 #3 에는 하단 ETA/QR 패널도 이 안에 있었다(그때 목적은 패널이 tabBar 뒤로
+          잘리는 걸 막는 것). 그 결과 정류장이 많은 노선에서는 **패널이 화면 밖으로 밀려
+          스크롤해야 QR 탑승이 보였다** — 2026-08-28 최우석 신고가 그것이다.
+          🔴 패널을 밖으로 빼도 잘리지 않는다: 지도가 `flex:'1 1 0'` 으로 남는 공간만
+             먹으므로 패널·노선도가 먼저 자리를 잡는다(잘림 방지 목적은 그대로 지켜진다). */}
+      <div style={{ flex: '0 1 auto', minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
       {/* ── 노선 진척 스트립(단일) — 2026-08-05 회의 #4 ──────────────────────
           예전엔 여기에 ①4노드 요약 진척바(출발/현재/다음/도착)와 ②전 정류장 노선도
           스트립이 위아래로 쌓여 있었다. 노선도처럼 생긴 게 두 줄이라 헷갈리고,
@@ -1804,9 +1814,14 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
           </div>
         );
       })()}
+      </div>{/* /노선도 스크롤 컨테이너 */}
 
-      {/* ── 하단 ETA + QR 패널 ── */}
-      <div style={{ background: 'var(--color-bg)', flexShrink: 0, padding: '12px 14px', borderTop: '1px solid var(--color-line)' }}>
+      {/* ── 하단 ETA + QR 패널 — **항상 화면에 고정**(스크롤 밖) ── */}
+      {/* 🔴 오른쪽 여백 58px = 도움말 '?' 버튼 자리(EmployeeApp: right 12 · 지름 38).
+          패널이 스크롤 안에 있을 땐 둘이 만날 일이 드물었지만, 이제 패널이 늘 화면
+          맨 아래에 있어 **버튼끼리 겹친다**(2026-08-28 실측: QR 탑승·정류장 변경 둘 다).
+          겹침은 headless_check_home_qr_fold.cjs 가 픽셀로 잠근다 — 14px 로 되돌리지 말 것. */}
+      <div style={{ background: 'var(--color-bg)', flexShrink: 0, padding: '12px 58px 12px 14px', borderTop: '1px solid var(--color-line)' }}>
         {myStop ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -1910,8 +1925,7 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
             </button>
           </div>
         )}
-      </div>
-      </div>{/* /스크롤 컨테이너 (#3) — fixed 오버레이(모달/카드)는 이 아래 형제로 유지 */}
+      </div>{/* /하단 ETA+QR 패널 — fixed 오버레이(모달/카드)는 이 아래 형제로 유지 */}
 
       {/* ── 노선 변경 모달 — 선택 시 chooseRoute로 기준 노선 갱신·영속·재바인딩 ── */}
       {routePicker && (

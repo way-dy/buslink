@@ -7,6 +7,7 @@
 //    가드가 적혀 있었는데 이번 요청이 그걸 뒤집는다. 문구로 "이제 괜찮다"고 적는 대신
 //    **겹치는지·잘리는지를 픽셀로 재서** 잠근다.
 const path = require("path");
+const crypto = require("crypto");
 const os = require("os");
 const fs = require("fs");
 const { chromium } = require(path.join(__dirname, "..", "docs", "manual", "node_modules", "playwright-core"));
@@ -15,30 +16,37 @@ const CHROME = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const BASE = process.env.BASE || "http://localhost:3000";
 const COMPANY = "dy001";
 const ROOT = path.join(__dirname, "..");
-const QUERY = process.argv[2] || "채드윅";
+const EMP = process.env.EMP || "SAMPLE-SEC";   // 기본은 샘플 거래처 승객 — 실제 사람 계정을 안 건드린다
 
-function loadDb() {
+function loadAdmin() {
   const admin = require(path.join(ROOT, "functions", "node_modules", "firebase-admin"));
   const kf = fs.readdirSync(path.join(ROOT, "key")).find((f) => f.endsWith(".json"));
   const sa = require(path.join(ROOT, "key", kf));
   if (sa.project_id !== "buslink-prod") throw new Error("project_id 불일치");
-  admin.initializeApp({ credential: admin.credential.cert(sa) });
-  return admin.firestore();
+  if (!admin.apps.length) admin.initializeApp({ credential: admin.credential.cert(sa) });
+  return admin;
 }
 
 (async () => {
   let fail = 0;
   const ok = (n, c, x) => { console.log(`  ${c ? "✓" : "✗"} ${n}${!c && x !== undefined ? " → " + x : ""}`); if (!c) fail++; };
 
-  const db = loadDb();
-  const pc = await db.collection("partnerCodes").where("companyId", "==", COMPANY).get();
-  const codes = pc.docs.map((d) => ({ code: d.id, ...(d.data() || {}) }));
-  const target = codes.find((c) => String(c.partnerName || "").includes(QUERY)) || codes[0];
-  const ps = await db.collection("companies").doc(COMPANY).collection("passengers")
-    .where("partnerCode", "==", target.code).limit(1).get();
-  if (ps.empty) { console.log("⏭ SKIP — 승객 없음"); process.exit(0); }
-  const p = { empNo: ps.docs[0].id, ...ps.docs[0].data() };
-  console.log(`\n대상: ${target.partnerName} · 승객 ${p.empNo} · ${BASE}`);
+  // 🔴 2026-08-25 승객 인증 전환 이후 localStorage 세션만으로는 못 들어간다 — 부팅이 조용히
+  //    로그인 화면으로 떨어져 이 검사가 통째로 죽어 있었다(2026-08-28 발견).
+  //    capture_passenger_screens.cjs 와 같이 승계표(resumeToken)를 발급해 넣고 끝나면 지운다.
+  const admin = loadAdmin();
+  const db = admin.firestore();
+  const pdoc = await db.collection("companies").doc(COMPANY).collection("passengers").doc(EMP).get();
+  if (!pdoc.exists) { console.log("⏭ SKIP — 승객 " + EMP + " 없음"); process.exit(0); }
+  const p = { empNo: pdoc.id, ...(pdoc.data() || {}) };
+  const resumeToken = crypto.randomBytes(32).toString("hex");
+  const sessRef = db.collection("companies").doc(COMPANY).collection("passengerSessions")
+    .doc(crypto.createHash("sha256").update(resumeToken).digest("hex"));
+  await sessRef.set({ companyId: COMPANY, empNo: p.empNo,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    lastUsedAt: admin.firestore.FieldValue.serverTimestamp() });
+  process.on("exit", () => { sessRef.delete().catch(() => {}); });
+  console.log(`\n대상: ${p.partnerName || p.partnerCode} · 승객 ${p.empNo} · ${BASE}`);
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "strip-"));
   const ctx = await chromium.launchPersistentContext(dir, {
@@ -49,7 +57,7 @@ function loadDb() {
   page.on("pageerror", (e) => errs.push(e.message));
   await page.addInitScript((s) => localStorage.setItem("buslink_employee", JSON.stringify(s)),
     { empNo: p.empNo, name: p.name || "검토", dept: p.dept || "검토", routeId: p.routeId || null,
-      partnerCode: target.code, partnerName: target.partnerName || null, companyId: COMPANY });
+      partnerCode: p.partnerCode || null, partnerName: p.partnerName || null, companyId: COMPANY, resumeToken });
   await page.goto(`${BASE}/p?c=${COMPANY}`, { waitUntil: "domcontentloaded", timeout: 45000 });
   await page.waitForTimeout(9000);
   for (const label of ["확인했습니다", "나중에", "✕"]) {
@@ -69,10 +77,18 @@ function loadDb() {
     const read = (col) => {
       const kids = [...col.children];
       const box = (el) => { const r = el.getBoundingClientRect(); return { t: r.top, b: r.bottom, l: r.left, rt: r.right, h: r.height, w: r.width }; };
-      const texts = kids.filter((k) => (k.textContent || "").trim().length > 0).map((k) => ({
-        txt: (k.textContent || "").trim().slice(0, 20), ...box(k),
-        clippedX: k.scrollWidth > k.clientWidth + 1,
-      }));
+      // 🔴 정류장 이름 칸만 `-webkit-line-clamp:2` 다 — **2줄 넘는 이름은 말줄임이 설계**이고
+      //    그 클램프가 걸린 요소는 scrollWidth 가 clientWidth 를 넘는다(세로 말줄임인데 가로로
+      //    읽힌다). 그래서 이름 칸은 가로 잘림 판정에서 빼고 `clamped` 로 따로 센다 —
+      //    가로 잘림 검사의 대상은 역할·시각·'내 정류장' 처럼 **온전해야만 하는 짧은 줄**이다.
+      const texts = kids.filter((k) => (k.textContent || "").trim().length > 0).map((k) => {
+        const clamp = getComputedStyle(k).webkitLineClamp;
+        const clamped = clamp && clamp !== "none";
+        return { txt: (k.textContent || "").trim().slice(0, 20), ...box(k),
+          clamped: !!clamped,
+          truncated: !!clamped && k.scrollHeight > k.clientHeight + 1,   // 실제로 3줄 이상이라 잘린 이름
+          clippedX: !clamped && k.scrollWidth > k.clientWidth + 1 };
+      });
       return texts;
     };
     const all = cols.map(read);
@@ -89,6 +105,7 @@ function loadDb() {
       for (let i = 0; i < n; i++) if (b[i].l < a[i].rt - 0.5) hOverlap++;
     }
     const clipped = all.flat().filter((t) => t.clippedX).map((t) => t.txt);
+    const clampedNames = all.flat().filter((t) => t.truncated).map((t) => t.txt);
     const timeRows = all.filter((rows) => rows.some((t) => /^\d{2}:\d{2}$/.test(t.txt))).length;
     const myStopRows = all.filter((rows) => rows.some((t) => t.txt === "내 정류장")).length;
     // 🔴 "한눈에 보인다"의 실제 합격 조건 — 노선도 맨 아랫줄('내 정류장')이 탭바에 안 가려야 한다.
@@ -100,6 +117,7 @@ function loadDb() {
     const labelBottom = labels.length ? Math.max(...labels.map((l) => l.getBoundingClientRect().bottom)) : null;
     return { found: true, cols: cols.length, vOverlap, hOverlap, clipped, timeRows, myStopRows,
       tabTop: Math.round(tabTop), labelBottom: labelBottom === null ? null : Math.round(labelBottom),
+      clampedNames,
       headline: document.body.innerText.includes("탑승하실 정류장을 선택하시면 QR탑승 하실 수 있습니다.") };
   });
 
@@ -118,7 +136,8 @@ function loadDb() {
   ok("이웃 정류장끼리 글자가 겹치지 않는다", r.hOverlap === 0, `겹침 ${r.hOverlap}건`);
   // 이름은 2줄까지 보여주고 그 이상만 말줄임한다(가로 잘림은 없어야 한다).
   // 시각·'내 정류장' 은 짧아서 어떤 경우에도 온전해야 한다.
-  ok("가로로 잘린 글자가 없다", r.clipped.length === 0, r.clipped.join(" | "));
+  ok("가로로 잘린 글자가 없다(이름 2줄 말줄임 제외)", r.clipped.length === 0, r.clipped.join(" | "));
+  if (r.clampedNames.length) console.log(`  · 2줄을 넘어 말줄임된 이름: ${r.clampedNames.join(" | ")} (설계상 허용)`);
   ok("시각·'내 정류장' 라벨은 온전하다",
     !r.clipped.some((t) => /^\d{2}:\d{2}$/.test(t) || t === "내 정류장"), r.clipped.join(" | "));
   console.log(`  '내 정류장' 아래끝 ${r.labelBottom}px · 탭바 윗변 ${r.tabTop}px`);
