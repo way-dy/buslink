@@ -78,6 +78,9 @@ function loadDb() {
     docs = [one];
   } else {
     // `lastLoginAt` 이 있는 사람만 = 첫 PIN 설정 화면에 갇히지 않는 계정(내림차순 최근순).
+    // 🔴 이 쿼리는 **복합 인덱스**(passengers: partnerCode ASC + lastLoginAt DESC)가 있어야 돈다.
+    //    2026-08-27 에 이 줄을 넣고 인덱스를 안 만들어 prod 에서 계속 실패했고(`EMP=` 로 우회 중이었다),
+    //    2026-08-28 에 `firestore.indexes.json` 에 추가·배포해 풀었다. 인덱스를 지우면 다시 죽는다.
     docs = (await col.where("partnerCode", "==", target.code)
       .orderBy("lastLoginAt", "desc").limit(20).get()).docs;
   }

@@ -43,6 +43,20 @@
       ]
     },
     {
+      "collectionGroup": "passengers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "partnerCode",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lastLoginAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "partnerCodes",
       "queryScope": "COLLECTION",
       "fields": [
