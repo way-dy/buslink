@@ -7,8 +7,16 @@
 // 를 그 앱 전용 값으로 교체한다. beforeinstallprompt(안드)·iOS 홈 화면 추가는
 // 모두 마운트 이후 시점이라 마운트 1회 교체로 충분. idempotent — 같은 값으로
 // 여러 번 호출해도 안전(메타 태그 없으면 1회 생성).
-export function applyAppManifest({ manifestHref, appleTouchHref, title }) {
+export function applyAppManifest({ manifestHref, appleTouchHref, title, faviconHref }) {
   if (typeof document === "undefined") return;
+
+  // 파비콘(2026-08-28) — 거래처 워드마크를 쓰는 화면은 브라우저 탭 아이콘까지 그 브랜드로.
+  // 🔴 `index.js` 가 부팅 때 앱별 아이콘으로 이미 한 번 바꾼다. 여기서는 거래처가 정해진 뒤
+  //    **덧칠**하는 것이고, 거래처가 없으면 호출부가 앱 기본값을 다시 넘겨 원복시킨다.
+  if (faviconHref) {
+    const icon = document.querySelector('link[rel="icon"]');
+    if (icon && icon.getAttribute("href") !== faviconHref) icon.setAttribute("href", faviconHref);
+  }
 
   if (manifestHref) {
     const link = document.querySelector('link[rel="manifest"]');

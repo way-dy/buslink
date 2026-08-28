@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- 거래처 전용 진입 주소 (2026-08-28).
+     🔴 이 파일이 존재하는 이유 = **카카오톡·슬랙 링크 카드 제목은 정적 HTML 에서만 나온다.**
+        스크레이퍼는 JS 를 안 돌리므로 앱 안에서 런타임에 바꾸는 제목·아이콘은 카드에 안 잡힌다.
+        그렇다고 공용 `index.html` 에 거래처 상표를 박으면 **다른 고객사 링크 카드까지** 그 이름이
+        찍힌다(한 호스팅이 4개 앱·전 거래처를 함께 서빙한다). 그래서 거래처마다 주소를 따로 둔다.
+     🔴 리다이렉트를 JS 로만 한다 — `meta refresh` 를 쓰면 일부 스크레이퍼가 따라가 버려
+        카드가 승객앱(기본 브랜드) 것으로 잡힌다. 사람은 JS 로 넘어가고, 안 되면 아래 링크를 누른다.
+     🔴 거래처 코드가 바뀌면 아래 `PC` 한 줄만 고친다. -->
+<title>카카오 T 통근셔틀</title>
+<meta name="description" content="노선·정류장·실시간 차량 위치 확인과 QR 탑승을 링크 하나로" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="카카오 T 통근셔틀" />
+<meta property="og:title" content="카카오 T 통근셔틀" />
+<meta property="og:description" content="노선·정류장·실시간 차량 위치 확인과 QR 탑승을 링크 하나로" />
+<meta property="og:url" content="https://p.buslink.co.kr/kakao" />
+<meta property="og:image" content="https://p.buslink.co.kr/icons/kakao-t-1024.png" />
+<meta property="og:locale" content="ko_KR" />
+<meta name="twitter:card" content="summary" />
+<link rel="icon" type="image/svg+xml" href="/icons/kakao-t.svg" />
+<link rel="apple-touch-icon" href="/icons/kakao-t-1024.png" />
+<meta name="color-scheme" content="light" />
+<meta name="theme-color" content="#1E233D" />
+<style>
+  html,body{margin:0;height:100%;background:#1E233D;color:#fff;
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+  .mark{width:72px;height:72px}
+  .t{font-size:20px;font-weight:800;letter-spacing:-.02em}
+  .s{font-size:13px;color:rgba(255,255,255,.72)}
+  a{color:#FFCD00;font-size:14px;font-weight:700;text-decoration:none;
+    border:1px solid rgba(255,205,0,.45);border-radius:999px;padding:10px 18px}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <img class="mark" src="/icons/kakao-t.svg" alt="" />
+    <div class="t">카카오 T 통근셔틀</div>
+    <div class="s">잠시만 기다려 주세요…</div>
+    <a id="go" href="/p">화면이 안 넘어가면 여기를 누르세요</a>
+  </div>
+<script>
+  var PC = "DY001-삼성전자샘플-2026-SMPL";
+  var to = "/p?pc=" + encodeURIComponent(PC);
+  document.getElementById("go").href = to;
+  location.replace(to);
+</script>
+</body>
+</html>

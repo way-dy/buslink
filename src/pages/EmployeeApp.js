@@ -32,7 +32,7 @@ import PermissionGate from "../components/PermissionGate";
 import HelpSheet from "../components/HelpSheet";
 import { resolveCompanyIdForAnon } from "../lib/companyResolver";
 // 거래처 브랜딩(2026-07-16 회의 #5) — 메인 컬러 CSS 변수 + 헤더 로고. 미설정=기본 테마.
-import { applyPartnerTheme, clearPartnerBranding, fetchPartnerCodeData, logoHeightOf, brandBand, readableOn } from "../lib/partnerBranding";
+import { applyPartnerTheme, clearPartnerBranding, fetchPartnerCodeData, logoHeightOf, brandBand, readableOn, brandOf } from "../lib/partnerBranding";
 // 문의 게시판(2026-08-06 미팅) — dycs CS 위젯 연동. 거래처별 opt-in.
 import { resolveInquiryConfig, buildInquiryUrl } from "../lib/inquiry";
 import { resolveHomepageConfig, homepageDisplayHost } from "../lib/homepage";
@@ -459,6 +459,8 @@ export default function EmployeeApp() {
   const [branding, setBranding] = useState(null);
   // 거래처 테마(2026-08-27). null = 테마 미사용 → 예전 branding 경로가 그대로 돈다(현행 100%).
   const [theme, setTheme] = useState(null);
+  // 거래처 워드마크(2026-08-28) — 화면에 쓰는 브랜드 표기. 테마에 없으면 "BusLink"(부재=현행).
+  const brand = useMemo(() => brandOf(theme), [theme]);
   const [inquiry, setInquiry] = useState(null); // {enabled,tenantId,token} | null(=미조회/거래처 없음)
   const [homepage, setHomepage] = useState(null); // {enabled,url} | null (2026-08-25)
   useEffect(() => {
@@ -488,6 +490,22 @@ export default function EmployeeApp() {
     });
     return () => { cancelled = true; clearPartnerBranding(); clearTagSoundPolicy(); };
   }, [session?.partnerCode]);
+
+  // 🔴 거래처 워드마크가 걸리면 **탭 제목·홈 화면 아이콘 이름**도 그 이름으로 바꾼다(2026-08-28).
+  //    정적 <title> 은 index.html 의 "BusLink" 라, 안 바꾸면 화면은 거래처 톤인데 탭만 BusLink 로 남는다.
+  //    기본 브랜드면 예전 값과 **글자 그대로** 같다(부재=현행).
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.title = brand.custom ? brand.name + " 승객" : "BusLink";
+    // 🔴 부재면 **직원앱 기본값을 명시로 되돌린다**(undefined 로 두면 거래처를 옮겼을 때
+    //    앞 거래처 아이콘이 그대로 남는다 — 색을 지우는 clearPartnerBranding 과 같은 이유).
+    applyAppManifest({
+      title: brand.custom ? brand.name + " 승객" : "BusLink 승객",
+      faviconHref: brand.favicon || "/icons/passenger.svg",
+      appleTouchHref: brand.apple || "/icons/passenger-1024.png",
+      manifestHref: brand.manifest || "/manifest-employee.json",
+    });
+  }, [brand.custom, brand.name, brand.favicon, brand.apple, brand.manifest]);
 
   // 배너 높이 실측 — 공지가 바뀌거나(문구 길이 변동) 화면이 회전해도 따라간다.
   useEffect(() => {
@@ -535,7 +553,7 @@ export default function EmployeeApp() {
     </div>
   );
 
-  if (!session) return <LoginScreen companyId={companyId} onLogin={handleLogin} />;
+  if (!session) return <LoginScreen companyId={companyId} onLogin={handleLogin} brand={brand} />;
 
   // ── 첫 로그인 비밀번호 설정 강제(2026-07-27) ──────────────
   // 관리자가 발급한 초기 비밀번호를 그대로 쓰면 안내문을 본 사람 누구나 그 계정에
@@ -546,6 +564,7 @@ export default function EmployeeApp() {
       <FirstPinSetup
         companyId={companyId}
         session={session}
+        brand={brand}
         onDone={(s) => { saveSession({ ...session, ...s }); setSession(p => ({ ...p, ...s })); }}
         onLogout={handleLogout}
       />
@@ -609,7 +628,7 @@ export default function EmployeeApp() {
         {tab === "scan"     && <ScanTab companyId={companyId} session={session} />}
         {tab === "inquiry"  && <InquiryTab config={inquiry} partnerName={session?.partnerName || null} />}
         {tab === "homepage" && <HomepageTab config={homepage} partnerName={session?.partnerName || null} />}
-        {tab === "settings" && <SettingsTab companyId={companyId} session={session} onLogout={handleLogout} onGoHome={() => setTab("home")} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />}
+        {tab === "settings" && <SettingsTab companyId={companyId} session={session} brand={brand} onLogout={handleLogout} onGoHome={() => setTab("home")} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />}
 
         {/* ── 도움말 버튼 (2026-08-10) ─────────────────────────────
             "노선이 안 보여요 / 알림이 안 와요" 는 우리 신고 1·2순위인데, 물어볼 곳이
@@ -672,7 +691,7 @@ export default function EmployeeApp() {
 // ════════════════════════════════════════════════════════
 // 로그인 화면
 // ════════════════════════════════════════════════════════
-function LoginScreen({ companyId, onLogin }) {
+function LoginScreen({ companyId, onLogin, brand = { name: "BusLink", sub: null, custom: false } }) {
   // 계정 안내문 QR(`/p?emp=10001`)로 들어오면 사번을 미리 채운다(2026-07-27).
   // 배부받은 사람이 자기 아이디를 타이핑하지 않아도 되고 오타 문의가 사라진다.
   const [empNo, setEmpNo] = useState(() => (getParam("emp") || "").trim());
@@ -702,7 +721,7 @@ function LoginScreen({ companyId, onLogin }) {
     <div style={S.fullCenter}>
       <div style={S.loginCard}>
         <div style={S.header}>
-          <BusLinkLogo size={26} color="var(--color-primary)" sub="승객 탑승 서비스" />
+          <BusLinkLogo size={26} color="var(--color-primary)" name={brand.custom ? brand.name : undefined} sub={brand.sub || "승객 탑승 서비스"} />
         </div>
         <div style={{ fontSize: 20, fontWeight: 800, color: "var(--color-label)", letterSpacing: "-0.02em", marginBottom: 4 }}>로그인</div>
         <div style={{ fontSize: 13, color: "var(--color-label-mute)", marginBottom: 18, lineHeight: 1.55 }}>
@@ -733,7 +752,7 @@ function LoginScreen({ companyId, onLogin }) {
 // 현재 비밀번호를 다시 묻지 않는 이유 = 방금 그 값으로 로그인해 세션에 검증된 해시가
 // 이미 있기 때문(session.pinHash). 한 번 더 묻는 건 마찰만 늘린다.
 // ════════════════════════════════════════════════════════
-function FirstPinSetup({ companyId, session, onDone, onLogout }) {
+function FirstPinSetup({ companyId, session, onDone, onLogout, brand = { name: "BusLink", sub: null, custom: false } }) {
   const [newPin, setNewPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
   const [loading, setLoading] = useState(false);
@@ -787,7 +806,7 @@ function FirstPinSetup({ companyId, session, onDone, onLogout }) {
     <div style={S.fullCenter}>
       <div style={S.loginCard}>
         <div style={S.header}>
-          <BusLinkLogo size={26} color="var(--color-primary)" sub="승객 탑승 서비스" />
+          <BusLinkLogo size={26} color="var(--color-primary)" name={brand.custom ? brand.name : undefined} sub={brand.sub || "승객 탑승 서비스"} />
         </div>
         <div style={{ fontSize: 20, fontWeight: 800, color: "var(--color-label)", letterSpacing: "-0.02em", marginBottom: 4 }}>
           비밀번호를 정해주세요
@@ -826,6 +845,8 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
   // 🔴 테마가 오면 밴드색을 primary 에서 파생하지 않는다 — 카카오 톤은 밴드(곤색)와
   //    CTA(파랑)가 서로 다른 색이라 파생으로 만들 수 없다(`partnerBranding.brandBand`).
   const band = brandBand(branding, theme);
+  // 밴드에 로고 이미지가 없을 때 대신 찍히는 글자. 테마 워드마크가 있으면 그 이름이다(2026-08-28).
+  const brand = brandOf(theme);
   const [routes, setRoutes]         = useState([]);
   const [activeRouteId, setActiveRouteId] = useState(session.routeId || null);
   // 첫 노선 로드에서 한 번만 활성 노선을 홈 목록 안으로 맞춘다(2026-08-18) — 아래 주석 참조.
@@ -1320,7 +1341,7 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
               <img src={branding.logo} alt="" style={{ height: Math.min(logoHeightOf(branding), 24), maxWidth: 120, objectFit: 'contain', display: 'block' }} />
             </div>
           ) : (
-            <div style={{ fontSize: 13, fontWeight: 800, color: band.fg, letterSpacing: '-0.01em' }}>BusLink</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: band.fg, letterSpacing: '-0.01em' }}>{brand.name}</div>
           )}
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, padding: '4px 10px', borderRadius: 'var(--radius-pill)', background: band.chipBg, border: `1px solid ${band.chipLine}`, fontSize: 11, fontWeight: 700, color: band.fg }}>
             <StatusDot tone={buses.length > 0 ? 'positive' : 'neutral'} size={7} pulse={buses.length > 0} />
@@ -3411,7 +3432,7 @@ function TagSoundCard() {
   );
 }
 
-function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate }) {
+function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate, brand = { name: "BusLink", sub: null, custom: false } }) {
   const [showPinChange, setShowPinChange] = useState(session.pinInitial || false);
   const [oldPin, setOldPin] = useState("");
   const [newPin, setNewPin] = useState("");
@@ -3708,20 +3729,20 @@ function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate }
               공지 푸시가 자꾸 안 온다면
             </div>
             <div style={{ fontSize: 12, color: "var(--color-label-mute)", lineHeight: 1.6, marginBottom: 10 }}>
-              휴대폰 절전 기능이 BusLink를 잠재우면 공지 알림이 늦거나 누락될 수 있습니다.
-              아래처럼 <b style={{ color: "var(--color-label)" }}>BusLink를 절전 예외</b>로 설정해 주세요.
+              휴대폰 절전 기능이 {brand.name}를 잠재우면 공지 알림이 늦거나 누락될 수 있습니다.
+              아래처럼 <b style={{ color: "var(--color-label)" }}>{brand.name}를 절전 예외</b>로 설정해 주세요.
             </div>
             <div style={{ background: "var(--color-bg-soft)", borderRadius: "var(--radius-8)", padding: "12px 14px" }}>
               {batteryPlatform === "samsung" ? (
                 <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: "var(--color-label)", lineHeight: 1.7 }}>
                   <li><b>설정</b> → <b>배터리</b> (또는 배터리 및 디바이스 케어 → 배터리)</li>
-                  <li><b>백그라운드 사용 제한</b> → <b>사용 안 함 앱</b> 목록에서 BusLink 제거</li>
-                  <li>앱별 설정에서 BusLink를 <b>제한 없음</b>으로 변경</li>
+                  <li><b>백그라운드 사용 제한</b> → <b>사용 안 함 앱</b> 목록에서 {brand.name} 제거</li>
+                  <li>앱별 설정에서 {brand.name}를 <b>제한 없음</b>으로 변경</li>
                 </ol>
               ) : (
                 <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: "var(--color-label)", lineHeight: 1.7 }}>
                   <li><b>설정</b> → <b>배터리</b> → 앱 절전 관리 / 배터리 사용량</li>
-                  <li>BusLink를 찾아 <b>제한 없음</b> 또는 <b>최적화 안 함</b>으로 변경</li>
+                  <li>{brand.name}를 찾아 <b>제한 없음</b> 또는 <b>최적화 안 함</b>으로 변경</li>
                 </ol>
               )}
             </div>
@@ -3743,9 +3764,9 @@ function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate }
           {showInstallGuide && (
             <div style={{ borderTop: "1px solid var(--color-line)" }}>
               <div style={{ padding: "12px 18px 4px", fontSize: 12, color: "var(--color-label-mute)", lineHeight: 1.6 }}>
-                홈 화면에 BusLink를 추가하면 앱처럼 빠르게 실행되고 공지 푸시도 더 잘 도착합니다.
+                홈 화면에 {brand.name}를 추가하면 앱처럼 빠르게 실행되고 공지 푸시도 더 잘 도착합니다.
               </div>
-              <InstallGuide inline />
+              <InstallGuide inline brandName={brand.name} />
             </div>
           )}
         </div>
@@ -3787,7 +3808,7 @@ function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate }
           로그아웃
         </button>
 
-        <div style={{ fontSize: 11, color: "var(--color-label-alt)", textAlign: "center" }}>BusLink v1.0 · buslink-prod.web.app</div>
+        <div style={{ fontSize: 11, color: "var(--color-label-alt)", textAlign: "center" }}>{brand.custom ? brand.name + " v1.0" : "BusLink v1.0 · buslink-prod.web.app"}</div>
       </div>
     </div>
   );

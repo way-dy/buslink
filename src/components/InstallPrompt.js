@@ -195,7 +195,9 @@ function StepRow({ n, glyph, children }) {
 // platform: "ios" | "android-manual" | "android"(=android-manual 와 동일 텍스트) | "auto"
 //   - "auto": 현재 기기를 감지해 적절한 안내 표시(설정 탭 인라인용).
 // onInstall: android 네이티브 프롬프트 핸들러(있을 때만 "설치" 버튼 노출).
-export function InstallGuide({ platform = "auto", onInstall, inline = false }) {
+// brandName = 홈 화면에 생길 앱 이름. 거래처 워드마크를 쓰는 화면이 자기 이름을 넘긴다
+// (2026-08-28). 안 넘기면 "BusLink" — 관리자·기사·협력사 화면은 예전 그대로다.
+export function InstallGuide({ platform = "auto", onInstall, inline = false, brandName = "BusLink" }) {
   // auto → 실제 기기 감지
   let mode = platform;
   if (mode === "auto") {
@@ -219,7 +221,7 @@ export function InstallGuide({ platform = "auto", onInstall, inline = false }) {
             메뉴를 위로 올려 <b>'홈 화면에 추가'</b>를 선택하세요.
           </StepRow>
           <StepRow n={3}>
-            오른쪽 위 <b>'추가'</b>를 누르면 홈 화면에 BusLink 아이콘이 생깁니다.
+            오른쪽 위 <b>'추가'</b>를 누르면 홈 화면에 {brandName} 아이콘이 생깁니다.
           </StepRow>
         </div>
         <div style={{
@@ -243,7 +245,7 @@ export function InstallGuide({ platform = "auto", onInstall, inline = false }) {
           <b>'홈 화면에 추가'</b> 또는 <b>'앱 설치'</b>를 선택하세요.
         </StepRow>
         <StepRow n={3}>
-          <b>'설치'</b>를 누르면 홈 화면에 BusLink 아이콘이 생깁니다.
+          <b>'설치'</b>를 누르면 홈 화면에 {brandName} 아이콘이 생깁니다.
         </StepRow>
       </div>
       {onInstall && (

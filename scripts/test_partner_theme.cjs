@@ -39,7 +39,8 @@ function loadModule(doc) {
   vm.createContext(ctx);
   vm.runInContext(src + `
 ;this.__m = { THEME_PRESETS, resolveTheme, readableOn, brandBand, applyPartnerTheme,
-              applyPartnerBranding, clearPartnerBranding, mixHex, relativeLuminance, isValidHexColor };`, ctx);
+              applyPartnerBranding, clearPartnerBranding, mixHex, relativeLuminance, isValidHexColor,
+              brandOf, sanitizeWordmark, sanitizeAssetPath, DEFAULT_WORDMARK };`, ctx);
   return ctx.__m;
 }
 
@@ -146,8 +147,83 @@ function loadModule(doc) {
   ok("🔴 테마가 쓴 변수를 하나도 남기지 않는다(남으면 로그아웃 후 남의 색이 보인다)",
     beforeClear === 7 && doc.props.size === 0, [...doc.props.keys()]);
 
-  // ── [7] 소스 가드 (복원 금지) ──────────────────────────────────
-  console.log("\n[7] 소스 가드");
+  // ── [7] 거래처 워드마크 (2026-08-28) ──────────────────────────
+  // 🔴 여기서 재는 것 = "워드마크를 안 준 거래처는 여전히 BusLink 인가". 이름을 바꾸는 기능은
+  //    켠 거래처 하나만 바꿔야 하고, 그게 새면 9개 고객사 화면의 제품명이 한꺼번에 바뀐다.
+  console.log("");
+  console.log("[7] 거래처 워드마크");
+  const bDefault = M.brandOf(null);
+  ok("🔴 테마가 없으면 BusLink 다(부재=현행)",
+    bDefault.name === "BusLink" && bDefault.custom === false && bDefault.sub === null, bDefault);
+
+  const bColorOnly = M.brandOf(M.resolveTheme({ theme: { band: "#003876" } }));
+  ok("🔴 색만 쓰는 거래처도 이름은 그대로 BusLink",
+    bColorOnly.name === "BusLink" && bColorOnly.custom === false, bColorOnly);
+
+  const tKakao = M.resolveTheme({ theme: { preset: "kakao" } });
+  const bKakao = M.brandOf(tKakao);
+  ok("카카오 프리셋은 워드마크를 함께 싣는다",
+    bKakao.name === "카카오 T" && bKakao.sub === "통근셔틀" && bKakao.custom === true, bKakao);
+
+  const bOverride = M.brandOf(M.resolveTheme({ theme: { preset: "kakao", wordmark: "카카오모빌리티" } }));
+  ok("거래처가 준 이름이 프리셋 기본값을 이긴다(회사명 표기 전환은 한 필드)",
+    bOverride.name === "카카오모빌리티" && bOverride.sub === "통근셔틀", bOverride);
+
+  const tOff = M.resolveTheme({ theme: { preset: "kakao", wordmark: "" } });
+  ok("🔴 빈 문자열 = 상표만 빼고 색은 유지(2026-08-27 «색만» 상태로 되돌리는 통로)",
+    M.brandOf(tOff).name === "BusLink" && tOff.band === "#1E233D" && tOff.accent === "#FFCD00", tOff);
+
+  ok("워드마크만 있는 문서는 테마로 인정하지 않는다(밴드색이 조용히 바뀌는 것 차단)",
+    M.resolveTheme({ theme: { wordmark: "아무개" } }) === null);
+
+  ok("앞뒤·연속 공백을 정리한다", M.sanitizeWordmark("  카카오   T  ") === "카카오 T");
+  ok("꺾쇠를 남기지 않는다(인쇄물·문서 템플릿이 같은 값을 HTML 로 끼운다)",
+    (M.sanitizeWordmark("<b>카카오 T</b>") || "").indexOf("<") === -1);
+  ok("문자열이 아니거나 너무 길면 null(호출부가 기본 브랜드로 내려간다)",
+    M.sanitizeWordmark(123) === null && M.sanitizeWordmark("가".repeat(25)) === null
+    && M.sanitizeWordmark("   ") === null);
+
+  // 아이콘 3종(2026-08-28) — 파비콘·홈화면 아이콘·매니페스트도 테마에서 나온다.
+  ok("기본 브랜드는 아이콘을 정하지 않는다(호출부가 앱 기본값으로 되돌린다)",
+    bDefault.favicon === null && bDefault.apple === null && bDefault.manifest === null);
+  ok("카카오 프리셋은 아이콘 3종을 함께 싣는다",
+    bKakao.favicon === "/icons/kakao-t.svg" && bKakao.apple === "/icons/kakao-t-1024.png"
+    && bKakao.manifest === "/manifest-kakao.json", bKakao);
+  ok("🔴 외부 URL·프로토콜 상대경로·상위 이동은 아이콘 경로로 인정하지 않는다",
+    M.sanitizeAssetPath("https://evil.example/x.svg") === null
+    && M.sanitizeAssetPath("//evil.example/x.svg") === null
+    && M.sanitizeAssetPath("/icons/../../x.svg") === null
+    && M.sanitizeAssetPath("/icons/kakao-t.svg") === "/icons/kakao-t.svg");
+  const bBadIcon = M.brandOf(M.resolveTheme({ theme: { preset: "kakao", favicon: "https://evil.example/x.svg" } }));
+  ok("🔴 거래처가 못 쓰는 경로를 주면 프리셋 값을 쓰지 않고 앱 기본값으로 내려간다",
+    bBadIcon.favicon === null && bBadIcon.name === "카카오 T", bBadIcon);
+
+  // 실물 파일 — 경로만 맞고 파일이 없으면 화면에 깨진 아이콘이 나간다.
+  ["public/icons/kakao-t.svg", "public/icons/kakao-t-1024.png",
+   "public/manifest-kakao.json", "public/kakao.html"].forEach((f) => {
+    ok("파일이 실재한다: " + f, fs.existsSync(path.join(ROOT, f)));
+  });
+
+  // 거래처 전용 진입 주소 — 카카오톡 링크 카드는 **이 파일의 정적 태그**에서만 나온다.
+  const landing = fs.readFileSync(path.join(ROOT, "public/kakao.html"), "utf8");
+  ok("랜딩 카드 제목이 워드마크와 어긋나지 않는다",
+    landing.includes('property="og:title" content="카카오 T 통근셔틀"'));
+  ok("🔴 meta refresh 를 쓰지 않는다(스크레이퍼가 따라가면 카드가 승객앱 것으로 잡힌다)",
+    !landing.toLowerCase().includes("http-equiv=\"refresh\""));
+  ok("랜딩이 거래처 코드를 실어 승객앱으로 보낸다",
+    landing.includes("/p?pc=") && landing.includes("DY001-삼성전자샘플-2026-SMPL"));
+  const fbase = fs.readFileSync(path.join(ROOT, "firebase.json"), "utf8");
+  ok("🔴 호스팅 rewrite 가 캐치올보다 «먼저» /kakao 를 잡는다(순서가 뒤면 SPA 로 삼켜진다)",
+    fbase.indexOf('"/kakao"') !== -1 && fbase.indexOf('"/kakao"') < fbase.indexOf('"**"'));
+
+  const logoSrc = fs.readFileSync(path.join(ROOT, "src/components/ui/BusLinkLogo.js"), "utf8");
+  ok("BusLinkLogo 가 name 을 받는다",
+    logoSrc.includes("BusLinkLogo({ size = 22, color, sub, name })"));
+  ok("🔴 name 을 안 주면 예전 Bus+Link 두 색 렌더 그대로",
+    logoSrc.includes("{name ? name : <>Bus<span style={{ color: c }}>Link</span></>}"));
+
+  // ── [8] 소스 가드 (복원 금지) ──────────────────────────────────
+  console.log("\n[8] 소스 가드");
   const libSrc = fs.readFileSync(path.join(ROOT, "src/lib/partnerBranding.js"), "utf8");
   const cssSrc = fs.readFileSync(path.join(ROOT, "src/styles/tokens.css"), "utf8");
   ok("brandBand 가 theme 인자를 받는다", /function brandBand\(branding, theme\)/.test(libSrc));

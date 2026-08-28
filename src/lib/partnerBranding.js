@@ -31,10 +31,77 @@ export const THEME_PRESETS = {
   // 🔴 이 값들은 짐작이 아니라 카카오모빌리티 통근셔틀 소개서(`file/20260827/*.pdf`) 7쪽을
   //    렌더해 픽셀에서 읽은 것이다. 카카오 **공식** 옐로우(#FEE500)가 아니라 그 문서가
   //    실제로 쓰는 값(#FFCD00)을 따른다 — 상표가 아니라 톤을 맞추는 게 요청이었다.
-  kakao: { band: "#1E233D", accent: "#FFCD00", accentSoft: "#FFF3C4", primary: "#4088FE" },
+  //
+  // 🔴 워드마크(2026-08-28) — 2026-08-27 에는 **"색만, 상표는 넣지 않는다"** 였다(라이선스).
+  //    그 결정을 뒤집는 근거는 고객 요청이다: 카카오모빌리티 윤지영 부장이 카톡으로
+  //    "저 링크에 카카오모빌리티를 넣을 수 있을까요 버스링크에 / 카카오 T나" 라고 직접
+  //    요청했고 way 가 승낙했다(2026-08-28). 그러니 이 값은 **우리가 고른 상표가 아니라
+  //    상대가 지정한 표기**다. 다른 고객사에 임의로 복사하지 말 것.
+  //    "카카오 T" 를 고른 이유 = 상대가 준 소개서 제목이 `[카카오 T] 통근셔틀 서비스 소개서`
+  //    라 그쪽 서비스명이 그것이다. 회사명 표기를 원하면 이 한 줄만 "카카오모빌리티" 로 바꾼다.
+  // 🔴 아이콘 3종(2026-08-28 way 승인 "아이콘도 사용해도 됨") — 파비콘·홈화면 아이콘·매니페스트.
+  //    아이콘 도형은 짐작이 아니라 **고객이 준 소개서 7쪽의 앱 아이콘을 렌더해 노랑 픽셀 런을
+  //    스캔한 좌표**로 다시 그린 벡터다(원본은 48px 남짓 래스터라 확대하면 뭉갠다).
+  kakao: { band: "#1E233D", accent: "#FFCD00", accentSoft: "#FFF3C4", primary: "#4088FE",
+           wordmark: "카카오 T", wordmarkSub: "통근셔틀",
+           favicon: "/icons/kakao-t.svg", apple: "/icons/kakao-t-1024.png",
+           manifest: "/manifest-kakao.json" },
 };
 
 const THEME_KEYS = ["band", "accent", "accentSoft", "primary"];
+// 색이 아니라 **글자**인 테마 필드. 위 THEME_KEYS 와 검증 방식이 다르므로 따로 둔다.
+const TEXT_KEYS = ["wordmark", "wordmarkSub"];
+// 파비콘·홈화면 아이콘·매니페스트 경로. 값의 성격이 또 달라(같은 오리진 경로) 검증도 따로다.
+const ASSET_KEYS = ["favicon", "apple", "manifest"];
+
+/** 기본 브랜드 표기. 테마가 없거나 워드마크를 안 준 거래처는 전부 이 값이다(부재=현행). */
+export const DEFAULT_WORDMARK = "BusLink";
+
+/**
+ * 아이콘·매니페스트 경로 정리 — **같은 오리진의 절대경로만** 인정한다.
+ * 🔴 정규식을 쓰지 않는 이유는 취향이 아니다: 이 값은 `<link href>` 로 그대로 들어가므로
+ *    거래처 문서에 외부 URL(`https://…`)이나 `//evil.example` 을 넣으면 **남의 서버가 우리 앱
+ *    아이콘을 정하게 된다**. 스킴(`:`)·프로토콜 상대경로(`//`)·상위 이동(`..`)을 전부 막는다.
+ */
+export function sanitizeAssetPath(s) {
+  if (typeof s !== "string") return null;
+  const t = s.trim();
+  if (!t || t.length > 80) return null;
+  if (t.charAt(0) !== "/") return null;
+  if (t.indexOf("//") !== -1 || t.indexOf(":") !== -1 || t.indexOf("..") !== -1) return null;
+  return t;
+}
+
+/**
+ * 워드마크 문자열 정리 — 앞뒤 공백·연속 공백·꺾쇠 제거 후 24자 이내만 인정.
+ * 🔴 거래처 문서는 관리자가 자유 입력하는 값이라 그대로 렌더하지 않는다. 꺾쇠를 지우는 건
+ *    XSS 방어가 아니라(React 가 이미 이스케이프한다) **인쇄물·문서 템플릿**이 같은 값을
+ *    HTML 로 끼워 넣기 때문이다. 못 쓰는 값이면 null → 호출부가 기본 브랜드로 내려간다.
+ */
+export function sanitizeWordmark(s) {
+  if (typeof s !== "string") return null;
+  const t = s.replace(/[<>]/g, "").replace(/\s+/g, " ").trim();
+  return t && t.length <= 24 ? t : null;
+}
+
+/**
+ * 화면에 쓸 브랜드 표기. `resolveTheme` 결과를 받아 `{name, sub, custom}` 을 돌려준다.
+ * 🔴 **부재 = 현행**: 테마가 없거나 워드마크가 없으면 이름은 "BusLink" 이고 `custom` 은
+ *    false 다 — 호출부는 이 플래그로 "기본이면 예전 화면 그대로" 를 지킨다.
+ */
+export function brandOf(theme) {
+  const name = (theme && theme.wordmark) || DEFAULT_WORDMARK;
+  return {
+    name,
+    sub: (theme && theme.wordmarkSub) || null,
+    custom: name !== DEFAULT_WORDMARK,
+    // 부재면 null — 호출부가 «그 앱의 기본 아이콘»으로 되돌린다(거래처를 옮겼을 때 남의 아이콘이
+    // 남지 않게. 색을 지우는 clearPartnerBranding 과 같은 이유다).
+    favicon: (theme && theme.favicon) || null,
+    apple: (theme && theme.apple) || null,
+    manifest: (theme && theme.manifest) || null,
+  };
+}
 
 /**
  * partnerCodes/{code} 문서에서 테마를 해석한다. 프리셋을 바탕으로 유효한 개별 필드만 덮어쓴다.
@@ -46,9 +113,24 @@ export function resolveTheme(codeData) {
   if (!t || typeof t !== "object") return null;
   const base = THEME_PRESETS[t.preset];
   // 프리셋도 없고 밴드·포인트도 없으면 테마라고 볼 근거가 없다(primary 하나면 옛 경로가 맞다).
+  // 🔴 워드마크만 있는 문서도 여기서 걸러진다 — 일부러다. 테마로 인정하면 밴드색이
+  //    기본 #003DCC 가 아니라 primary 파생(#004DBF)으로 «조용히» 바뀐다. 이름만 바꾸고
+  //    싶은 거래처는 preset 이나 band 를 함께 지정해야 한다.
   if (!base && !isValidHexColor(t.band) && !isValidHexColor(t.accent)) return null;
   const out = { ...(base || {}) };
   THEME_KEYS.forEach((k) => { if (isValidHexColor(t[k])) out[k] = t[k].trim(); });
+  // 글자 필드는 «준 경우에만» 손댄다. 빈 문자열은 "프리셋 워드마크를 끄겠다" 는 뜻으로 읽는다
+  // (프리셋 색은 그대로 쓰되 상표만 빼고 싶은 거래처가 있을 수 있다 — 2026-08-27 이 그 상태였다).
+  TEXT_KEYS.forEach((k) => {
+    if (!(k in t)) return;
+    const v = sanitizeWordmark(t[k]);
+    if (v) out[k] = v; else delete out[k];
+  });
+  ASSET_KEYS.forEach((k) => {
+    if (!(k in t)) return;
+    const v = sanitizeAssetPath(t[k]);
+    if (v) out[k] = v; else delete out[k];
+  });
   if (!isValidHexColor(out.primary)) out.primary = "#0066FF";
   if (!isValidHexColor(out.band)) out.band = mixHex(out.primary, "#000000", 0.25);
   if (!isValidHexColor(out.accent)) out.accent = out.primary;

@@ -8,8 +8,12 @@
 //
 // 판형·색은 카카오모빌리티 통근셔틀 소개서를 따랐다(곤색 #1E233D · 옐로우 #FFCD00 ·
 // CTA #4088FE — 그 PDF 를 렌더해 픽셀에서 읽은 값. 카카오 **공식** 옐로우 #FEE500 이 아니다).
-// 🔴 카카오 로고·워드마크는 넣지 않는다 — 맞춘 것은 색과 형태지 상표가 아니다.
-//    (2026-08-27 way 결정: "색만". 상표를 쓰려면 카카오 측 서면 승인이 선행되어야 한다.)
+// 🔴 워드마크 표기는 2026-08-28 에 뒤집혔다. 2026-08-27 결정은 "색만"(상표 미사용)이었는데,
+//    카카오모빌리티 윤지영 부장이 카톡으로 "저 링크에 카카오모빌리티를 넣을 수 있을까요
+//    버스링크에 / 카카오 T나" 라고 직접 요청했고 way 가 승낙했다. 즉 이 표기는 우리가 고른
+//    상표가 아니라 **상대가 지정한 표기**다 — 다른 고객사 안내서에 그대로 복사하지 말 것
+//    (재사용 시 BRAND 를 그 고객사 이름이나 "BusLink" 로 되돌린다).
+//    로고 이미지는 여전히 안 넣는다(글자 표기만. 이미지 사용은 별도 승인 사안).
 const path = require("path");
 const fs = require("fs");
 const http = require("http");
@@ -17,7 +21,10 @@ const { chromium } = require(path.join(__dirname, "..", "node_modules", "playwri
 
 const DIR = __dirname;
 const SHOTS = process.env.SHOTS || path.join(DIR, "shots");
-const OUT = process.argv[2] || path.join(DIR, "..", "out", "버스링크_통근셔틀_이용안내서.pdf");
+// 슬라이드 꼬리말에 찍히는 브랜드 표기. 앱 화면의 워드마크(`partnerBranding.THEME_PRESETS.kakao`)와
+// **같은 값이어야** 안내서와 실제 화면이 어긋나지 않는다. 다른 고객사용으로 재사용하면 여기를 바꾼다.
+const BRAND = process.env.BRAND || "카카오 T";
+const OUT = process.argv[2] || path.join(DIR, "..", "out", "통근셔틀_이용안내서.pdf");
 
 // 템플릿 자리 → 캡처 파일명.
 const MAP = {
@@ -34,6 +41,8 @@ function dataUri(file) {
 (async () => {
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
   let html = fs.readFileSync(path.join(DIR, "deck.tpl.html"), "utf8");
+  // 글자 자리는 이미지 자리보다 먼저 채운다(아래 MAP 검사는 남은 {{...}} 를 전부 캡처로 본다).
+  html = html.split("{{brand}}").join(BRAND);
   const miss = [];
   html = html.replace(/\{\{([a-z_]+)\}\}/g, (m, k) => {
     if (!MAP[k]) { miss.push(k); return m; }

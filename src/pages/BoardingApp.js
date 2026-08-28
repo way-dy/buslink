@@ -5,7 +5,8 @@ import { unlockTagSound, playTagBeep } from "../lib/tagSound";
 import { auth } from "../firebase";
 import { signInAnonymously } from "firebase/auth";
 import { BusLinkLogo, Icon } from "../components/ui";
-import { fetchPartnerCodeData, applyPartnerTheme } from "../lib/partnerBranding";
+import { fetchPartnerCodeData, applyPartnerTheme, brandOf } from "../lib/partnerBranding";
+import { applyAppManifest } from "../lib/pwaManifest";
 
 function getParam(key) {
   return new URLSearchParams(window.location.search).get(key);
@@ -56,11 +57,23 @@ export default function BoardingApp() {
   //    알 수 있으므로, 로그인·복원이 돌려주는 `passenger.partnerCode` 로 한 번 조회한다.
   //    그 전(사번·비밀번호 입력 화면)은 기본 테마다 — 아직 누구인지 모르니 당연하다.
   // ⚠ 조회 실패·거래처 없음은 조용히 기본 테마(현행). 탑승은 테마와 무관하게 진행돼야 한다.
+  // 워드마크도 테마에서 나온다(2026-08-28) — 색만 바꾸고 이름은 BusLink 로 두면 한 화면에
+  // 두 브랜드가 섞인다. 테마가 워드마크를 안 주면 custom:false 라 예전 렌더 그대로다.
+  const [brand, setBrand] = useState(brandOf(null));
   const themeFor = (passenger) => {
     const pc = passenger && passenger.partnerCode;
     if (!pc) return;
-    fetchPartnerCodeData(pc).then(applyPartnerTheme).catch(() => {});
+    fetchPartnerCodeData(pc).then((d) => setBrand(brandOf(applyPartnerTheme(d)))).catch(() => {});
   };
+
+  // 브랜드가 정해지면 탭 제목·파비콘도 그 브랜드로(2026-08-28).
+  // 🔴 매니페스트는 건드리지 않는다 — `/board` 는 설치 대상 화면이 아니고, 여기서 바꾸면
+  //    같은 오리진의 관리자 PWA(scope "/")가 엉뚱한 매니페스트를 물 수 있다.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.title = brand.custom ? brand.name : "BusLink";
+    applyAppManifest({ faviconHref: brand.favicon || "/icons/passenger.svg" });
+  }, [brand.custom, brand.name, brand.favicon]);
 
   // 🔴 신원이 생기기 «전»에도, 인쇄된 QR 이 거래처를 실어 왔으면 그 톤으로 연다(2026-08-27).
   //    한 거래처 전용 차량에만 관리자가 넣는 값이고(`?pc=`), 없으면 예전처럼 기본 테마다.
@@ -69,7 +82,7 @@ export default function BoardingApp() {
     const pc = getParam("pc");
     if (!pc) return;
     let alive = true;
-    fetchPartnerCodeData(pc).then(d => { if (alive) applyPartnerTheme(d); }).catch(() => {});
+    fetchPartnerCodeData(pc).then(d => { if (alive) setBrand(brandOf(applyPartnerTheme(d))); }).catch(() => {});
     return () => { alive = false; };
   }, []);
 
@@ -185,7 +198,7 @@ export default function BoardingApp() {
         {/* 헤더 */}
         {/* 워드마크는 다른 화면과 같은 `BusLinkLogo`. 색을 CSS 변수로 넘겨 거래처 테마를 따라간다. */}
         <div style={S.header}>
-          <BusLinkLogo size={24} color="var(--color-primary)" sub={isStatic ? "고정 QR 탑승" : "탑승 확인"} />
+          <BusLinkLogo size={24} color="var(--color-primary)" name={brand.custom ? brand.name : undefined} sub={isStatic ? "고정 QR 탑승" : "탑승 확인"} />
         </div>
 
         {/* ─ 입력 단계 ─ */}

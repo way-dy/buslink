@@ -1,0 +1,25 @@
+{
+  "short_name": "카카오 T",
+  "name": "카카오 T 통근셔틀",
+  "icons": [
+    {
+      "src": "/icons/kakao-t.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/kakao-t-1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "id": "/p",
+  "start_url": "/p",
+  "scope": "/p",
+  "display": "standalone",
+  "theme_color": "#1E233D",
+  "background_color": "#FFFFFF",
+  "orientation": "portrait"
+}
