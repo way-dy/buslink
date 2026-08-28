@@ -7,7 +7,7 @@
 <div style="display:flex;gap:6mm;justify-content:center;align-items:flex-start"><img src="assets/employee/01-login.png" style="max-width:38%;margin:3mm 0 2mm" alt="로그인 화면"><img src="assets/employee/02-install-android.png" style="max-width:38%;margin:3mm 0 2mm" alt="앱 설치 안내"></div>
 
 - 휴대폰 브라우저에서 **`p.buslink.co.kr`** 접속 → **사번**과 **PIN** 입력 후 **`로그인`**
-- **첫 PIN은 `000000`** — 안내문에 다른 번호가 적혀 있으면 그 번호를 쓰세요(8월 이전 발급분)
+- **첫 PIN은 안내문에 적힌 번호** — 사람마다 다릅니다(2026년 7월 이전에 받으신 분만 `000000`)
 - 첫 로그인에서 **비밀번호 변경 화면이 반드시 나옵니다**(건너뛸 수 없음) — 받으신 날 바로 바꿔 주세요
 - 앱 설치: 안드로이드는 브라우저 메뉴(⋮) → **앱 설치**, 아이폰은 사파리 **공유** → **홈 화면에 추가**
 
