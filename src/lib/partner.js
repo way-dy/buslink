@@ -3,8 +3,31 @@ import { normalizeNfcUid, isValidNfcUid } from "./nfc";
 import { generateInitialPin, isValidInitialPin } from "./accountCards";
 import {
   doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc,
-  collection, getDocs, query, where, serverTimestamp, Timestamp
+  collection, getDocs, query, where, serverTimestamp, Timestamp,
+  documentId, writeBatch, increment
 } from "firebase/firestore";
+
+// ─── 대량 처리 도우미(2026-08-28) ─────────────────────────
+// 🔴 왜 필요한가: 명부가 250명 전제로 짜여 있었는데 신촌세브란스병원 한 곳이
+//    16,155명이다. 문서마다 왕복하면 읽기만 5분(실측 1건 18.9ms)이라, 읽기는
+//    **쿼리로 묶고** 쓰기는 **배치로 묶는다**.
+function chunk(arr, n) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+}
+/** 최대 `limit` 개를 동시에 굴리는 작업 풀 — 순차 await 로 왕복이 쌓이는 것을 막는다. */
+async function pooled(tasks, limit, onEach) {
+  let i = 0;
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, async () => {
+    while (i < tasks.length) {
+      const my = i++;
+      await tasks[my]();
+      if (onEach) onEach();
+    }
+  });
+  await Promise.all(workers);
+}
 
 // ─── 업체코드 생성 ────────────────────────────────────────
 export function generatePartnerCode(companyId, partnerName) {
@@ -173,7 +196,7 @@ export function parseEmployeeExcel(file) {
 }
 
 // ─── 직원 DB 반영 ─────────────────────────────────────────
-export async function importEmployees({ companyId, partnerCode, partnerName, employees, routes }) {
+export async function importEmployees({ companyId, partnerCode, partnerName, employees, routes, onProgress }) {
   // credentials = 이번에 **신규 발급된** 계정의 평문 PIN. 저장하지 않고 호출부(안내문
   // 인쇄)로만 돌려준다 — 화면을 벗어나면 다시 볼 수 없다(재발급 필요).
   const results = { added: 0, updated: 0, deactivated: 0, skipped: 0, errors: [], credentials: [] };
@@ -185,77 +208,145 @@ export async function importEmployees({ companyId, partnerCode, partnerName, emp
     routeMap[r.name.trim()] = r.id;
   });
 
-  for (const emp of employees) {
+  // ═══ 대량 처리(2026-08-28) ═══════════════════════════════════════════
+  // 🔴 예전엔 사번마다 `getDoc` → `setDoc/updateDoc` 을 **순차로 왕복**했다. 250명
+  //    전제에선 괜찮았지만 신촌세브란스병원 명부가 16,155명이 되면서 읽기만 5분
+  //    (실측 1건 18.9ms)이 걸렸다 — 게시판 「임직원일괄등록 시 느려집니다」의 근인.
+  //    이제 **읽기는 쿼리로, 쓰기는 배치로** 묶는다.
+  const col = collection(db, "companies", companyId, "passengers");
+  const report = (phase, done, total) => { try { onProgress && onProgress({ phase, done, total }); } catch (_) {} };
+
+  // ① 같은 사번이 파일에 여러 번 있으면 **뒤엣것만** 남긴다(예전 순차 처리도 뒤엣것이
+  //    앞엣것을 덮어썼다 — 파서가 "사번이 겹쳐서 N명만 등록됩니다"로 이미 알린다).
+  const byEmpNo = new Map();
+  for (const emp of employees || []) {
+    const n = String(emp.empNo ?? "").trim();
+    if (!n) { results.errors.push("사번이 비어 있는 행을 건너뜀"); continue; }
+    byEmpNo.set(n, { ...emp, empNo: n });
+  }
+  const rows = [...byEmpNo.values()];
+
+  // ② 기존 문서 선조회 — 이 협력사 명부는 쿼리 1번으로 받는다.
+  const existing = new Map();
+  try {
+    const mine = await getDocs(query(col, where("partnerCode", "==", partnerCode)));
+    mine.forEach(d => existing.set(d.id, d.data()));
+  } catch (e) {
+    results.errors.push("기존 명부 조회 실패: " + e.message);
+  }
+
+  // ③ 그 명부에 없는 사번만 30개씩 묶어 확인한다. 🔴 건너뛰면 안 된다 —
+  //    **다른 협력사에 이미 있는 사번(이관자)** 을 신규로 오판하면 PIN 이 새로 발급돼
+  //    그 사람이 쓰던 비밀번호가 끊긴다. 순차 왕복 대신 동시 12개로 굴린다.
+  const unknown = rows.map(r => r.empNo).filter(n => !existing.has(n));
+  const scanChunks = chunk(unknown, 30);
+  let scanned = 0;
+  report("scan", 0, scanChunks.length);
+  await pooled(scanChunks.map(c => async () => {
     try {
-      const ref = doc(db, "companies", companyId, "passengers", emp.empNo);
-      const existing = await getDoc(ref);
+      const snap = await getDocs(query(col, where(documentId(), "in", c)));
+      snap.forEach(d => existing.set(d.id, d.data()));
+    } catch (e) {
+      results.errors.push("기존 사번 확인 실패(" + c.length + "건): " + e.message);
+    }
+  }), 12, () => report("scan", ++scanned, scanChunks.length));
 
-      // routeId 해석
-      const routeId = emp.routeCode
-        ? (routeMap[emp.routeCode] || emp.routeCode)
-        : (existing.exists() ? existing.data().routeId : "");
+  // ④ 쓸 내용을 먼저 다 만든다(네트워크 없음).
+  const ops = [];
+  for (const emp of rows) {
+    const ref = doc(col, emp.empNo);
+    const prev = existing.get(emp.empNo) || null;
 
-      // PIN 변경 잠금(2026-07-21) — 여러 사람이 함께 쓰는 공용/통합 계정용.
-      // emp 에 boolean 으로 들어올 때만 기록한다. 파일·다중 등록처럼 값을 안 넘기는
-      // 경로에서는 undefined → 필드 미기록 → 기존 잠금 설정 보존(회귀 0).
-      const hasPinLocked = typeof emp.pinLocked === "boolean";
+    // routeId 해석
+    const routeId = emp.routeCode
+      ? (routeMap[emp.routeCode] || emp.routeCode)
+      : (prev ? prev.routeId : "");
 
-      // NFC 사원증 UID(2026-07-22) — pinLocked 와 **같은 조건부 기록 규칙**.
-      // 엑셀 일괄 업로드는 nfcUid 를 안 넘기므로 undefined → 필드 미기록 →
-      // 이미 등록된 카드가 대량 등록으로 날아가지 않는다(회귀 0).
-      // 빈 문자열/null 은 "해제" 의도로 보고 null 기록(수정 모달에서 비운 경우).
-      const hasNfcUid = emp.nfcUid !== undefined;
-      const nfcUidValue = emp.nfcUid ? normalizeNfcUid(emp.nfcUid) : null;
+    // PIN 변경 잠금(2026-07-21) — 여러 사람이 함께 쓰는 공용/통합 계정용.
+    // emp 에 boolean 으로 들어올 때만 기록한다. 파일·다중 등록처럼 값을 안 넘기는
+    // 경로에서는 undefined → 필드 미기록 → 기존 잠금 설정 보존(회귀 0).
+    const hasPinLocked = typeof emp.pinLocked === "boolean";
 
-      const data = {
-        empNo: emp.empNo,
-        name: emp.name,
-        dept: emp.dept,
-        routeId,
-        routeCode: emp.routeCode,
-        active: emp.active,
-        partnerCode,
-        partnerName,
-        companyId,
-        updatedAt: serverTimestamp(),
-      };
-      if (hasPinLocked) data.pinLocked = emp.pinLocked;
-      if (hasNfcUid) data.nfcUid = nfcUidValue;
+    // NFC 사원증 UID(2026-07-22) — pinLocked 와 **같은 조건부 기록 규칙**.
+    // 엑셀 일괄 업로드는 nfcUid 를 안 넘기므로 undefined → 필드 미기록 →
+    // 이미 등록된 카드가 대량 등록으로 날아가지 않는다(회귀 0).
+    // 빈 문자열/null 은 "해제" 의도로 보고 null 기록(수정 모달에서 비운 경우).
+    const hasNfcUid = emp.nfcUid !== undefined;
+    const nfcUidValue = emp.nfcUid ? normalizeNfcUid(emp.nfcUid) : null;
 
-      if (!existing.exists()) {
-        // 신규: 초기 PIN 을 **개인별로** 발급(2026-07-27).
-        //   이전엔 전원 "000000" 고정이라 사번(명부 순번)만 알면 남의 계정으로
-        //   로그인해 그 사람 노선·정류장·공지를 볼 수 있었다. 인원이 늘수록 그대로 확대.
-        //   관리자가 엑셀·폼으로 지정한 값이 있으면 그것, 없으면 랜덤 6자리.
-        const initialPin = isValidInitialPin(emp.initialPin) ? String(emp.initialPin).trim() : generateInitialPin();
-        data.pinHash = await hashPin(initialPin);
-        data.pinInitial = true; // 첫 로그인 시 본인 PIN 으로 변경 강제
-        data.createdAt = serverTimestamp();
-        await setDoc(ref, data);
-        results.added++;
-        // 평문은 여기서만 존재 — 안내문 인쇄용으로 반환하고 Firestore 엔 남기지 않는다.
-        results.credentials.push({ empNo: emp.empNo, name: emp.name, dept: emp.dept || "", routeCode: emp.routeCode || "", pin: initialPin });
-      } else {
-        // 기존: 정보 업데이트 (PIN은 건드리지 않음)
-        await updateDoc(ref, {
+    const data = {
+      empNo: emp.empNo,
+      name: emp.name,
+      dept: emp.dept,
+      routeId,
+      routeCode: emp.routeCode,
+      active: emp.active,
+      partnerCode,
+      partnerName,
+      companyId,
+      updatedAt: serverTimestamp(),
+    };
+    if (hasPinLocked) data.pinLocked = emp.pinLocked;
+    if (hasNfcUid) data.nfcUid = nfcUidValue;
+
+    if (!prev) {
+      // 신규: 초기 PIN 을 **개인별로** 발급(2026-07-27).
+      //   이전엔 전원 "000000" 고정이라 사번(명부 순번)만 알면 남의 계정으로
+      //   로그인해 그 사람 노선·정류장·공지를 볼 수 있었다. 인원이 늘수록 그대로 확대.
+      //   관리자가 엑셀·폼으로 지정한 값이 있으면 그것, 없으면 랜덤 6자리.
+      const initialPin = isValidInitialPin(emp.initialPin) ? String(emp.initialPin).trim() : generateInitialPin();
+      data.pinHash = await hashPin(initialPin);
+      data.pinInitial = true; // 첫 로그인 시 본인 PIN 으로 변경 강제
+      data.createdAt = serverTimestamp();
+      ops.push({ ref, empNo: emp.empNo, name: emp.name, kind: "set", data });
+      results.added++;
+      // 평문은 여기서만 존재 — 안내문 인쇄용으로 반환하고 Firestore 엔 남기지 않는다.
+      results.credentials.push({ empNo: emp.empNo, name: emp.name, dept: emp.dept || "", routeCode: emp.routeCode || "", pin: initialPin });
+    } else {
+      // 기존: 정보 업데이트 (PIN은 건드리지 않음)
+      ops.push({
+        ref, empNo: emp.empNo, name: emp.name, kind: "update",
+        data: {
           name: emp.name, dept: emp.dept,
           routeId, routeCode: emp.routeCode,
           active: emp.active,
           partnerCode, partnerName, updatedAt: serverTimestamp(),
           ...(hasPinLocked ? { pinLocked: emp.pinLocked } : {}),
           ...(hasNfcUid ? { nfcUid: nfcUidValue } : {}),
-        });
-        if (!emp.active && existing.data().active) results.deactivated++;
-        else results.updated++;
-      }
-    } catch (e) {
-      results.errors.push(`${emp.empNo} (${emp.name}): ${e.message}`);
+        },
+      });
+      if (!emp.active && prev.active) results.deactivated++;
+      else results.updated++;
     }
   }
 
-  // 업체코드 업로드 횟수 업데이트
+  // ⑤ 배치 커밋 — 한 배치 450건(상한 500), 동시 4개.
+  //    🔴 배치가 통째로 실패하면 그 450명이 소리 없이 빠진다 → 그때만 문서별로 다시 쓴다
+  //       (한 사람의 문제가 나머지 449명을 끌고 가지 않게).
+  const groups = chunk(ops, 450);
+  let written = 0;
+  report("write", 0, ops.length);
+  await pooled(groups.map(g => async () => {
+    try {
+      const batch = writeBatch(db);
+      g.forEach(o => { if (o.kind === "set") batch.set(o.ref, o.data); else batch.update(o.ref, o.data); });
+      await batch.commit();
+    } catch (_) {
+      for (const o of g) {
+        try {
+          if (o.kind === "set") await setDoc(o.ref, o.data); else await updateDoc(o.ref, o.data);
+        } catch (e2) {
+          results.errors.push(`${o.empNo} (${o.name}): ${e2.message}`);
+        }
+      }
+    }
+    written += g.length;
+    report("write", Math.min(written, ops.length), ops.length);
+  }), 4);
+
+  // 업체코드 업로드 횟수 업데이트 — 읽고 더하지 않는다(값이 없으면 NaN 이 된다).
   await updateDoc(doc(db, "partnerCodes", partnerCode), {
-    uploadCount: (await getDoc(doc(db, "partnerCodes", partnerCode))).data().uploadCount + 1,
+    uploadCount: increment(1),
     lastUploadAt: serverTimestamp(),
   });
 

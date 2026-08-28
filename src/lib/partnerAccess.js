@@ -89,17 +89,31 @@ export function partnerRouteOptions(routes, code, current) {
  *
  * @param {Array} routes     회사 전체 노선 [{id, partnerCode?}]
  * @param {string} code      이 포털의 업체코드
- * @param {Array} passengers 이 거래처 활성 승객 [{routeId?}]
+ * @param {Array|{byRouteCount:Object, unassignedCount:number}} passengers
+ *   이 거래처 활성 승객 [{routeId?}].
+ *   🔴 인원이 많은 거래처(2026-08-28 신촌세브란스 16,155명)에서는 승객 문서를 전부
+ *   받아오는 것 자체가 운영 포털을 느리게 한다 → **{byRouteCount:{routeId:수}, unassignedCount}**
+ *   집계를 대신 넘길 수 있다. 호출부는 Firestore 집계(count)로 그 값을 만든다(문서 0건 전송).
  * @returns {{ids:Set<string>, byRouteCount:Map<string,number>, unassignedCount:number}}
  */
 export function partnerOpsRoutes(routes, code, passengers) {
   const byRouteCount = new Map();
   let unassignedCount = 0;
-  (Array.isArray(passengers) ? passengers : []).forEach((p) => {
-    const rid = (p && p.routeId) || null;
-    if (!rid) { unassignedCount++; return; }
-    byRouteCount.set(rid, (byRouteCount.get(rid) || 0) + 1);
-  });
+  if (passengers && !Array.isArray(passengers) && typeof passengers === "object") {
+    // 집계 경로 — 값이 이미 '노선별 재직 인원'이라 다시 세지 않는다.
+    const src = passengers.byRouteCount || {};
+    for (const [rid, cnt] of Object.entries(src)) {
+      if (rid && typeof cnt === "number" && cnt > 0) byRouteCount.set(rid, cnt);
+    }
+    const u = passengers.unassignedCount;
+    unassignedCount = typeof u === "number" && u > 0 ? u : 0;
+  } else {
+    (Array.isArray(passengers) ? passengers : []).forEach((p) => {
+      const rid = (p && p.routeId) || null;
+      if (!rid) { unassignedCount++; return; }
+      byRouteCount.set(rid, (byRouteCount.get(rid) || 0) + 1);
+    });
+  }
   const ids = new Set(byRouteCount.keys());
   (Array.isArray(routes) ? routes : []).forEach((r) => {
     if (r && r.id && code && r.partnerCode === code) ids.add(r.id);

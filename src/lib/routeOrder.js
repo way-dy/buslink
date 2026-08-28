@@ -33,7 +33,10 @@ export function sortRoutes(routes) {
  * 순수 함수 — 집계만 한다(표시·경고 문구는 호출부).
  *
  * @param {Array} routes      [{id, seats}]
- * @param {Array} passengers  [{routeId, active}] — active===false 는 제외(퇴사)
+ * @param {Array|Object} passengers  [{routeId, active}] — active===false 는 제외(퇴사).
+ *   🔴 인원이 많은 회사(2026-08-28 신촌세브란스 16,155명)에서는 승객 문서를 전부 받아오는
+ *   것 자체가 화면을 느리게 한다 → **{routeId: 재직인원수} 맵**을 대신 넘길 수 있다.
+ *   호출부는 Firestore 집계(count) 로 그 맵을 만든다(문서 0건 전송).
  * @param {Array} [boardings] [{routeId}] — 오늘 탑승 기록(있으면 탑승 수도 집계)
  * @returns {Object} { [routeId]: {seats, registered, boarded, over, ratio} }
  *   seats null = 정원 미설정(over 는 항상 false — 없는 기준으로 초과 판정하지 않는다)
@@ -51,6 +54,12 @@ export function seatUsage(routes, passengers, boardings) {
       if (!p || p.active === false) continue;
       const e = out[p.routeId];
       if (e) e.registered++;
+    }
+  } else if (passengers && typeof passengers === "object") {
+    // 집계 맵 경로 — 값이 이미 '재직 인원'이라 active 필터를 다시 걸지 않는다.
+    for (const [routeId, n] of Object.entries(passengers)) {
+      const e = out[routeId];
+      if (e && typeof n === "number" && n > 0) e.registered = n;
     }
   }
   if (Array.isArray(boardings)) {

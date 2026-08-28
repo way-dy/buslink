@@ -97,13 +97,36 @@ console.log("\n[6] 나쁜 입력");
   ok("routeId 빈 문자열은 미배정", partnerOpsRoutes([], CODE, [{ routeId: "" }]).unassignedCount === 1);
 }
 
+console.log("\n[6-b] 집계 입력(2026-08-28) — 승객 문서를 안 받고 count 로만 채운다");
+{
+  // 🔴 왜: 신촌세브란스 16,155명을 문서째 받는 것 자체가 운영 포털을 느리게 했다.
+  //    호출부가 Firestore 집계로 만든 {byRouteCount, unassignedCount} 를 그대로 넘긴다.
+  const agg = { byRouteCount: { r1: 120, r2: 8 }, unassignedCount: 5 };
+  const r = partnerOpsRoutes(ROUTES, CODE, agg);
+  ok("집계 값이 노선별 인원이 된다", r.byRouteCount.get("r1") === 120 && r.byRouteCount.get("r2") === 8);
+  ok("미배정도 그대로", r.unassignedCount === 5);
+  ok("거래처 지정 노선과 합집합은 유지", r.ids.has("r1") && r.ids.has("r2"));
+  ok("0·음수·비수치는 버린다", partnerOpsRoutes(ROUTES, CODE, { byRouteCount: { r1: 0, r2: -1, r3: "9" } }).byRouteCount.size === 0);
+  ok("빈 집계에도 throw 0", partnerOpsRoutes(ROUTES, CODE, {}).unassignedCount === 0);
+  // 배열 경로는 그대로여야 한다(다른 화면이 아직 배열을 쓴다)
+  const arr = partnerOpsRoutes(ROUTES, CODE, [{ routeId: "r1" }, { routeId: "r1" }, { routeId: "" }]);
+  ok("배열 경로 회귀 없음", arr.byRouteCount.get("r1") === 2 && arr.unassignedCount === 1);
+}
+
+
 console.log("\n[7] 회귀 가드 — 소스에 실제로 남아 있는지");
 {
   const app = fs.readFileSync(path.join(__dirname, "..", "src", "pages", "PartnerApp.js"), "utf8");
-  ok("PartnerApp 이 partnerOpsRoutes 를 쓴다", /partnerOpsRoutes\(routes,\s*code,\s*passengers\)/.test(app));
+  // 🔴 2026-08-28: 세 번째 인자가 `passengers`(문서 배열) → `headcount`(집계) 로 바뀌었다.
+  //    신촌세브란스 16,155명을 문서째 받아오던 것이 운영 포털을 느리게 해서다. 가드의 뜻은
+  //    "PartnerApp 이 노선 집합을 스스로 다시 만들지 않는다" 이므로 인자 이름은 안 묶는다.
+  ok("PartnerApp 이 partnerOpsRoutes 를 쓴다", /partnerOpsRoutes\(routes,\s*code,\s*\w+\)/.test(app));
   ok("myRouteIds 를 승객 배정만으로 다시 만들지 않는다",
     !/myRouteIds:\s*new window\.Set\(m\.keys\(\)\)/.test(app));
-  ok("memo deps 에 routes·code 가 있다", /\}, \[passengers, routes, code\]\);/.test(app));
+  ok("memo deps 에 routes·code 가 있다", /\}, \[\w+, routes, code\]\);/.test(app));
+  // 🔴 새 사실 — 인원은 **집계(count)** 로 센다. 승객 문서를 통째로 받는 코드로 되돌리면 빨간불.
+  ok("운영 포털이 승객 문서를 통째로 받지 않는다",
+    /getCountFromServer\(query\(col, \.\.\.base\)\)/.test(app) && !/setPassengers\(snap\.docs/.test(app));
   const lib = fs.readFileSync(path.join(__dirname, "..", "src", "lib", "partnerAccess.js"), "utf8");
   ok("합집합(승객 배정 보존) 주석 가드", /합집합으로 남긴다/.test(lib));
 }

@@ -6,7 +6,7 @@ import { signOut } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import {
   collection, onSnapshot, query, where,
-  doc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, orderBy
+  doc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, orderBy, getCountFromServer
 } from "firebase/firestore";
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { compareRoutes, seatUsage } from "../lib/routeOrder";
@@ -2480,15 +2480,36 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
   }, [companyId]);
 
   // 정원 대비 등록 인원(2026-07-30) — 노선에 좌석수는 원래 있었는데 몇 명이 배정됐는지
-  // 볼 화면이 없어 정원 초과를 사전에 못 잡았다. 승객 목록 1회 로드로 집계(실시간 불필요).
-  const [seatPassengers, setSeatPassengers] = useState([]);
+  // 볼 화면이 없어 정원 초과를 사전에 못 잡았다.
+  // 🔴 2026-08-28: 예전엔 `getDocs(passengers)` 로 **전사 승객을 통째로** 받아 세었다.
+  //    250명 전제에선 괜찮았지만 신촌세브란스병원 명부가 들어오며 16,409건이 됐고,
+  //    노선 관리 탭을 열 때마다 그걸 다 받느라 관리자 페이지가 느려졌다(게시판 신고).
+  //    필요한 건 노선별 '재직 인원 수' 하나뿐이라 **Firestore 집계(count)** 로 바꾼다 —
+  //    문서는 한 건도 안 내려온다. 노선 121개 × 약 37ms 를 동시 8개로 굴린다.
+  const [seatCounts, setSeatCounts] = useState({});
   useEffect(() => {
-    if (!companyId) return;
-    getDocs(collection(db, "companies", companyId, "passengers"))
-      .then(snap => setSeatPassengers(snap.docs.map(d => ({ routeId: d.data().routeId, active: d.data().active }))))
-      .catch(() => setSeatPassengers([]));
-  }, [companyId]);
-  const usage = seatUsage(routes, seatPassengers);
+    if (!companyId || !routes.length) return;
+    let alive = true;
+    const ids = routes.map(r => r.id);
+    const col = collection(db, "companies", companyId, "passengers");
+    (async () => {
+      const acc = {};
+      let i = 0;
+      const workers = Array.from({ length: Math.min(8, ids.length) }, async () => {
+        while (i < ids.length) {
+          const id = ids[i++];
+          try {
+            const c = await getCountFromServer(query(col, where("routeId", "==", id), where("active", "==", true)));
+            acc[id] = c.data().count;
+          } catch (_) { /* 한 노선 실패가 나머지를 막지 않는다 */ }
+        }
+      });
+      await Promise.all(workers);
+      if (alive) setSeatCounts(acc);
+    })();
+    return () => { alive = false; };
+  }, [companyId, routes]);
+  const usage = seatUsage(routes, seatCounts);
 
   // 협력사 목록 로드
   useEffect(() => {

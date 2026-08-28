@@ -11,7 +11,7 @@ import { normalizeNfcUid, isValidNfcUid, formatNfcUid, isWebNfcSupported, create
 import { registerNfcCard } from "../lib/boarding";
 import { db, auth } from "../firebase";
 import { signInAnonymously } from "firebase/auth";
-import { collection, getDocs, doc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, limit } from "firebase/firestore";
+import { collection, getDocs, doc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, limit, getCountFromServer } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { BusLinkLogo, Pill, Icon } from "../components/ui";
 import InstallPrompt from "../components/InstallPrompt";
@@ -304,6 +304,8 @@ function FileUploadMode({ codeData, code, routes, onDone }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [previewing, setPreviewing] = useState(false);
+  // 진행률(2026-08-28) — 명부가 16,000명대가 되면서 "등록 중..." 한 줄로는 멈춘 것처럼 보인다.
+  const [progress, setProgress] = useState(null);   // { phase:'scan'|'write', done, total }
 
   const handleFile = async (e) => {
     const f = e.target.files?.[0];
@@ -320,13 +322,26 @@ function FileUploadMode({ codeData, code, routes, onDone }) {
 
   const handleImport = async () => {
     if (!parsed) return;
-    setLoading(true);
+    setLoading(true); setProgress(null);
     try {
-      const res = await importEmployees({ companyId:codeData.companyId, partnerCode:code, partnerName:codeData.partnerName, employees:parsed.employees, routes });
+      const res = await importEmployees({
+        companyId:codeData.companyId, partnerCode:code, partnerName:codeData.partnerName,
+        employees:parsed.employees, routes,
+        onProgress: (p) => setProgress(p),
+      });
       onDone(res);
     } catch(e) { setError(e.message); }
+    setProgress(null);
     setLoading(false);
   };
+
+  // 진행 문구 — 인원이 많을 때만 숫자를 보여준다(적을 땐 순식간이라 깜빡임만 된다).
+  const progressText = !loading ? null
+    : progress && progress.total > 500
+      ? (progress.phase === "scan"
+          ? `기존 명부 확인 중... ${progress.done}/${progress.total}`
+          : `등록 중... ${progress.done.toLocaleString()} / ${progress.total.toLocaleString()}명`)
+      : "등록 중...";
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
@@ -399,7 +414,7 @@ function FileUploadMode({ codeData, code, routes, onDone }) {
           {error && <div style={S.errorMsg}>{error}</div>}
           <div style={{ display:"flex", gap:8 }}>
             <button style={{ ...S.btn, opacity:loading?0.6:1 }} onClick={handleImport} disabled={loading}>
-              {loading?"등록 중...":`✅ ${parsed.total}명 등록하기`}
+              {loading ? progressText : `✅ ${parsed.total}명 등록하기`}
             </button>
             <button style={{ ...S.btnSecondary, flex:"0 0 80px" }} onClick={()=>{setPreviewing(false);setParsed(null);setFile(null);}}>다시</button>
           </div>
@@ -775,6 +790,12 @@ function EmployeeManageMode({ codeData, code, routes }) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterActive, setFilterActive] = useState("전체"); // 전체|재직|퇴사
+  // 🔴 표시 상한(2026-08-28) — 예전엔 걸러진 인원을 **전부** 카드로 그렸다. 250명 전제에선
+  //    괜찮았지만 신촌세브란스병원 명부가 16,155명이 되면서 카드 하나에 DOM 15개꼴이라
+  //    브라우저가 25만 노드를 그리다 멈췄다(게시판 「협력사페이지 느려짐」). 집계·검색은
+  //    전체를 그대로 쓰고 **그리는 것만** 끊는다 — 숫자가 틀려지면 안 되므로.
+  const PAGE = 100;
+  const [shown, setShown] = useState(PAGE);
   const [editEmp, setEditEmp] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
@@ -807,6 +828,10 @@ function EmployeeManageMode({ codeData, code, routes }) {
     if (search && !e.name?.includes(search) && !e.empNo?.includes(search) && !e.dept?.includes(search)) return false;
     return true;
   });
+  // 검색어·필터가 바뀌면 처음부터 다시 100명 — 앞에서 더 보기를 눌러 둔 상태가 따라오면
+  // 좁혀 놓고도 여전히 수천 장을 그린다.
+  useEffect(() => { setShown(PAGE); }, [search, filterActive]);
+  const visible = filtered.slice(0, shown);
 
   // 🔴 "아직 시작 안 한" 승객 판정(2026-07-27) — 접속 기록 없음 **AND** 발급받은 초기
   //   비밀번호를 그대로 둔 상태. `lastLoginAt` 은 이 날 신설한 필드라 그 전에 접속한
@@ -970,7 +995,7 @@ function EmployeeManageMode({ codeData, code, routes }) {
         </div>
       ) : (
         <div style={{ display:"flex", flexDirection:"column", gap:8, maxHeight:360, overflowY:"auto" }}>
-          {filtered.map(emp => (
+          {visible.map(emp => (
             <div key={emp.id} style={{
               background:"var(--color-bg)",
               borderRadius:10,
@@ -1015,6 +1040,17 @@ function EmployeeManageMode({ codeData, code, routes }) {
               </div>
             </div>
           ))}
+          {/* 남은 인원 안내 — 숫자는 늘 전체 기준이라 "몇 명 중 몇 명을 보고 있는지"를 밝힌다. */}
+          {filtered.length > visible.length && (
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6, padding:"10px 0 4px" }}>
+              <div style={{ fontSize:12, color:"var(--color-label-mute)", fontWeight:600 }}>
+                {filtered.length.toLocaleString()}명 중 {visible.length.toLocaleString()}명 표시 중 · 이름·사번으로 검색하면 바로 찾을 수 있습니다
+              </div>
+              <button onClick={() => setShown(n => n + PAGE)} style={{ ...S.btnSecondary, width:"auto", padding:"8px 18px" }}>
+                {Math.min(PAGE, filtered.length - visible.length)}명 더 보기
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1030,7 +1066,9 @@ function EmployeeManageMode({ codeData, code, routes }) {
             </div>
 
             <div style={{ maxHeight:220, overflowY:"auto", border:"1px solid var(--color-line)", borderRadius:8 }}>
-              {pinResult.credentials.map(c => (
+              {/* 🔴 목록에 다 그리지 않는다(2026-08-28) — 인원이 많으면 이 모달에서 브라우저가
+                  멈춘다. 전원분은 아래 '안내문 인쇄'로 나가므로 화면은 앞부분만 보여준다. */}
+              {pinResult.credentials.slice(0, 200).map(c => (
                 <div key={c.empNo} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, padding:"9px 12px", borderBottom:"1px solid var(--color-line-soft)" }}>
                   <div style={{ minWidth:0 }}>
                     <div style={{ fontSize:13, fontWeight:700, color:"var(--color-label)" }}>{c.name}</div>
@@ -1039,6 +1077,11 @@ function EmployeeManageMode({ codeData, code, routes }) {
                   <div style={{ fontSize:16, fontWeight:800, color:"var(--color-primary)", fontFamily:"monospace", letterSpacing:1 }}>{c.pin}</div>
                 </div>
               ))}
+              {pinResult.credentials.length > 200 && (
+                <div style={{ padding:"10px 12px", fontSize:12, color:"var(--color-label-mute)", fontWeight:600, textAlign:"center" }}>
+                  외 {(pinResult.credentials.length - 200).toLocaleString()}명 — 전원분은 아래 안내문 인쇄에 포함됩니다
+                </div>
+              )}
             </div>
 
             {pinResult.errors?.length > 0 && (
@@ -1753,33 +1796,55 @@ function OperationsMode({ codeData, code, routes }) {
   );
 
   // ── 자사 직원 ↦ routeId 분포 ─────────────────────────
-  const [passengers, setPassengers] = useState([]); // [{empNo,name,routeId,...}]
+  // 🔴 2026-08-28: 예전엔 이 거래처 활성 승객을 **문서째 전부** 받아 노선별로 세었다.
+  //    250명 전제에선 괜찮았지만 신촌세브란스병원이 16,155명이 되며 운영 포털을 열 때마다
+  //    그걸 다 내려받느라 느려졌다(게시판 「협력사페이지 느려짐」). 필요한 건 **노선별 인원
+  //    수와 총원**뿐이라 Firestore 집계(count)로 바꾼다 — 문서는 한 건도 안 내려온다.
+  //    미배정 = 총원 − 노선별 합계(사라진 노선에 배정된 승객도 여기로 모인다).
+  const [headcount, setHeadcount] = useState({ byRouteCount: {}, unassignedCount: 0, total: 0 });
   const [passengersLoading, setPassengersLoading] = useState(true);
   useEffect(() => {
-    if (!companyId || !code) return;
+    if (!companyId || !code || !routes.length) return;
+    let alive = true;
     setPassengersLoading(true);
-    const q = query(
-      collection(db, "companies", companyId, "passengers"),
-      where("partnerCode", "==", code),
-      where("active", "==", true)
-    );
-    getDocs(q).then(snap => {
-      setPassengers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setPassengersLoading(false);
-    }).catch(e => {
-      console.warn("[OperationsMode] passengers 조회 오류:", e?.message);
-      setPassengers([]); setPassengersLoading(false);
-    });
-  }, [companyId, code]);
+    const col = collection(db, "companies", companyId, "passengers");
+    const base = [where("partnerCode", "==", code), where("active", "==", true)];
+    (async () => {
+      try {
+        const totalSnap = await getCountFromServer(query(col, ...base));
+        const total = totalSnap.data().count;
+        const ids = routes.map(r => r.id);
+        const byRouteCount = {};
+        let i = 0;
+        const workers = Array.from({ length: Math.min(8, ids.length) }, async () => {
+          while (i < ids.length) {
+            const id = ids[i++];
+            try {
+              const c = await getCountFromServer(query(col, ...base, where("routeId", "==", id)));
+              if (c.data().count > 0) byRouteCount[id] = c.data().count;
+            } catch (_) { /* 한 노선 실패가 나머지를 막지 않는다 */ }
+          }
+        });
+        await Promise.all(workers);
+        const assigned = Object.values(byRouteCount).reduce((a, b) => a + b, 0);
+        if (alive) setHeadcount({ byRouteCount, unassignedCount: Math.max(0, total - assigned), total });
+      } catch (e) {
+        console.warn("[OperationsMode] 승객 집계 오류:", e?.message);
+        if (alive) setHeadcount({ byRouteCount: {}, unassignedCount: 0, total: 0 });
+      }
+      if (alive) setPassengersLoading(false);
+    })();
+    return () => { alive = false; };
+  }, [companyId, code, routes]);
 
   // 자사 routeId 집합 + 노선별 승객 수 — 정본 = partnerAccess.partnerOpsRoutes
   // 🔴 기준축은 **거래처에 지정된 노선**(routes.partnerCode)이고 승객 배정 노선은 합집합.
   //    승객 배정만으로 모으면 하교·요일별·방과후처럼 아무도 기준노선으로 잡지 않는 노선이
   //    통째로 빠진다(2026-08-11 실측: 채드윅 29개 중 8개만 표시). 되돌리지 말 것.
   const { myRouteIds, byRouteCount, unassignedCount } = useMemo(() => {
-    const r = partnerOpsRoutes(routes, code, passengers);
+    const r = partnerOpsRoutes(routes, code, headcount);
     return { myRouteIds: r.ids, byRouteCount: r.byRouteCount, unassignedCount: r.unassignedCount };
-  }, [passengers, routes, code]);
+  }, [headcount, routes, code]);
 
   // 노선 카드용 — routes props에서 매칭 + 필요 정보만 추출.
   const myRoutesList = useMemo(() => {
@@ -1942,7 +2007,7 @@ function OperationsMode({ codeData, code, routes }) {
     });
     return m;
   }, [todayBoardings]);
-  const totalEmployees = passengers.length;
+  const totalEmployees = headcount.total;
   const totalBoarded = todayBoardings.length;
   const boardingRate = totalEmployees > 0 ? Math.round(totalBoarded / totalEmployees * 100) : 0;
 

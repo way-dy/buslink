@@ -76,5 +76,23 @@ console.log("\n[5] 결측·이상 입력에 throw 하지 않는다");
   ok("id 없는 노선 무시", Object.keys(seatUsage([{ seats: 10 }], [])).length === 0);
 }
 
+console.log("\n[6] 집계 맵 입력(2026-08-28) — 승객 문서를 안 받고 count 로만 채운다");
+{
+  // 🔴 왜 필요한가: 신촌세브란스병원 명부가 16,155명이 되면서 승객 문서를 전부 받아
+  //    세는 것 자체가 관리자 화면을 느리게 했다. 호출부가 Firestore 집계로 만든
+  //    {routeId: 재직인원수} 맵을 그대로 넘길 수 있어야 한다.
+  const u = seatUsage(ROUTES, { r1: 46, r2: 25, 없는노선: 99 });
+  ok("맵 값이 등록 인원이 된다", u.r1.registered === 46, u.r1);
+  ok("정원 초과 판정도 그대로", u.r1.over === true && u.r2.over === false);
+  ok("정원 미설정 노선은 초과 아님", seatUsage(ROUTES, { r3: 100 }).r3.over === false);
+  ok("모르는 노선 키는 무시", u["없는노선"] === undefined && Object.keys(u).length === 4);
+  ok("맵에 없는 노선은 0", u.r3.registered === 0);
+  ok("음수·문자 값은 무시", seatUsage(ROUTES, { r1: -3, r2: "12" }).r1.registered === 0);
+  // 배열 경로는 그대로 — 두 입력이 같은 답을 내야 한다(협력사 화면은 아직 배열을 쓴다)
+  const arr = seatUsage(ROUTES, [{ routeId: "r1" }, { routeId: "r1" }, { routeId: "r2", active: false }]);
+  const map = seatUsage(ROUTES, { r1: 2 });
+  ok("배열 경로와 맵 경로가 같은 답", JSON.stringify(arr.r1) === JSON.stringify(map.r1), [arr.r1, map.r1]);
+}
+
 console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);
 process.exit(fail ? 1 : 0);
