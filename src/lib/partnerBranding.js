@@ -42,15 +42,19 @@ export const THEME_PRESETS = {
   // 🔴 아이콘 3종(2026-08-28 way 승인 "아이콘도 사용해도 됨") — 파비콘·홈화면 아이콘·매니페스트.
   //    아이콘 도형은 짐작이 아니라 **고객이 준 소개서 7쪽의 앱 아이콘을 렌더해 노랑 픽셀 런을
   //    스캔한 좌표**로 다시 그린 벡터다(원본은 48px 남짓 래스터라 확대하면 뭉갠다).
+  // 🔴 `appName` 은 워드마크와 **일부러 다르다**(2026-08-30 way): 홈 화면 아이콘 이름이
+  //    「카카오 T」 면 **폰에 이미 깔린 카카오 T 앱과 이름이 겹친다**. 앱 안 표기(헤더·밴드·
+  //    탑승 화면)는 카카오모빌리티가 지정한 「카카오 T」 그대로 두고, **설치·홈화면 이름만**
+  //    「카카오통근」 으로 가른다. 부재면 워드마크로 폴백하므로 다른 거래처는 영향 0.
   kakao: { band: "#1E233D", accent: "#FFCD00", accentSoft: "#FFF3C4", primary: "#4088FE",
-           wordmark: "카카오 T", wordmarkSub: "통근셔틀",
+           wordmark: "카카오 T", wordmarkSub: "통근셔틀", appName: "카카오통근",
            favicon: "/icons/kakao-t.svg", apple: "/icons/kakao-t-1024.png",
            manifest: "/manifest-kakao.json" },
 };
 
 const THEME_KEYS = ["band", "accent", "accentSoft", "primary"];
 // 색이 아니라 **글자**인 테마 필드. 위 THEME_KEYS 와 검증 방식이 다르므로 따로 둔다.
-const TEXT_KEYS = ["wordmark", "wordmarkSub"];
+const TEXT_KEYS = ["wordmark", "wordmarkSub", "appName"];
 // 파비콘·홈화면 아이콘·매니페스트 경로. 값의 성격이 또 달라(같은 오리진 경로) 검증도 따로다.
 const ASSET_KEYS = ["favicon", "apple", "manifest"];
 
@@ -93,6 +97,9 @@ export function brandOf(theme) {
   const name = (theme && theme.wordmark) || DEFAULT_WORDMARK;
   return {
     name,
+    // 설치 팝업·홈 화면 아이콘에 쓸 이름. 🔴 **부재면 워드마크와 같다** — 이 폴백을 빼면
+    // appName 을 안 준 거래처의 설치 안내가 통째로 BusLink 로 떨어진다.
+    appName: (theme && theme.appName) || name,
     sub: (theme && theme.wordmarkSub) || null,
     custom: name !== DEFAULT_WORDMARK,
     // 부재면 null — 호출부가 «그 앱의 기본 아이콘»으로 되돌린다(거래처를 옮겼을 때 남의 아이콘이

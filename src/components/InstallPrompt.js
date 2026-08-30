@@ -18,8 +18,22 @@
 import React, { useEffect, useState } from "react";
 import { Btn } from "./ui";
 import { resolveAppIcons } from "../lib/appIcons";
+import { withEulReul } from "../lib/josa";
 
 const LS_KEY = "buslink_pwa_prompt";
+
+// 주소에 `?install=1` 이 있으면 3일 스누즈를 무시하고 다시 띄운다(2026-08-30 way «다시 안 보여»).
+// 🔴 스누즈 자체는 그대로 둔다 — 매번 뜨면 광고가 된다. 이건 «지금 보고 싶다» 는 통로다.
+// 🔴 이미 설치된(standalone) 상태는 여전히 안 뜬다 — 설치한 사람에게 설치를 권할 이유가 없다.
+// 설정 탭 «📲 앱 설치하기» 는 예전부터 스누즈와 무관한 상시 진입점이다(이건 그걸 못 찾는 사람용).
+function isForcedByUrl() {
+  try {
+    const v = new URLSearchParams(window.location.search).get("install");
+    return v === "1" || v === "true";
+  } catch {
+    return false;
+  }
+}
 const SNOOZE_DAYS = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -269,13 +283,16 @@ export function InstallGuide({ platform = "auto", onInstall, inline = false, bra
 // (EmployeeApp 이 applyAppManifest 로 교체) **이 팝업만** 앱 고정 매핑을 봐서, 화면은
 // 카카오 톤인데 "홈 화면에 BusLink 를 추가하세요" 가 파란 BusLink 아이콘과 함께 떴다.
 export default function InstallPrompt({ brandName = null, iconHref = null }) {
+  const forced = typeof window !== "undefined" && isForcedByUrl();
   // mode: null(미표시) | "android"(네이티브 프롬프트 가능) | "android-manual" | "ios"
   const [mode, setMode] = useState(null);
   const [deferred, setDeferred] = useState(null);
 
   useEffect(() => {
     // 이미 설치됨 / 최근 닫음이면 아무것도 하지 않음
-    if (isStandalone() || isSnoozed()) return;
+    // 🔴 standalone 은 강제 노출로도 뚫지 않는다(이미 설치된 앱 안에서 설치를 권하게 된다).
+    if (isStandalone()) return;
+    if (!forced && isSnoozed()) return;
 
     let mounted = true;
 
@@ -329,14 +346,25 @@ export default function InstallPrompt({ brandName = null, iconHref = null }) {
       }, 3000);
     }
 
+    // 강제 노출인데 iOS Safari 도 안드로이드 크롬도 아니면 위 두 타이머가 안 돌아 «눌렀는데 아무 일도
+    // 안 일어난다» 가 된다 → 기기에 맞는 안내라도 띄운다(설치 버튼은 어차피 BIP 가 있을 때만 뜬다).
+    let forcedTimer = null;
+    if (forced && !isIosSafari() && !isAndroidPwaCapable()) {
+      forcedTimer = setTimeout(() => {
+        if (mounted) setMode((prev) => prev || (isIos() ? "ios" : "android-manual"));
+      }, 1500);
+    }
+
     return () => {
       mounted = false;
+      if (forcedTimer) clearTimeout(forcedTimer);
       window.removeEventListener("beforeinstallprompt", onBIP);
       window.removeEventListener("appinstalled", onInstalled);
       if (iosTimer) clearTimeout(iosTimer);
       if (androidTimer) clearTimeout(androidTimer);
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forced]);
 
   const close = () => {
     writeDismiss();
@@ -435,8 +463,8 @@ export default function InstallPrompt({ brandName = null, iconHref = null }) {
               }}
             >
               {isIosMode || mode === "android-manual"
-                ? `아래 순서대로 홈 화면에 ${name} 를 추가하세요.`
-                : `홈 화면에 ${name} 를 추가하면 앱처럼 바로 실행돼요.`}
+                ? `아래 순서대로 홈 화면에 ${withEulReul(name)} 추가하세요.`
+                : `홈 화면에 ${withEulReul(name)} 추가하면 앱처럼 바로 실행돼요.`}
             </div>
           </div>
           <button

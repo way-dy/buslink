@@ -237,6 +237,47 @@ function loadModule(doc) {
   ok("applyPartnerTheme 이 테마 없을 때 옛 경로로 내려간다",
     /if \(!theme\) \{ applyPartnerBranding/.test(libSrc));
 
+  // ── [9] 앱 이름(appName)·조사 (2026-08-30) ─────────────────────
+  // 🔴 홈 화면 아이콘 이름은 앱 안 워드마크와 **일부러 다르다** — 「카카오 T」 는 폰에 이미
+  //    깔린 카카오 T 앱과 이름이 겹친다(way 지적). 둘을 같은 값으로 묶으면 그 결정이 사라진다.
+  console.log("\n[9] 앱 이름·조사");
+  const josaSrc = fs.readFileSync(path.join(ROOT, "src/lib/josa.js"), "utf8")
+    .replace(/^export const /gm, "const ")
+    .replace(/^export function /gm, "function ");
+  const jctx = { console };
+  vm.createContext(jctx);
+  vm.runInContext(josaSrc + "\n;this.__j = { hasBatchim, withEulReul };", jctx);
+  const J = jctx.__j;
+  ok("받침 있는 한글 → 을", J.withEulReul("카카오통근") === "카카오통근을", J.withEulReul("카카오통근"));
+  ok("받침 없는 한글 → 를", J.withEulReul("버스") === "버스를", J.withEulReul("버스"));
+  ok("🔴 영문은 무받침 취급 = 현행 유지", J.withEulReul("BusLink") === "BusLink를", J.withEulReul("BusLink"));
+  ok("🔴 «카카오 T» 도 현행 그대로", J.withEulReul("카카오 T") === "카카오 T를", J.withEulReul("카카오 T"));
+  ok("빈 값·null 이어도 던지지 않는다", J.withEulReul("") === "를" && J.withEulReul(null) === "를");
+  ok("꼬리 공백은 무시한다", J.hasBatchim("카카오통근  ") === true);
+
+  const kk = M.THEME_PRESETS.kakao;
+  ok("카카오 프리셋 appName 이 «카카오통근»", kk.appName === "카카오통근", kk.appName);
+  ok("🔴 앱 안 워드마크는 «카카오 T» 그대로(고객이 지정한 표기)", kk.wordmark === "카카오 T", kk.wordmark);
+  ok("🔴 부재면 appName 이 워드마크로 폴백", M.brandOf({ wordmark: "가나다" }).appName === "가나다");
+  ok("🔴 테마가 없으면 appName 도 BusLink", M.brandOf(null).appName === "BusLink");
+  ok("appName 이 24자를 넘으면 무시되고 워드마크로 내려간다",
+    M.brandOf(M.resolveTheme({ theme: { preset: "kakao", appName: "가".repeat(25) } })).appName === "카카오 T");
+  ok("빈 문자열이면 appName 만 끄고 워드마크를 쓴다",
+    M.brandOf(M.resolveTheme({ theme: { preset: "kakao", appName: "" } })).appName === "카카오 T");
+
+  const kakaoManifest = JSON.parse(fs.readFileSync(path.join(ROOT, "public/manifest-kakao.json"), "utf8"));
+  ok("🔴 매니페스트 short_name 이 프리셋 appName 과 같다(하나만 고치면 화면과 홈 아이콘이 갈린다)",
+    kakaoManifest.short_name === kk.appName, kakaoManifest.short_name);
+  const promptSrc = fs.readFileSync(path.join(ROOT, "src/components/InstallPrompt.js"), "utf8");
+  ok("🔴 설치 팝업 문구가 조사 헬퍼를 쓴다(하드코딩 « 를 » 복원 금지)", promptSrc.includes("withEulReul(name)"));
+  ok("🔴 brandName 기본값이 null 이다(«준 경우에만» 계약)",
+    /InstallPrompt\(\{ brandName = null, iconHref = null \}\)/.test(promptSrc));
+  ok("?install=1 로 스누즈를 건너뛸 수 있다",
+    promptSrc.includes("isForcedByUrl") && promptSrc.includes("!forced && isSnoozed()"));
+  ok("🔴 standalone 은 강제 노출로도 안 뚫는다", /if \(isStandalone\(\)\) return;/.test(promptSrc));
+  const empSrc = fs.readFileSync(path.join(ROOT, "src/pages/EmployeeApp.js"), "utf8");
+  ok("🔴 승객앱이 팝업에 appName 을 넘긴다(워드마크 아님)",
+    empSrc.includes("brandName={brand.custom ? brand.appName : null}"));
   console.log(`\n${fail ? "✗ 실패 " + fail : "✓ 전부 통과"} (${n}단언)\n`);
   process.exit(fail ? 1 : 0);
 })();

@@ -33,6 +33,7 @@ import HelpSheet from "../components/HelpSheet";
 import { resolveCompanyIdForAnon } from "../lib/companyResolver";
 // 거래처 브랜딩(2026-07-16 회의 #5) — 메인 컬러 CSS 변수 + 헤더 로고. 미설정=기본 테마.
 import { applyPartnerTheme, clearPartnerBranding, fetchPartnerCodeData, logoHeightOf, brandBand, readableOn, brandOf } from "../lib/partnerBranding";
+import { withEulReul } from "../lib/josa";
 // 문의 게시판(2026-08-06 미팅) — dycs CS 위젯 연동. 거래처별 opt-in.
 import { resolveInquiryConfig, buildInquiryUrl } from "../lib/inquiry";
 import { resolveHomepageConfig, homepageDisplayHost } from "../lib/homepage";
@@ -574,8 +575,10 @@ export default function EmployeeApp() {
   return (
     <div style={S.appWrap}>
       {/* 설치 팝업도 거래처 표기·아이콘을 따른다(2026-08-30) — 기본 거래처면 인자가 null 이라
-          예전과 글자 그대로 같다. 이걸 안 넘기면 화면은 카카오 톤인데 팝업만 BusLink 다. */}
-      <InstallPrompt brandName={brand.custom ? brand.name : null} iconHref={brand.favicon || null} />
+          예전과 글자 그대로 같다. 이걸 안 넘기면 화면은 카카오 톤인데 팝업만 BusLink 다.
+          🔴 넘기는 건 `name`(워드마크)이 아니라 **`appName`** 이다 — 홈 화면 아이콘 이름은
+          폰에 이미 깔린 앱과 겹치면 안 되므로 앱 안 표기와 일부러 다를 수 있다. */}
+      <InstallPrompt brandName={brand.custom ? brand.appName : null} iconHref={brand.favicon || null} />
       {/* ── 강제 공지 모달 — 안 읽음 공지 1건을 풀스크린으로 노출(푸시 누락 대비 도달성 보장 통로) ── */}
       {/* key={id} 필수 — 모달이 로컬 dismissed 를 갖게 됐으므로, 키가 없으면 인스턴스가
           재사용되어 **새 공지가 도착해도 다시 뜨지 않는다**(2026-08-11). */}
@@ -3780,9 +3783,9 @@ function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate, 
           {showInstallGuide && (
             <div style={{ borderTop: "1px solid var(--color-line)" }}>
               <div style={{ padding: "12px 18px 4px", fontSize: 12, color: "var(--color-label-mute)", lineHeight: 1.6 }}>
-                홈 화면에 {brand.name}를 추가하면 앱처럼 빠르게 실행되고 공지 푸시도 더 잘 도착합니다.
+                홈 화면에 {withEulReul(brand.appName)} 추가하면 앱처럼 빠르게 실행되고 공지 푸시도 더 잘 도착합니다.
               </div>
-              <InstallGuide inline brandName={brand.name} />
+              <InstallGuide inline brandName={brand.appName} />
             </div>
           )}
         </div>

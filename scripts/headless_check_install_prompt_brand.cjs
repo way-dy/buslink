@@ -58,11 +58,17 @@ function loadAdmin() {
   for (const d of plains) { if (await pick(d.id)) { plain = d; break; } }
   if (!plain) { console.log("⏭ SKIP — 로그인 가능한 비카카오 승객을 못 찾음"); process.exit(0); }
 
+  // 🔴 `wantText` 는 이름이 아니라 **조사까지 붙은 문장 조각**이다 — 「카카오통근를」 같은 오조사를
+  //    이름만 검사하면 통과시킨다(2026-08-30 way 가 이름을 바꾸며 드러난 함정).
+  // 🔴 홈 화면 아이콘 이름(`manifest.short_name`)은 앱 안 워드마크와 **일부러 다르다** —
+  //    「카카오 T」 는 폰에 이미 깔린 카카오 T 앱과 겹친다. 둘을 같은 값으로 묶지 말 것.
   const CASES = [
     { label: "카카오 프리셋 · " + ((kakao.data() || {}).partnerName || kakao.id), code: kakao.id,
-      wantIcon: "kakao-t.svg", wantText: "카카오 T", denyText: "BusLink" },
+      wantIcon: "kakao-t.svg", wantText: "카카오통근을 추가", denyText: "BusLink",
+      denyText2: "카카오통근를", wantShortName: "카카오통근" },
     { label: "기본 테마 · " + ((plain.data() || {}).partnerName || plain.id), code: plain.id,
-      wantIcon: "passenger.svg", wantText: "BusLink", denyText: null },
+      wantIcon: "passenger.svg", wantText: "BusLink를 추가", denyText: null,
+      denyText2: null, wantShortName: "BusLink 승객" },
   ];
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "instbrand-"));
@@ -94,22 +100,32 @@ function loadAdmin() {
       await page.goto(BASE + "/p?c=" + COMPANY, { waitUntil: "domcontentloaded", timeout: 45000 });
       await page.waitForTimeout(11000); // 로그인 부팅 + 팝업 3초 폴백
 
-      const r = await page.evaluate(() => {
+      const r = await page.evaluate(async () => {
+        // 실제로 걸려 있는 매니페스트를 받아 홈 화면 아이콘 이름을 읽는다(설정값이 아니라 결과를 본다).
+        const link = document.querySelector("link[rel='manifest']");
+        const manifestHref = link ? link.getAttribute("href") : null;
+        let shortName = null;
+        try {
+          if (manifestHref) shortName = (await (await fetch(manifestHref)).json()).short_name || null;
+        } catch (_) { shortName = null; }
         const dlg = document.querySelector('[role="dialog"][aria-label="앱 설치 안내"]');
-        if (!dlg) return { found: false, body: document.body.innerText.slice(0, 160) };
+        if (!dlg) return { found: false, shortName, manifestHref, body: document.body.innerText.slice(0, 160) };
         const img = dlg.querySelector("img");
-        return { found: true, icon: img ? img.getAttribute("src") : null,
+        return { found: true, shortName, manifestHref, icon: img ? img.getAttribute("src") : null,
                  alt: img ? img.getAttribute("alt") : null, text: dlg.innerText.replace(/\s+/g, " ") };
       });
       await page.screenshot({ path: path.join(dir, "install-" + c.code.slice(-4) + ".png") });
 
       ok("설치 안내 팝업이 뜬다", r.found, r.body);
+      console.log("    매니페스트: " + r.manifestHref + " · short_name: " + r.shortName);
+      ok("홈 화면 아이콘 이름이 " + c.wantShortName, r.shortName === c.wantShortName, r.shortName);
       if (r.found) {
         console.log("    아이콘: " + r.icon + " · alt: " + r.alt);
         console.log("    문구: " + r.text.slice(0, 120));
         ok("아이콘이 " + c.wantIcon, (r.icon || "").indexOf(c.wantIcon) !== -1, r.icon);
         ok('문구에 "' + c.wantText + '"', r.text.indexOf(c.wantText) !== -1);
         if (c.denyText) ok('문구에 "' + c.denyText + '" 없음', r.text.indexOf(c.denyText) === -1, r.text.slice(0, 80));
+        if (c.denyText2) ok('오조사 "' + c.denyText2 + '" 없음', r.text.indexOf(c.denyText2) === -1, r.text.slice(0, 80));
       }
       ok("콘솔 페이지오류 0", errs.length === 0, errs.join(" | "));
       await ctx.close();
