@@ -62,18 +62,52 @@ function loadAdmin() {
   //    이름만 검사하면 통과시킨다(2026-08-30 way 가 이름을 바꾸며 드러난 함정).
   // 🔴 홈 화면 아이콘 이름(`manifest.short_name`)은 앱 안 워드마크와 **일부러 다르다** —
   //    「카카오 T」 는 폰에 이미 깔린 카카오 T 앱과 겹친다. 둘을 같은 값으로 묶지 말 것.
+  // 🔴 그리고 그 이름은 **프리셋이 아니라 거래처 문서**에 있다 — 같은 카카오 프리셋을 쓰는
+  //    신촌세브란스는 예전 그대로여야 한다(way: 「거기는 거기만의 셋팅이 있어」). 아래 [대조군] 이 그것만 잰다.
   const CASES = [
     { label: "카카오 프리셋 · " + ((kakao.data() || {}).partnerName || kakao.id), code: kakao.id,
       wantIcon: "kakao-t.svg", wantText: "카카오통근을 추가", denyText: "BusLink",
-      denyText2: "카카오통근를", wantShortName: "카카오통근" },
+      denyText2: "카카오통근를", wantShortName: "카카오통근", wantManifest: "/manifest-kakao-commute.json" },
     { label: "기본 테마 · " + ((plain.data() || {}).partnerName || plain.id), code: plain.id,
       wantIcon: "passenger.svg", wantText: "BusLink를 추가", denyText: null,
-      denyText2: null, wantShortName: "BusLink 승객" },
+      denyText2: null, wantShortName: "BusLink 승객", wantManifest: "/manifest-employee.json" },
   ];
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "instbrand-"));
   const cleanup = [];
   try {
+    // ── [대조군] 같은 프리셋을 쓰는 다른 거래처는 예전 그대로인가 ──────────────
+    // 🔴 로그인하지 않는다 — 이 거래처 승객은 **실제 사람**이고, `?pc=` 만으로도 테마가 걸리므로
+    //    승계표를 만들 이유가 없다(하네스가 남의 계정을 건드리지 않는 게 이 검사의 조건이다).
+    const others = codes.docs.filter((d) => ((d.data() || {}).theme || {}).preset === "kakao"
+      && d.id !== kakao.id && !((d.data() || {}).theme || {}).appName);
+    for (const o of others) {
+      const oname = (o.data() || {}).partnerName || o.id;
+      console.log("\n[대조군 · " + oname + " — 프리셋만 쓰는 거래처]");
+      const octx = await chromium.launchPersistentContext(path.join(dir, "ctl-" + o.id.slice(-4)), {
+        executablePath: CHROME, headless: true, userAgent: UA_ANDROID,
+        viewport: { width: 390, height: 844 }, deviceScaleFactor: 2,
+      });
+      const opage = await octx.newPage();
+      await opage.goto(BASE + "/p?pc=" + encodeURIComponent(o.id), { waitUntil: "networkidle", timeout: 45000 });
+      await opage.waitForTimeout(2500);
+      const h = await opage.evaluate(async () => {
+        const link = document.querySelector("link[rel='manifest']");
+        const href = link ? link.getAttribute("href") : null;
+        let shortName = null;
+        try { if (href) shortName = (await (await fetch(href)).json()).short_name || null; } catch (_) {}
+        const icon = document.querySelector("link[rel~='icon']");
+        return { href, shortName, title: document.title,
+                 icon: icon ? icon.getAttribute("href") : null };
+      });
+      console.log("    제목: " + h.title + " · 매니페스트: " + h.href + " · short_name: " + h.shortName);
+      ok("🔴 홈 화면 이름이 예전 그대로(카카오 T)", h.shortName === "카카오 T", h.shortName);
+      ok("🔴 매니페스트가 공용 /manifest-kakao.json 그대로", h.href === "/manifest-kakao.json", h.href);
+      ok("🔴 탭 제목이 카카오 T 그대로", (h.title || "").indexOf("카카오 T") !== -1, h.title);
+      ok("아이콘 그림은 공유(kakao-t.svg)", (h.icon || "").indexOf("kakao-t.svg") !== -1, h.icon);
+      await octx.close();
+    }
+
     for (const c of CASES) {
       const p = await pick(c.code);
       console.log("\n[" + c.label + "]");
@@ -119,6 +153,7 @@ function loadAdmin() {
       ok("설치 안내 팝업이 뜬다", r.found, r.body);
       console.log("    매니페스트: " + r.manifestHref + " · short_name: " + r.shortName);
       ok("홈 화면 아이콘 이름이 " + c.wantShortName, r.shortName === c.wantShortName, r.shortName);
+      ok("매니페스트가 " + c.wantManifest, r.manifestHref === c.wantManifest, r.manifestHref);
       if (r.found) {
         console.log("    아이콘: " + r.icon + " · alt: " + r.alt);
         console.log("    문구: " + r.text.slice(0, 120));

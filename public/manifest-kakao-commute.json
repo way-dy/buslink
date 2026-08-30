@@ -1,6 +1,6 @@
 {
-  "short_name": "카카오 T",
-  "name": "카카오 T 통근셔틀",
+  "short_name": "카카오통근",
+  "name": "카카오통근 · 카카오 T 통근셔틀",
   "icons": [
     {
       "src": "/icons/kakao-t.svg",

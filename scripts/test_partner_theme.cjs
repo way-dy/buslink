@@ -256,18 +256,36 @@ function loadModule(doc) {
   ok("꼬리 공백은 무시한다", J.hasBatchim("카카오통근  ") === true);
 
   const kk = M.THEME_PRESETS.kakao;
-  ok("카카오 프리셋 appName 이 «카카오통근»", kk.appName === "카카오통근", kk.appName);
-  ok("🔴 앱 안 워드마크는 «카카오 T» 그대로(고객이 지정한 표기)", kk.wordmark === "카카오 T", kk.wordmark);
+  ok("🔴 프리셋에는 appName 이 없다 — 프리셋을 공유하는 거래처가 같이 바뀐다(신촌세브란스 보호)",
+    kk.appName === undefined, kk.appName);
+  ok("🔴 프리셋만 고른 거래처는 홈 아이콘 이름이 워드마크(카카오 T) 그대로",
+    M.brandOf(M.resolveTheme({ theme: { preset: "kakao" } })).appName === "카카오 T");
+  ok("🔴 앱 안 워드마크는 «카카오 T»(고객이 지정한 표기)", kk.wordmark === "카카오 T", kk.wordmark);
   ok("🔴 부재면 appName 이 워드마크로 폴백", M.brandOf({ wordmark: "가나다" }).appName === "가나다");
   ok("🔴 테마가 없으면 appName 도 BusLink", M.brandOf(null).appName === "BusLink");
+
+  // 거래처 문서에 값을 주면 그 거래처만 바뀐다(삼성전자 샘플이 이 모양이다).
+  const sample = M.resolveTheme({ theme: { preset: "kakao", appName: "카카오통근",
+    manifest: "/manifest-kakao-commute.json" } });
+  ok("거래처 값이 프리셋을 이긴다", M.brandOf(sample).appName === "카카오통근", M.brandOf(sample).appName);
+  ok("🔴 그래도 앱 안 워드마크는 카카오 T 그대로", M.brandOf(sample).name === "카카오 T");
+  ok("매니페스트도 그 거래처 것으로", M.brandOf(sample).manifest === "/manifest-kakao-commute.json");
   ok("appName 이 24자를 넘으면 무시되고 워드마크로 내려간다",
     M.brandOf(M.resolveTheme({ theme: { preset: "kakao", appName: "가".repeat(25) } })).appName === "카카오 T");
   ok("빈 문자열이면 appName 만 끄고 워드마크를 쓴다",
     M.brandOf(M.resolveTheme({ theme: { preset: "kakao", appName: "" } })).appName === "카카오 T");
 
   const kakaoManifest = JSON.parse(fs.readFileSync(path.join(ROOT, "public/manifest-kakao.json"), "utf8"));
-  ok("🔴 매니페스트 short_name 이 프리셋 appName 과 같다(하나만 고치면 화면과 홈 아이콘이 갈린다)",
-    kakaoManifest.short_name === kk.appName, kakaoManifest.short_name);
+  const commuteManifest = JSON.parse(fs.readFileSync(path.join(ROOT, "public/manifest-kakao-commute.json"), "utf8"));
+  ok("🔴 공용 매니페스트 short_name 은 카카오 T 그대로(신촌세브란스가 이 파일을 쓴다)",
+    kakaoManifest.short_name === "카카오 T", kakaoManifest.short_name);
+  ok("🔴 샘플 전용 매니페스트만 카카오통근", commuteManifest.short_name === "카카오통근", commuteManifest.short_name);
+  ok("두 매니페스트의 아이콘·색은 같다(이름만 다르다)",
+    JSON.stringify(commuteManifest.icons) === JSON.stringify(kakaoManifest.icons)
+    && commuteManifest.theme_color === kakaoManifest.theme_color);
+  const setSrc = fs.readFileSync(path.join(ROOT, "scripts/set_partner_app_options.cjs"), "utf8");
+  ok("🔴 설정 스크립트가 이름↔매니페스트 짝을 파일에서 확인한다",
+    setSrc.includes("assertAppNamePair") && setSrc.includes("short_name"));
   const promptSrc = fs.readFileSync(path.join(ROOT, "src/components/InstallPrompt.js"), "utf8");
   ok("🔴 설치 팝업 문구가 조사 헬퍼를 쓴다(하드코딩 « 를 » 복원 금지)", promptSrc.includes("withEulReul(name)"));
   ok("🔴 brandName 기본값이 null 이다(«준 경우에만» 계약)",
