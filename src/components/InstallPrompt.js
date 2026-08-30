@@ -262,7 +262,13 @@ export function InstallGuide({ platform = "auto", onInstall, inline = false, bra
 // ════════════════════════════════════════════════════════
 // InstallPrompt — 자동 노출 바텀시트(standalone·스누즈 가드 포함)
 // ════════════════════════════════════════════════════════
-export default function InstallPrompt() {
+// brandName / iconHref = 거래처 테마가 있는 화면이 넘기는 «홈 화면에 생길 앱» 이름·아이콘
+// (2026-08-30). 🔴 **부재 = 현행** — 안 넘기면 예전 그대로 앱 고정 아이콘(resolveAppIcons)과
+// "BusLink" 다. 기사·관리자·협력사 화면은 인자를 안 주므로 한 픽셀도 안 바뀐다.
+// 왜 필요했나: <head> 의 파비콘·애플터치·매니페스트는 이미 거래처 테마를 따라가는데
+// (EmployeeApp 이 applyAppManifest 로 교체) **이 팝업만** 앱 고정 매핑을 봐서, 화면은
+// 카카오 톤인데 "홈 화면에 BusLink 를 추가하세요" 가 파란 BusLink 아이콘과 함께 떴다.
+export default function InstallPrompt({ brandName = null, iconHref = null }) {
   // mode: null(미표시) | "android"(네이티브 프롬프트 가능) | "android-manual" | "ios"
   const [mode, setMode] = useState(null);
   const [deferred, setDeferred] = useState(null);
@@ -369,6 +375,10 @@ export default function InstallPrompt() {
     typeof window !== "undefined" ? window.location.pathname : ""
   );
 
+  // 거래처 표기·아이콘이 오면 그것으로, 아니면 앱 기본(부재=현행).
+  const name = brandName || "BusLink";
+  const iconSrc = iconHref || appIcon.install;
+
   return (
     <div
       role="dialog"
@@ -400,8 +410,8 @@ export default function InstallPrompt() {
       >
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
           <img
-            src={appIcon.install}
-            alt={appIcon.title}
+            src={iconSrc}
+            alt={brandName || appIcon.title}
             width={44}
             height={44}
             style={{ borderRadius: 10, flexShrink: 0 }}
@@ -424,11 +434,9 @@ export default function InstallPrompt() {
                 color: "var(--color-label-mute, rgba(46,47,51,0.62))",
               }}
             >
-              {isIosMode
-                ? "아래 순서대로 홈 화면에 BusLink 를 추가하세요."
-                : mode === "android-manual"
-                  ? "아래 순서대로 홈 화면에 BusLink 를 추가하세요."
-                  : "홈 화면에 BusLink 를 추가하면 앱처럼 바로 실행돼요."}
+              {isIosMode || mode === "android-manual"
+                ? `아래 순서대로 홈 화면에 ${name} 를 추가하세요.`
+                : `홈 화면에 ${name} 를 추가하면 앱처럼 바로 실행돼요.`}
             </div>
           </div>
           <button
@@ -455,7 +463,7 @@ export default function InstallPrompt() {
         {/* iOS · android-manual: 단계 일러스트 안내. android: 네이티브 프롬프트만. */}
         {(isIosMode || mode === "android-manual") && (
           <div style={{ marginTop: 14 }}>
-            <InstallGuide platform={mode} />
+            <InstallGuide platform={mode} brandName={name} />
           </div>
         )}
 

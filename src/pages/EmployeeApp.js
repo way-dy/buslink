@@ -573,7 +573,9 @@ export default function EmployeeApp() {
 
   return (
     <div style={S.appWrap}>
-      <InstallPrompt />
+      {/* 설치 팝업도 거래처 표기·아이콘을 따른다(2026-08-30) — 기본 거래처면 인자가 null 이라
+          예전과 글자 그대로 같다. 이걸 안 넘기면 화면은 카카오 톤인데 팝업만 BusLink 다. */}
+      <InstallPrompt brandName={brand.custom ? brand.name : null} iconHref={brand.favicon || null} />
       {/* ── 강제 공지 모달 — 안 읽음 공지 1건을 풀스크린으로 노출(푸시 누락 대비 도달성 보장 통로) ── */}
       {/* key={id} 필수 — 모달이 로컬 dismissed 를 갖게 됐으므로, 키가 없으면 인스턴스가
           재사용되어 **새 공지가 도착해도 다시 뜨지 않는다**(2026-08-11). */}
