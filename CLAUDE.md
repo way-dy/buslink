@@ -22,3 +22,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 아키텍처 변경 → 해당 섹션 파일만 수정
 - 파일 50줄 초과 → 추가 분리(예: `frontend-routing.md`)
 - 루트 CLAUDE.md는 @임포트 허브 전용, 30줄 이하 유지
+
+## 배포 게이트
+`firebase.json` hosting `predeploy` → `node scripts/run-tests.cjs`(`--list` 로 대상·제외 확인). 실패하면 배포가 **중단**된다 — 게이트를 지우지 말고 원인을 가른다(`git stash` 로 베이스라인 대조). 제외는 표식으로만: `@requires-credentials`(--live) · `@manual-only`(실발송·삭제 도구, 영구 제외). ⚠ 훅 실패 시 콘솔 끝의 `ENOENT` 스택은 cross-env 잡음 — 진짜 원인은 그 위의 `❌` 줄. 시행 기록 `scripts/gate-log.md`.
