@@ -1,3 +1,4 @@
+// @requires-credentials — firebase-admin/운영 데이터가 있어야 돈다(기본 게이트 제외, --live 로 실행)
 // 빈 차 확인 서버 가드 실호출 검증 — 2026-08-18 way "인쇄한 QR 을 사진 찍어 도용할 수 있지 않나".
 //
 //   node scripts/test_sleep_guard_live.cjs

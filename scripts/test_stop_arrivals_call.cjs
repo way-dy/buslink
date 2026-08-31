@@ -1,3 +1,4 @@
+// @requires-credentials — firebase-admin/운영 데이터가 있어야 돈다(기본 게이트 제외, --live 로 실행)
 // getRouteStopArrivals 대조 검증 — **익명 클라이언트로 실제 호출**해 Admin SDK 실값과 맞춘다.
 //
 //   node scripts/test_stop_arrivals_call.cjs [노선이름일부]

@@ -1,3 +1,4 @@
+// @manual-only — 테스트가 아니라 **운영 데이터 정리 스크립트**다(가짜 탑승 기록 삭제). 게이트에서 영구 제외
 // 2026-08-25 본인확인 하네스가 만든 가짜 탑승 기록 정리(1회성).
 //
 //   node scripts/clean_auth_test_boardings.cjs            (dry-run — 지우지 않음)

@@ -1,5 +1,7 @@
 {
   "hosting": {
+    "//": "🔴 배포 게이트. 실패하면 배포가 중단된다 — 게이트를 지우지 말고 원인을 가른다. 제외는 표식으로만(@requires-credentials / @manual-only).",
+    "predeploy": ["node scripts/run-tests.cjs"],
     "public": "build",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [

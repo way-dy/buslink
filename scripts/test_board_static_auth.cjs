@@ -1,3 +1,4 @@
+// @requires-credentials — firebase-admin/운영 데이터가 있어야 돈다(기본 게이트 제외, --live 로 실행)
 // 고정 QR 탑승 본인 확인 — 2026-08-25 미팅(외부 카메라로 열면 아무거나 넣어도 탑승) 가드.
 //
 //   node scripts/test_board_static_auth.cjs            (거부 3종만 — prod 쓰기 0)

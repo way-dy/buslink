@@ -1,3 +1,4 @@
+// @requires-credentials — firebase-admin/운영 데이터가 있어야 돈다(기본 게이트 제외, --live 로 실행)
 // 강제 공지 모달이 **항상 닫히는지** 검사 (2026-08-11 way 신고 회귀 가드)
 //   1) node docs/manual/_serve_build.mjs   (별도 터미널·3000 포트)
 //   2) node scripts/test_force_notice_close.cjs        # 로컬 빌드 검사

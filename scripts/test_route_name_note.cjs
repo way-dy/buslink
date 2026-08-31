@@ -1,3 +1,4 @@
+// @requires-credentials — firebase-admin/운영 데이터가 있어야 돈다(기본 게이트 제외, --live 로 실행)
 // 노선명 특이사항 꼬리표 가르기 격리 테스트 — 2026-08-25 최우석 "조기출근 진하게".
 //   node scripts/test_route_name_note.cjs
 // 🔴 판정식을 베끼지 않고 `src/lib/routeKind.js` 소스를 그대로 vm 에 태운다(재구현 0).

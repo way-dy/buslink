@@ -1,3 +1,4 @@
+// @requires-credentials — firebase-admin/운영 데이터가 있어야 돈다(기본 게이트 제외, --live 로 실행)
 // 승객 로그인 라이브 검증 — **배포 후에만** 돌린다 (2026-08-25 P1·P2)
 //   node scripts/test_passenger_login_live.cjs
 //

@@ -35,16 +35,21 @@ const { INQUIRY_WIDGET_ORIGIN } = ctx.__exp;
 
 // EmployeeApp 의 탭 삽입 — TABS 배열 + visibleTabsFor 함수 원문만 발췌해 태운다.
 const empSrc = fs.readFileSync(path.join(ROOT, "src/pages/EmployeeApp.js"), "utf8");
+// 🔄 2026-08-31 갱신 — 2026-08-25 에 **홈페이지 탭**이 생기며 시그니처가 `(inquiryOn, homepageOn)`
+//    으로 바뀌었는데 추출 정규식이 `(inquiryOn)` 에 고정돼 있어 그날부터 이 테스트가 통째로
+//    죽어 있었다(러너가 없어 아무도 몰랐다). 인자 목록은 느슨하게 받되 **HOMEPAGE_TAB 은 필수**로
+//    둔다 — 그 탭이 사라지면 아래 대체 규칙 단언이 의미를 잃으므로 그때는 시끄럽게 실패해야 한다.
 const tabsBlock = empSrc.match(/const TABS = \[[\s\S]*?\n\];/);
 const inqTabBlock = empSrc.match(/const INQUIRY_TAB = \{[^}]*\};/);
-const visFnBlock = empSrc.match(/function visibleTabsFor\(inquiryOn\) \{[\s\S]*?\n\}/);
-if (!tabsBlock || !inqTabBlock || !visFnBlock) {
-  console.error("🔴 EmployeeApp.js 에서 TABS/INQUIRY_TAB/visibleTabsFor 를 못 찾았습니다 (이름이 바뀌었나요?)");
+const homeTabBlock = empSrc.match(/const HOMEPAGE_TAB = \{[^}]*\};/);
+const visFnBlock = empSrc.match(/function visibleTabsFor\([^)]*\) \{[\s\S]*?\n\}/);
+if (!tabsBlock || !inqTabBlock || !homeTabBlock || !visFnBlock) {
+  console.error("🔴 EmployeeApp.js 에서 TABS/INQUIRY_TAB/HOMEPAGE_TAB/visibleTabsFor 를 못 찾았습니다 (이름이 바뀌었나요?)");
   process.exit(1);
 }
 const tabCtx = {};
 vm.createContext(tabCtx);
-vm.runInContext([tabsBlock[0], inqTabBlock[0], visFnBlock[0]].join("\n"), tabCtx);
+vm.runInContext([tabsBlock[0], inqTabBlock[0], homeTabBlock[0], visFnBlock[0]].join("\n"), tabCtx);
 const { visibleTabsFor } = tabCtx;
 
 console.log("\n[1] tenantId 형식 판정");
@@ -100,14 +105,25 @@ eq("미리보기는 스위치와 무관하게 만들어진다(저장 전 확인�
 eq("미리보기도 형식 위반이면 null", buildInquiryPreviewUrl("한화", ""), null);
 
 console.log("\n[4] 하단 탭 구성 — 켠 거래처만 6탭");
-const off = visibleTabsFor(false).map(t => t.id);
-const on = visibleTabsFor(true).map(t => t.id);
+const off = visibleTabsFor(false, false).map(t => t.id);
+const on = visibleTabsFor(true, false).map(t => t.id);
 eq("꺼짐 = 기존 5탭 그대로(회귀 0)", off.join(","), "home,routes,notices,scan,settings");
 eq("켜짐 = 설정 왼쪽에 문의 삽입", on.join(","), "home,routes,notices,scan,inquiry,settings");
 ok("🔴 설정은 언제나 맨 끝", on[on.length - 1] === "settings");
 ok("기존 탭의 순서·id 는 그대로", on.filter(id => id !== "inquiry").join(",") === off.join(","));
 ok("문의 탭에 아이콘·라벨이 있다",
-  visibleTabsFor(true).some(t => t.id === "inquiry" && t.icon === "chat" && t.label === "문의"));
+  visibleTabsFor(true, false).some(t => t.id === "inquiry" && t.icon === "chat" && t.label === "문의"));
+
+// 2026-08-25 미팅 결정 — 홈페이지 탭은 문의 탭과 **같은 자리**를 쓰고, 켜면 문의를 **대체**한다.
+// (둘을 나란히 두면 승객이 어디로 문의해야 하는지 갈린다. ⚠ 대체되는 순간 그 거래처의
+//  dycs 문의 위젯 유입은 끊긴다 — 이 규칙이 조용히 뒤집히면 유입 경로가 통째로 바뀐다.)
+const hp = visibleTabsFor(false, true).map(t => t.id);
+eq("홈페이지만 켬 = 설정 왼쪽에 홈페이지 삽입", hp.join(","), "home,routes,notices,scan,homepage,settings");
+const both = visibleTabsFor(true, true).map(t => t.id);
+eq("🔴 둘 다 켜면 홈페이지가 문의를 대체(나란히 두지 않는다)", both.join(","), hp.join(","));
+ok("문의 탭은 그때 사라진다", !both.includes("inquiry"));
+ok("홈페이지 탭에 아이콘·라벨이 있다",
+  visibleTabsFor(false, true).some(t => t.id === "homepage" && t.icon === "globe" && t.label === "홈페이지"));
 
 console.log("\n[5] 회귀 가드 — 소스에 실제로 남아 있는지 코드로 단언");
 const inqLib = inquirySrc;
@@ -116,8 +132,14 @@ ok("buildInquiryUrl 이 tenantId 형식을 재검사(호출부 신뢰 금지)",
   /buildInquiryUrl[\s\S]{0,300}isValidTenantId\(config\.tenantId\)/.test(inqLib));
 ok("EmployeeApp 이 문의 탭을 enabled 로 게이팅",
   /const inquiryOn = !!\(inquiry && inquiry\.enabled\)/.test(empSrc));
+// 🔄 2026-08-31 갱신 — 종전 단언은 `tab === "inquiry" && !inquiryOn) setTab("home")` 를 **글자 그대로**
+//    찾았는데, 소스가 `(!inquiryOn || homepageOn)` 으로 **더 강해지면서**(홈페이지로 대체될 때도 탈출)
+//    매칭이 깨졌다. 코드가 좋아졌는데 테스트가 빨개진 형태다 → 괄호·조건 추가에 견디게 느슨히 쓰되,
+//    가드가 **사라지면** 반드시 빨개지도록 "탭 이름 → setTab(home)" 근접만 본다.
 ok("🔴 꺼진 뒤 문의 탭에 갇히지 않게 홈으로 되돌리는 가드가 있다",
-  /tab === "inquiry" && !inquiryOn\) setTab\("home"\)/.test(empSrc));
+  /tab === "inquiry"[\s\S]{0,60}setTab\("home"\)/.test(empSrc));
+ok("🔴 홈페이지 탭도 꺼지면 홈으로 되돌린다(같은 함정의 짝)",
+  /tab === "homepage"[\s\S]{0,60}setTab\("home"\)/.test(empSrc));
 ok("🔴 임베드 탈출구('새 창에서 열기')가 남아 있다", /새 창에서 열기/.test(empSrc));
 ok("탭바가 visibleTabs 를 렌더(TABS 하드코딩으로 되돌아가지 않았다)",
   /\{visibleTabs\.map\(t =>/.test(empSrc));

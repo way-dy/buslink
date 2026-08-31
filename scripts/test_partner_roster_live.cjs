@@ -1,3 +1,4 @@
+// @requires-credentials — firebase-admin/운영 데이터가 있어야 돈다(기본 게이트 제외, --live 로 실행)
 // 포털 명부 CF 실호출 검증 — partnerImportPassengers / partnerReissuePins (2026-08-28 P3-a)
 //   node scripts/test_partner_roster_live.cjs
 //

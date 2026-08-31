@@ -205,8 +205,15 @@ async function measure(p) {
   ok(/\[data-nav-scroll\]\s*\{[^}]*scrollbar-width:\s*thin/.test(indexCss),
     "⑰ 스크롤바를 숨기지 않는다(‘더 있다’는 신호가 곧 이 수정의 목적)");
   ok(!/\[data-nav-scroll\][^{]*\{[^}]*display:\s*none/.test(indexCss), "⑱ data-nav-scroll 스크롤바 숨김 규칙이 없다");
-  ok(/maxHeight:"calc\(100dvh - 50px\)"[\s\S]{0,40}overflowY:"auto"/.test(adminSrc),
-    "⑲ 모바일 드롭다운에도 높이 상한+스크롤이 있다(부모가 overflow:hidden)");
+  // 🔄 2026-08-31 갱신 — 종전 ⑲ 는 "모바일 2열 드롭다운에도 높이 상한+스크롤이 있다" 였는데
+  //    그 드롭다운은 **2026-08-26 에 걷어냈다**(본문 위를 덮는데 닫는 방법이 항목 선택뿐이었다).
+  //    지키던 대상이 사라졌으니 단언도 사라져야 하는 게 아니라, **그 결정을 지키는 단언**으로 바꾼다:
+  //    메뉴 목록은 이제 하나뿐이고 PC·모바일이 그걸 공유한다(탭이 늘 때 한 곳만 고치면 된다).
+  //    ⚠ 이 테스트는 러너가 없어 그날부터 계속 빨간 채 방치돼 있었다 — 갱신 누락이 곧 신호 소실이다.
+  const tabsMapCount = (adminSrc.match(/TABS\.map\(/g) || []).length;
+  ok(tabsMapCount === 1,
+    "⑲ 탭 목록 렌더는 한 곳뿐(PC·모바일 공유 — 2열 드롭다운 복원 금지)",
+    `TABS.map( ${tabsMapCount}회`);
 
   console.log(`\n${fail === 0 ? "✅" : "🔴"} 통과 ${pass} / 실패 ${fail}`);
   process.exit(fail === 0 ? 0 : 1);
