@@ -20,6 +20,20 @@ service cloud.firestore {
           == "superadmin";
     }
 
+    // 승객 «본인» 여부 — passengerLogin(CF)이 발급한 커스텀 토큰 클레임으로만 판정한다.
+    // 🔴 `users/{uid}` 를 읽지 않는다 — 승객에게는 그 문서가 아예 없어서 isAdmin 계열은
+    //    언제나 거짓이고(그게 2026-05-26 부터의 «복원 실패» 정체다), 문서 읽기 비용도 0이다.
+    // 🔴 세 값이 **모두** 일치해야 한다(role·회사·사번) — empNo 비교를 빼는 순간
+    //    로그인한 승객 아무나 남의 문서를 읽는다.
+    // ⚠ 여기 쓰는 클레임은 **식별자**(누구인가)지 권한 등급이 아니다. 등급을 커스텀 토큰에
+    //    박으면 세션에 얼어붙는다(playbook backend-auth · DI_BMBOARD 2026-08-25).
+    function isSelfPassenger(companyId, empNo) {
+      return isAuth()
+        && request.auth.token.role == "passenger"
+        && request.auth.token.companyId == companyId
+        && request.auth.token.empNo == empNo;
+    }
+
     function isDriverOf(companyId) {
       return isAuth() &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
@@ -129,8 +143,17 @@ service cloud.firestore {
       }
 
       // ─── FCM 토큰 저장 ───────────────────────────────
+      // 🔴 승객은 **자기 문서만** 읽는다(2026-09-01). 예전엔 read 가 admin 전용이라
+      //    앱이 '내 정류장'을 **쓰기만 하고 다시 읽지 못했다** — 그래서 앱을 새로 열 때마다
+      //    지정이 풀린 것처럼 보였다. `.claude/issues.md` 에 2026-05-26 부터 «비치명적»
+      //    이라고 적혀 있었지만, 그게 2026-09-01 신고("아무리 지정해도 자꾸 풀립니다")의
+      //    정체였다(그날 하루에만 287명이 다시 지정했다).
+      // 🔴 onCall 위임을 쓰지 않은 이유 = 이 화면은 더 이상 익명이 아니다. 2026-08-25(P1)
+      //    부터 승객에게 진짜 신원(커스텀 토큰)이 있고, 여기서 여는 것은 **남의 데이터가
+      //    아니라 자기 문서 한 건**이다. 위임 원칙(playbook backend-auth)은 «익명 화면이
+      //    남의 데이터가 든 컬렉션을 읽으려 할 때» 의 처방이라 전제가 다르다.
       match /fcmTokens/{empNo} {
-        allow read:  if isAdmin(companyId);
+        allow read:  if isSelfPassenger(companyId, empNo) || isAdmin(companyId);
         allow write: if isAuth(); // 직원 앱에서 토큰 등록
       }
 

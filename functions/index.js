@@ -4115,13 +4115,32 @@ async function assertPartnerCaller(db, request, companyId, partnerCode) {
   return { code, data: cd };
 }
 
-/** 서버측 초기 PIN — 클라 `accountCards.generateInitialPin` 과 같은 계약(6자리). */
+/**
+ * 서버측 초기 PIN — 클라 `accountCards.generateInitialPin` 과 **같은 값**이어야 한다.
+ *
+ * 🔴 2026-09-01 사고: 2026-08-25 way 결정(「초기 PIN 을 000000 으로 고정」)을 **클라에만**
+ *    반영하고 여기를 안 고쳤다. 그리고 2026-08-28 P3-a 로 등록·재발급이 CF 로 이관되면서
+ *    **실제로 도는 것은 이 서버 함수**가 됐다 → 그날 이후 신규·재발급된 사람의 초기 PIN 이
+ *    랜덤이 되어, 로그인 화면 안내(「초기 비밀번호는 000000」)대로 넣으면 **로그인이 안 됐다.**
+ *    그리고 그 사람은 PIN 설정 화면에 닿지 못하므로 **스스로 회복할 방법이 없었다**(재발급도
+ *    랜덤을 줘서 같은 벽). prod 에서 2명이 실제로 갇혀 있었다.
+ * 🔴 **클라(`accountCards.DEFAULT_INITIAL_PIN`)와 이 함수 중 하나만 고치지 말 것** — 이번
+ *    사고가 정확히 그것이다. 되돌릴 때는 옛 랜덤 발급기가 클라에 `generateRandomPin` 으로
+ *    남아 있으니 양쪽을 같이 옮긴다.
+ */
 function generateInitialPinAdmin() {
-  return String(crypto.randomInt(0, 1000000)).padStart(6, "0");
+  return "000000";
 }
+/**
+ * 관리자가 엑셀·폼으로 **지정한** 초기 PIN 형식 검사.
+ * 🔴 `000000` 을 거부하지 않는다 — 그게 지금의 기본값이라, 거부하면 담당자가 엑셀에 기본값을
+ *    적는 순간 그 행만 조용히 실패한다(위 사고와 같은 «양쪽이 갈린» 상태).
+ * ⚠ 길이는 아직 클라(`isValidInitialPin` = 4~6자리)와 갈려 있다(여기는 6자리 고정).
+ *    별도 항목으로 `.claude/tasks.md` 에 남겼다 — 함께 고칠 때 한 번에 맞출 것.
+ */
 function isValidInitialPinAdmin(v) {
   const t = String(v == null ? "" : v).trim();
-  return /^\d{6}$/.test(t) && t !== "000000";
+  return /^\d{6}$/.test(t);
 }
 
 // partnerImportPassengers({ companyId, partnerCode, partnerName, employees })

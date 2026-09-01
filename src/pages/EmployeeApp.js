@@ -16,9 +16,10 @@ import { useSmoothedEta } from "../lib/useSmoothedEta";
 import { computeRunEnded } from "../lib/runStatus";
 import { useOneRouteStopArrivals } from "../lib/useRouteStopArrivals";
 import { useWakeTick } from "../lib/useWakeTick";
+import { checkAndReload } from "../lib/appUpdate";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
 import { forceReconnect } from "../lib/forceReconnect";
-import { compareRoutes, sortRoutes, homeRouteList } from "../lib/routeOrder";
+import { compareRoutes, sortRoutes, homeRouteList, pickHomeRoute, boardingRouteId } from "../lib/routeOrder";
 import { splitRouteNameNote, routeKind } from "../lib/routeKind";
 
 import { validateAndBoard, createPassengerToken, resolveStaticDispatch, validateAndBoardStatic } from "../lib/boarding";
@@ -248,6 +249,13 @@ function NoticeForceModal({ notice, onClose }) {
 // `Icon` 은 currentColor 기반이라 활성 탭이 자동으로 브랜드 색을 탄다.
 // 🔴 아이콘 파일 업로드는 도입하지 않는다(way 결정 — 크기·품질이 제각각이면 앱이 싸구려로 보인다).
 //    표준 아이콘 + 컬러 변경까지만.
+// 고객 CS 카카오톡 채널(2026-09-01 회의 결정) — **로그인 못 한 사람의 유일한 문의 통로**다.
+// 🔴 «동영케어» = 고객 CS 채널. 기사 전용 «@드라이버스» 와 **다른 채널**이니 바꾸지 말 것 —
+//    잘못 넣으면 승객 문의가 기사 채널로 가서 받을 사람이 없다(portfolio-memory 2026-07-28).
+// ⚠ 문의 탭(dycs 위젯)은 거래처별 opt-in 이라 꺼진 거래처가 많다. 이 링크는 그와 별개로
+//    **로그인 화면**에 항상 있어야 한다(로그인 전에는 문의 탭에 닿을 수 없다).
+const KAKAO_CS_CHANNEL_URL = "https://pf.kakao.com/_gxlHfX";
+
 const TABS = [
   { id: "home",     icon: "home",     label: "홈" },
   { id: "routes",   icon: "route",    label: "노선" },
@@ -295,6 +303,20 @@ export default function EmployeeApp() {
   // 백그라운드 → foreground 복귀 시 공지 onSnapshot 재구독(stale 리스너 신선화).
   // 통근버스 사용자는 등하교 전후 장시간 백그라운드 상태가 흔함(issues.md useWakeTick 패턴).
   const wakeTick = useWakeTick();
+
+  // ── 새 빌드 자동 반영 (2026-09-01) ────────────────────────────────
+  // 🔴 2026-09-01 긴급 수정을 배포했을 때 **이미 열려 있는 앱에는 닿을 수단이 없었다**.
+  //    HTML 이 no-cache 라 "다시 열면" 새 번들이 오지만, 켜 둔 채로는 옛 코드가 계속 돈다.
+  //    16,000명에게 "앱을 껐다 켜세요"라고 할 수는 없다 → 백그라운드에서 돌아온 순간
+  //    번들 해시를 대조해 달라졌으면 조용히 새로고침한다.
+  // 🔴 **wake 시점에만** 부른다 — 그때 사용자는 아직 아무것도 입력하지 않았고,
+  //    새로고침이 "앱이 열리는 것"과 구별되지 않는다. 쓰고 있는 도중에 부르면 조작이 끊긴다.
+  // 🔴 탑승 탭(QR 스캔·카메라·탑승 처리 중)에서는 건너뛴다 — 하던 일을 끊지 않는다.
+  // 판정·루프 차단은 정본 `lib/appUpdate.js`(첫 마운트에는 안 돈다 = wakeTick 0→1 전이부터).
+  useEffect(() => {
+    if (!wakeTick) return;
+    checkAndReload({ busy: tab === "scan" }).catch(() => {});
+  }, [wakeTick, tab]);
 
   // 뒤로가기 종료 확인(마운트 시 1회 발판 push, 인증/로딩 분기와 무관).
   useExitConfirm();
@@ -704,6 +726,8 @@ function LoginScreen({ companyId, onLogin, brand = { name: "BusLink", sub: null,
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [isFirst, setIsFirst] = useState(false);
+  // 「비밀번호를 잊으셨나요」 안내 — 로그인 실패 시 자동으로 펼쳐진다.
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const handleSubmit = async () => {
     if (!empNo.trim() || pin.length < 4) return;
@@ -718,6 +742,9 @@ function LoginScreen({ companyId, onLogin, brand = { name: "BusLink", sub: null,
       onLogin({ ...passenger, resumeToken });
     } catch (e) {
       setError(e.message);
+      // 🔴 실패한 **그 순간** 도움말을 펼친다(2026-09-01). 링크만 달아 두면 아무도 안 누르고,
+      //    문의는 담당자에게 몰린다 — 실제로 신촌세브란스 오픈 첫날 그렇게 됐다.
+      setHelpOpen(true);
     }
     setLoading(false);
   };
@@ -745,6 +772,71 @@ function LoginScreen({ companyId, onLogin, brand = { name: "BusLink", sub: null,
           onClick={handleSubmit} disabled={!empNo || pin.length < 4 || loading}>
           {loading ? "확인 중..." : "로그인"}
         </button>
+
+        {/* ── 비밀번호를 잊으셨나요 (2026-09-01 최우석 신고) ──────────────
+            🔴 **셀프 재설정은 만들지 않는다.** 본인 확인에 쓸 수 있는 값(사번·이름)이
+               `passengers` read 규칙이 `isAuth()` 라 익명에게 다 열려 있어(P4 미해결),
+               그걸로 재설정을 열면 **아무나 남의 계정을 가져간다**. 담당자 재발급이 정답이다.
+            🔴 문구는 **실측에 맞춰 적는다** — 초기 비밀번호 000000(prod 15,109명이 이 값)·
+               사번은 앞의 0 포함(신촌세브란스 16,150명이 0으로 시작)·재발급하면 000000 으로
+               돌아간다(협력사 포털 '비밀번호 재발급'). 셋 중 하나라도 틀리면 안내가 해가 된다. */}
+        {/* 🔴 카카오톡 문의는 **로그인 못 한 사람의 유일한 통로**다(2026-09-01 회의 결정:
+            "로그인이 안 되면 카톡으로 문의하라고"). 그래서 도움말 안에 숨기지 않고
+            로그인 버튼 바로 아래에 **항상 보이게** 둔다 — 비밀번호 문제가 아닌 문의도 있다.
+            채널 = 동영케어(고객 CS). 🔴 기사 전용 @드라이버스와 다른 채널이니 바꾸지 말 것. */}
+        <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+          <button onClick={() => setHelpOpen(v => !v)}
+            style={{ background: "none", border: "none", padding: 4,
+              color: "var(--color-label-mute)", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+              fontFamily: "inherit", textDecoration: "underline", textUnderlineOffset: 3 }}>
+            비밀번호를 잊으셨나요?
+          </button>
+          <span style={{ color: "var(--color-line)", fontSize: 12 }}>|</span>
+          <a href={KAKAO_CS_CHANNEL_URL} target="_blank" rel="noopener noreferrer"
+            style={{ padding: 4, color: "var(--color-label-mute)", fontSize: 12.5, fontWeight: 600,
+              fontFamily: "inherit", textDecoration: "underline", textUnderlineOffset: 3 }}>
+            카카오톡 문의
+          </a>
+        </div>
+        {helpOpen && (
+          <div style={{ marginTop: 8, background: "var(--color-bg-soft)", border: "1px solid var(--color-line)",
+            borderRadius: "var(--radius-12)", padding: "13px 15px", fontSize: 12.5, lineHeight: 1.65,
+            color: "var(--color-label-alt)", wordBreak: "keep-all" }}>
+            <div style={{ fontWeight: 700, color: "var(--color-label)", marginBottom: 6 }}>이렇게 확인해 보세요</div>
+            <div style={{ marginBottom: 5 }}>
+              <b style={{ color: "var(--color-label)" }}>①</b> 아이디는 안내문에 적힌 <b style={{ color: "var(--color-label)" }}>그대로</b> 입력하세요.
+              앞의 <b style={{ color: "var(--color-label)" }}>0</b>도 빼지 말고 넣어야 합니다.
+            </div>
+            <div style={{ marginBottom: 5 }}>
+              <b style={{ color: "var(--color-label)" }}>②</b> 아직 한 번도 바꾸지 않으셨다면 비밀번호는{" "}
+              <b style={{ color: "var(--color-label)", letterSpacing: "0.08em" }}>000000</b> 입니다.
+              (안내문에 다른 번호가 적혀 있으면 그 번호)
+            </div>
+            <div style={{ marginBottom: 5 }}>
+              <b style={{ color: "var(--color-label)" }}>③</b> 전에 <b style={{ color: "var(--color-label)" }}>본인이 정한 번호</b>가 있다면 그 번호로 로그인하세요.
+              한 번이라도 바꾸셨다면 000000으로는 들어갈 수 없습니다.
+            </div>
+            <div style={{ marginTop: 9, paddingTop: 9, borderTop: "1px solid var(--color-line)" }}>
+              <b style={{ color: "var(--color-label)" }}>그래도 안 되면</b> — 회사 통근버스 담당자에게{" "}
+              <b style={{ color: "var(--color-label)" }}>비밀번호 재발급</b>을 요청하세요.
+              재발급하면 <b style={{ color: "var(--color-label)", letterSpacing: "0.08em" }}>000000</b>으로 돌아가고,
+              다시 로그인해서 새 번호를 정하시면 됩니다.
+              {/* 🔴 이 문장은 서버 `generateInitialPinAdmin()` 이 "000000" 을 돌려줄 때만 참이다.
+                  그 함수를 랜덤으로 되돌리면 **여기도 같이 고쳐야 한다**(2026-09-01 사고가 그것). */}
+              <div style={{ marginTop: 7 }}>
+                담당자와 연락이 어려우면 아래 <b style={{ color: "var(--color-label)" }}>카카오톡 문의</b>로 남겨 주세요.
+              </div>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <a href={KAKAO_CS_CHANNEL_URL} target="_blank" rel="noopener noreferrer"
+                style={{ display: "block", textAlign: "center", padding: "10px 12px",
+                  borderRadius: "var(--radius-8)", background: "#FEE500", color: "#191600",
+                  fontSize: 13, fontWeight: 800, textDecoration: "none", fontFamily: "inherit" }}>
+                카카오톡으로 문의하기
+              </a>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -854,8 +946,6 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
   const brand = brandOf(theme);
   const [routes, setRoutes]         = useState([]);
   const [activeRouteId, setActiveRouteId] = useState(session.routeId || null);
-  // 첫 노선 로드에서 한 번만 활성 노선을 홈 목록 안으로 맞춘다(2026-08-18) — 아래 주석 참조.
-  const initialRouteBoundRef = useRef(false);
   const [stops, setStops]           = useState([]);
   const [myStopIdx, setMyStopIdx]   = useState(null);
   const [rawBuses, setRawBuses]     = useState([]);
@@ -952,15 +1042,22 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
       const myPartner = session.partnerCode || null;
       const fallback = sortRoutes(myPartner ? all.filter(r => (r.partnerCode || null) === myPartner) : all).slice(0, 3);
       setRoutes(shown.length > 0 ? shown : fallback);
-      // 🔴 첫 로드에서만 활성 노선을 목록 안으로 끌어온다. 매번 하면 "노선 변경"으로 고른
-      //    기준 노선이 즐겨찾기가 아닐 때 곧바로 첫 즐겨찾기로 튕겨 나간다.
-      if (!initialRouteBoundRef.current) {
-        initialRouteBoundRef.current = true;
-        if (shown.length > 0 && !shown.some(r => r.id === activeRouteId)) setActiveRouteId(shown[0].id);
-      } else if (!activeRouteId && shown.length > 0) {
-        setActiveRouteId(shown[0].id);
-      }
+      // 🔴 자동 선택은 **세션에 남긴다**. 예전엔 "활성 노선을 홈 목록(=즐겨찾기) 안으로 끌어온다"였고, 그 끌어오기는
+      //    `activeRouteId` 만 바꾸고 세션에는 안 썼다. 홈 탭은 탭을 옮기면 **언마운트**되므로
+      //    (QR 탑승 버튼도 `setTab('scan')` 이다) 돌아올 때마다 이 끌어오기가 다시 돌았고,
+      //    배정 노선이 즐겨찾기에 없는 사람은 화면이 첫 즐겨찾기로 튕겼다. 그 결과
+      //      ① 내 정류장 복원은 `activeRouteId` 기준이라 매번 실패 = "지정해도 자꾸 풀린다"
+      //      ② 스캐너는 `session.routeId` 를 보내므로 화면과 달라 "선택한 노선의 차량이 아닙니다"
+      //    가 동시에 났다(2026-09-01 조수빈 · prod 실측 390명 동일 조건).
+      //    → 이제 보는 노선을 바꾸는 길은 `bindRoute` 하나뿐이고, 그 함수가 세션까지 쓴다.
+      //    홈 목록 밖의 노선은 **사용자가 직접 고른 것일 때만**(routePinned) 유지한다.
+      //    그래야 ⓐ 즐겨찾기만 등록해 둔 사람은 첫 진입에 그 노선으로 자동 정착하고(그 값이
+      //    곧 스캐너가 보내는 노선이 된다) ⓑ 노선 변경/칩으로 직접 고른 사람은 즐겨찾기가
+      //    아니어도 튕겨 나가지 않는다(2026-08-18 배시현 요청 보존).
+      const pick = pickHomeRoute({ all, shown, fallback, routeId: session.routeId, pinned: session.routePinned });
+      if (pick) bindRoute(pick);   // 자동 선택 — pin 은 안 찍는다
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, session.routeId]);
 
   // 기준 노선(session.routeId) 변경 시 활성 노선·내 정류장 재바인딩
@@ -968,13 +1065,26 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
     if (session.routeId) { setActiveRouteId(session.routeId); setMyStopIdx(null); }
   }, [session.routeId]);
 
+  // ── 보는 노선을 바꾸는 **단일 통로**(2026-09-01) ───────────────────────
+  // 🔴 `setActiveRouteId` 를 이 함수 밖에서 직접 부르지 말 것. 홈이 보는 노선과
+  //    스캐너가 서버에 보내는 노선(`session.routeId`)은 **같은 값이어야 한다** —
+  //    갈라지면 화면에 뜬 노선의 버스를 타도 서버가 "선택한 노선의 차량이 아닙니다"로 막는다.
+  //    세션에 쓰므로 탭 전환(홈 언마운트)·새로고침에도 보던 노선이 유지된다.
+  //    `pin`=true 는 "사용자가 직접 골랐다"는 표시 — 이후 자동 선택이 이 값을 덮지 않는다.
+  const bindRoute = (rid, { pin = false } = {}) => {
+    if (!rid) return;
+    setActiveRouteId(rid);
+    // saveSession으로 localStorage 자동 영속
+    onSessionUpdate(pin ? { routeId: rid, routePinned: true } : { routeId: rid });
+  };
+
   // 노선 변경 확정 — 기준 노선 갱신 + localStorage 영속(다음 로그인까지 유지) + 재바인딩
   const chooseRoute = (rid) => {
-    onSessionUpdate({ routeId: rid });   // saveSession으로 localStorage 자동 영속
-    setActiveRouteId(rid);
+    const changed = rid !== activeRouteId;
+    bindRoute(rid, { pin: true });
     setMyStopIdx(null);
     // 노선이 바뀌면 이전 노선의 내 정류장 영속값도 해제 — 옛 노선 도착 푸시 차단.
-    if (rid !== activeRouteId) persistMyStop(companyId, session?.empNo, null, null);
+    if (changed) persistMyStop(companyId, session?.empNo, null, null);
     setStops([]);
     setStopInfo(null);
     setRoutePicker(false);
@@ -1007,6 +1117,9 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
     if (!activeRouteId || !companyId) return;
     let cancelled = false;
     setStops([]);
+    // 🔴 인덱스도 함께 리셋한다 — 노선이 바뀌면 옛 노선의 myStopIdx 가 새 노선의
+    //    엉뚱한 정류장을 가리킨다(아래 복원이 이 노선의 저장값으로 다시 채운다).
+    setMyStopIdx(null);
     getDocs(query(
       collection(db, 'companies', companyId, 'routes', activeRouteId, 'stops'),
       orderBy('order', 'asc')
@@ -1399,13 +1512,16 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
             <span style={{ marginLeft: 'auto', fontSize: 10.5, color: band.fgMute, flexShrink: 0 }}>{timeSince(lastUpdate)} 갱신</span>
           )}
         </div>
-        {/* 노선 칩 (즐겨찾기 + 지금 보는 노선이 복수일 때 — 빠른 전환, 영속 아님) */}
+        {/* 노선 칩 (즐겨찾기 + 지금 보는 노선이 복수일 때 — 빠른 전환)
+            🔴 **영속이다**(2026-09-01). 예전엔 화면 state 만 바꿔서, 칩으로 노선을 옮긴 뒤
+               QR 탭에 다녀오면 홈이 언마운트→재마운트되며 배정 노선으로 되돌아갔고
+               (내 정류장도 함께 풀렸다), 스캐너는 계속 옛 노선을 보내 탑승이 막혔다. */}
         {homeRoutes.length > 1 && (
           <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginTop: 8, paddingBottom: 2 }}>
             {homeRoutes.map(r => (
               // 밴드 위에 얹히므로 토큰 색이 아니라 밴드 대비색을 쓴다(흰 배경 전제였던 값을
               // 그대로 두면 컬러 밴드 위에서 대비가 무너진다).
-              <button key={r.id} onClick={() => { setActiveRouteId(r.id); setMyStopIdx(null); }}
+              <button key={r.id} onClick={() => { bindRoute(r.id, { pin: true }); setMyStopIdx(null); }}
                 style={{ flexShrink: 0, padding: '5px 12px', borderRadius: 'var(--radius-pill)', cursor: 'pointer',
                   fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
                   border: `1px solid ${activeRouteId === r.id ? 'transparent' : band.chipLine}`,
@@ -1913,7 +2029,9 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
                 style={{ background: 'var(--color-primary)', border: 'none', borderRadius: 'var(--radius-12)', padding: '10px 16px', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', boxShadow: 'var(--shadow-strong)' }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}><Icon name="qr" size={14} stroke={2} /> QR 탑승</span>
               </button>
-              <button onClick={() => setMyStopIdx(null)}
+              {/* 🔴 `setMyStopIdx(null)` 만 하면 안 된다 — fcmTokens 의 영속값이 남아
+                  다음 진입에 그 정류장이 되살아나고 도착 임박 푸시도 계속 간다(2026-09-01). */}
+              <button onClick={() => selectMyStop(null)}
                 style={{ background: 'var(--color-bg-soft)', border: '1px solid var(--color-line)', borderRadius: 'var(--radius-8)', padding: '5px 10px', color: 'var(--color-label-mute)', fontSize: 10, cursor: 'pointer', fontFamily: 'inherit' }}>
                 정류장 변경
               </button>
@@ -3108,11 +3226,17 @@ function ScanTabDriverQR({ companyId, session }) {
 
       // 차량 부착 고정 QR(`/board?c={companyId}&v={vehicleId}`, 2026-07-09) — 토큰 없음.
       // 유비칸 등 기사앱 미사용 차량용. 폰 기본 카메라(BoardingApp)와 이 인앱 스캐너 둘 다 지원.
-      // 승객이 앱에서 선택한 노선(session.routeId)을 서버에 전달 — 선택 노선 배차만 매칭,
+      // 승객이 앱에서 **선택한** 노선을 서버에 전달 — 선택 노선 배차만 매칭,
       // 다른 노선 차량이면 서버가 차단(오탑승 방지, 2026-07-16 회의 #1). 미선택 직원은 기존 동작.
+      // 🔴 `session.routeId` 를 그대로 보내지 않는다 — 그 값은 **명부 배정으로도 채워지고**
+      //    일괄 업로드의 부산물일 수 있다(prod: 신촌세브란스 16,155명 중 16,149명이 같은 노선).
+      //    고른 적 없는 사람에게 그 값으로 걸면 자기 버스를 타고도 막힌다 = 거짓 차단.
+      //    판정 정본 `routeOrder.boardingRouteId`(직접 고름 pinned · 즐겨찾기 안 = 선택으로 인정).
       if (!t && c && v) {
         if (companyId && c !== companyId) throw new Error("다른 회사의 QR코드입니다");
-        const selectedRouteId = session?.routeId || null;
+        const selectedRouteId = boardingRouteId({
+          routeId: session?.routeId, pinned: session?.routePinned, favorites: session?.favorites,
+        });
         const info = await resolveStaticDispatch({ companyId: c, vehicleId: v, selectedRouteId });
         setStaticQr({ companyId: c, vehicleId: v, selectedRouteId });
         setTokenData({ routeName: info.routeName, vehicleNo: info.vehicleNo });

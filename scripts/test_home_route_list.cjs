@@ -70,7 +70,11 @@ console.log("\n[5] 소스 회귀 가드 — 복원 금지 규칙이 코드에 �
   ok("옛 규칙(배정 ∪ 즐겨찾기)이 남아 있지 않다",
     !/all\.filter\(r => r\.id === session\.routeId \|\| favorites\.includes\(r\.id\)\)/.test(emp));
   ok("칩은 homeRoutes(즐겨찾기 + 지금 보는 노선)로 그린다", /homeRoutes\.map\(r =>/.test(emp));
-  ok("활성 노선 재바인딩은 첫 로드에서만", /initialRouteBoundRef\.current/.test(emp));
+  // 2026-09-01: "첫 로드에서만"(initialRouteBoundRef)은 **홈이 재마운트될 때마다 초기화**돼
+  // 지키지 못하는 약속이었다(탭 전환 = 언마운트). 같은 의도를 세션 플래그로 옮겼다 —
+  // 직접 고른 노선은 pin 이 붙어 자동 선택이 덮지 않는다. 판정식 잠금은 test_home_route_bind.cjs.
+  ok("직접 고른 노선을 자동 선택이 덮지 않는다(pin)", /pickHomeRoute[^)]*pinned: session[.]routePinned/.test(emp));
+  ok("노선 선택은 세션에 영속된다(재마운트에도 안 튄다)", /routePinned: true/.test(emp));
   ok("즐겨찾기 없을 때 배정 폴백 유지", /assignedRouteId \? list\.filter/.test(raw));
 }
 
