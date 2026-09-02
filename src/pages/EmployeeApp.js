@@ -22,7 +22,7 @@ import { forceReconnect } from "../lib/forceReconnect";
 import { compareRoutes, sortRoutes, homeRouteList, pickHomeRoute, boardingRouteId } from "../lib/routeOrder";
 import { splitRouteNameNote, routeKind } from "../lib/routeKind";
 
-import { validateAndBoard, createPassengerToken, resolveStaticDispatch, validateAndBoardStatic } from "../lib/boarding";
+import { validateAndBoard, createPassengerToken, validateAndBoardStatic } from "../lib/boarding";
 import { passengerLogin, passengerResume, passengerMigrate, passengerSetPin, passengerLogout } from "../lib/passengerAuth";
 import QRCode from "qrcode";
 import { BusLinkLogo, StatusDot, Icon } from "../components/ui";
@@ -3121,11 +3121,15 @@ function ScanTabPassengerQR({ companyId, session }) {
 
 // ─── 기사 QR 스캔 UI (driver-qr 모드, 기존 ScanTab 그대로) ────
 function ScanTabDriverQR({ companyId, session }) {
-  const [step, setStep] = useState("ready"); // ready|loading|scanning|confirm|success|error
+  // 2026-09-02 — 「진입 > 카메라 열기 > 태깅 > 탑승 확인 터치 > 완료」 4단계를 3단계로 줄였다
+  //   (세브란스병원 총무팀 요청 · 최우석 매니저 전달 — "신속한 탑승을 위해").
+  //   ① 마운트 즉시 카메라가 열리고 ② 태깅되면 확인 터치 없이 곧바로 탑승 처리한다.
+  //   🔴 ready(카메라 열기) 화면은 **지우지 않는다** — 자동 시작이 실패했을 때(권한 거부·
+  //      iOS 가 제스처를 다시 요구할 때)와 탑승 완료 후 되돌아왔을 때의 폴백이다.
+  //   🔴 확인 터치를 없앤 대신 "어느 버스에 탔는지"는 완료 화면이 그대로 보여준다.
+  const [step, setStep] = useState("ready"); // ready|scanning|processing|success|error
   // jsQR npm 패키지로 직접 import — 항상 사용 가능
-  const [scannedToken, setScannedToken] = useState(null);
-  const [tokenData, setTokenData] = useState(null);
-  const [staticQr, setStaticQr] = useState(null);          // 고정 QR 이면 {companyId, vehicleId}
+  const [result, setResult] = useState(null);   // 탑승 결과 { routeName, vehicleNo, staticQr }
   const [alreadyBoarded, setAlreadyBoarded] = useState(false); // 고정 QR 재스캔(당일 중복) 여부
   const [errMsg, setErrMsg] = useState("");
   const [scanStatus, setScanStatus] = useState("");
@@ -3133,10 +3137,18 @@ function ScanTabDriverQR({ companyId, session }) {
   const streamRef = useRef(null);
   const rafRef = useRef(null);
   const activeRef = useRef(false); // 스캔 루프 활성 여부
+  // 🔴 StrictMode(개발 빌드)는 마운트 effect 를 두 번 돌린다 — getUserMedia 가 await 라
+  //    앞선 호출이 cleanup 뒤에 resolve 하면 그 stream 이 주인 없이 남는다(카메라가 켜진 채
+  //    누수). 호출마다 세대 번호를 올려 두고 **뒤늦게 온 stream 은 스스로 정리하고 물러난다.**
+  const scanGenRef = useRef(0);
 
-  // 언마운트 시 카메라 정리
+  // 진입 즉시 카메라 — 이 탭은 사용자가 탭바(또는 홈 "QR 탑승" 버튼)를 눌러 들어오므로
+  // transient user activation 안이라 getUserMedia 가 정상 동작한다(tab 초기값이 "home" 이라
+  // 앱 시작 직후 저절로 호출되는 경로는 없다). 실패하면 기존 catch 가 error 화면으로 보낸다.
   useEffect(() => {
+    startScan();
     return () => { activeRef.current = false; stopStream(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const stopStream = () => {
@@ -3150,11 +3162,14 @@ function ScanTabDriverQR({ companyId, session }) {
 
   const startScan = async () => {
     setErrMsg("");
+    const gen = ++scanGenRef.current; // 이 호출의 세대(위 StrictMode 주석 참조)
     try {
       // 1. 카메라 권한 요청
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
       });
+      // 기다리는 사이 새 호출이 시작됐거나(또는 언마운트) 하면 이 stream 은 주인이 없다.
+      if (gen !== scanGenRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
       streamRef.current = stream;
 
       // 2. scanning 상태로 전환 → video 엘리먼트 DOM에 렌더됨
@@ -3163,6 +3178,7 @@ function ScanTabDriverQR({ companyId, session }) {
 
       // 3. 다음 렌더 사이클 후 video에 stream 연결
       await new Promise(resolve => setTimeout(resolve, 100));
+      if (gen !== scanGenRef.current) return; // 이미 다른 세대가 진행 중
 
       if (!videoRef.current) throw new Error("카메라 화면을 초기화할 수 없습니다");
       videoRef.current.srcObject = stream;
@@ -3212,8 +3228,11 @@ function ScanTabDriverQR({ companyId, session }) {
     rafRef.current = requestAnimationFrame(tick);
   };
 
+  // 스캔값 파싱 → 곧바로 탑승 기록까지. 확인 화면이 없어졌으므로 프리뷰 호출도 없다.
+  // 🔴 state 는 비동기라 아래 runBoarding 이 화면 state 를 읽으면 안 된다 — 인자로만 받는다.
   const handleTokenScanned = async (rawValue) => {
-    setScanStatus("QR 확인 중...");
+    setScanStatus("탑승 처리 중...");
+    setStep("processing");
     try {
       const raw = (rawValue || "").trim();
       let t = null, c = null, v = null;
@@ -3237,10 +3256,10 @@ function ScanTabDriverQR({ companyId, session }) {
         const selectedRouteId = boardingRouteId({
           routeId: session?.routeId, pinned: session?.routePinned, favorites: session?.favorites,
         });
-        const info = await resolveStaticDispatch({ companyId: c, vehicleId: v, selectedRouteId });
-        setStaticQr({ companyId: c, vehicleId: v, selectedRouteId });
-        setTokenData({ routeName: info.routeName, vehicleNo: info.vehicleNo });
-        setStep("confirm");
+        // 🔴 확인 화면용 프리뷰(resolveStaticDispatch)는 부르지 않는다 — CF boardStatic 이
+        //    resolveStaticBoarding 과 **같은 배차 해석 헬퍼**를 쓰므로 배차 없음·노선 불일치
+        //    안내가 그대로 나온다. 서버 왕복이 둘에서 하나로 줄어든다.
+        await runBoarding({ staticQr: { companyId: c, vehicleId: v, selectedRouteId } });
         return;
       }
 
@@ -3249,40 +3268,37 @@ function ScanTabDriverQR({ companyId, session }) {
       // doc() 가 "Invalid segment / Paths must not contain //" 로 죽으므로 미리 걸러 안내한다.
       if (!token || token.includes("/")) throw new Error("탑승용 QR코드가 아닙니다\n기사 폰 또는 차량에 부착된 QR을 스캔하세요");
 
-      setStaticQr(null);
-      const snap = await getDoc(doc(db, "boardingTokens", token));
-      if (!snap.exists()) throw new Error("유효하지 않은 QR코드입니다");
-      const data = snap.data();
-      if (data.used)  throw new Error("이미 사용된 QR코드입니다");
-      if (data.expiresAt.toDate() < new Date()) throw new Error("만료된 QR코드입니다.\n기사님께 새 QR코드를 요청하세요");
-      setScannedToken(token); setTokenData(data); setStep("confirm");
+      // 🔴 boardingTokens 사전 조회는 하지 않는다 — validateAndBoard 가 exists/expired/used 를
+      //    스스로 검사하고 노선·차량을 돌려준다(서버 왕복 2회 → 1회).
+      await runBoarding({ token });
     } catch (e) { setErrMsg(e.message); setStep("error"); }
   };
 
-  const handleBoard = async () => {
-    setStep("processing");
-    try {
-      if (staticQr) {
-        // 본인 확인은 **로그인 토큰**이 한다(2026-08-25 P2) — 승객 입력 0, 클라가 보내는
-        // 사번은 서버가 토큰 값으로 덮어쓴다.
-        const res = await validateAndBoardStatic({ ...staticQr, empNo: session.empNo, name: session.name });
-        setAlreadyBoarded(!!res.alreadyBoarded);
-      } else {
-        await validateAndBoard({ tokenId: scannedToken, empNo: session.empNo, name: session.name });
-        setAlreadyBoarded(false);
-      }
-      if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]);
-      playTagBeep();   // 2026-08-25 미팅 — 진동만으로는 탄 줄 모른다는 신고
-      setStep("success");
-    } catch (e) { setErrMsg(e.message); setStep("error"); }
+  // 실제 탑승 기록. 🔴 화면 state 를 읽지 않는다 — 스캔 직후 setState 는 아직 반영 전이라
+  //    여기서 staticQr state 를 읽으면 늘 null 이다(그래서 인자로 받는다).
+  const runBoarding = async ({ staticQr = null, token = null }) => {
+    // 본인 확인은 **로그인 토큰**이 한다(2026-08-25 P2) — 승객 입력 0, 클라가 보내는
+    // 사번은 서버가 토큰 값으로 덮어쓴다.
+    const res = staticQr
+      ? await validateAndBoardStatic({ ...staticQr, empNo: session.empNo, name: session.name })
+      : await validateAndBoard({ tokenId: token, empNo: session.empNo, name: session.name });
+    setResult({ routeName: res.routeName, vehicleNo: res.vehicleNo, staticQr: !!staticQr });
+    setAlreadyBoarded(!!res.alreadyBoarded);
+    if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]);
+    playTagBeep();   // 2026-08-25 미팅 — 진동만으로는 탄 줄 모른다는 신고
+    setStep("success");
   };
 
+  // 🔴 완료 후에는 자동 재시작하지 않는다 — 나가려는 사람에게 카메라가 계속 켜져 있으면 안 된다.
   const reset = () => {
     stopStream();
-    setStep("ready"); setScannedToken(null); setTokenData(null);
-    setStaticQr(null); setAlreadyBoarded(false);
+    setStep("ready"); setResult(null); setAlreadyBoarded(false);
     setErrMsg(""); setScanStatus("");
   };
+
+  // 오류 화면의 "다시 시도" — 사용자 제스처가 있으므로 ready 를 거치지 않고 곧바로
+  // 카메라를 연다(탭 두 번이 한 번으로).
+  const retry = () => { reset(); startScan(); };
 
   return (
     <div style={{ display:"flex", flexDirection:"column", flex:1, overflow:"hidden", background:"var(--color-bg-alt)" }}>
@@ -3305,6 +3321,8 @@ function ScanTabDriverQR({ companyId, session }) {
                 {session.name} ({session.empNo})<br/>으로 탑승 처리됩니다
               </div>
             </div>
+            {/* 🔴 이 화면은 폴백이다 — 보통은 진입 즉시 카메라가 열려 여기까지 오지 않는다.
+                자동 시작이 막혔거나(권한·제스처) 탑승을 마치고 돌아왔을 때 쓰인다. */}
             <button style={{ ...S.btn, maxWidth:280 }} onClick={startScan}>
               <span style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", gap:7 }}><Icon name="camera" size={17} stroke={2} /> 카메라 열기</span>
             </button>
@@ -3335,29 +3353,6 @@ function ScanTabDriverQR({ companyId, session }) {
           </div>
         )}
 
-        {/* ── 탑승 확인 ── */}
-        {step === "confirm" && tokenData && (
-          <div style={{ width:"100%", maxWidth:320 }}>
-            <div style={{ background:"var(--color-bg)", borderRadius:"var(--radius-16)", padding:20, marginBottom:16, border:"1px solid rgba(0,191,64,.3)", boxShadow:"var(--shadow-emphasize)" }}>
-              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
-                <span style={{ display:"inline-flex", color:"var(--color-positive)" }}><Icon name="check" size={20} stroke={2.4} /></span>
-                <div style={{ fontSize:14, fontWeight:800, color:"#007A29" }}>QR 인식 완료</div>
-                {staticQr && (
-                  <span style={{ marginLeft:"auto", fontSize:10, fontWeight:700, padding:"3px 8px", borderRadius:"var(--radius-pill)", background:"var(--color-primary-soft)", color:"var(--color-primary-deep)" }}>고정 QR</span>
-                )}
-              </div>
-              {[["노선",tokenData.routeName],["차량",tokenData.vehicleNo],["탑승자",`${session.name} (${session.empNo})`],["부서",session.dept||"–"]].map(([k,v])=>(
-                <div key={k} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:"1px solid var(--color-line)" }}>
-                  <span style={{ fontSize:12, color:"var(--color-label-mute)" }}>{k}</span>
-                  <span style={{ fontSize:13, fontWeight:700, color:"var(--color-label)" }}>{v}</span>
-                </div>
-              ))}
-            </div>
-            <button style={{ ...S.btn, marginBottom:8 }} onClick={handleBoard}>탑승 확인</button>
-            <button style={S.btnSecondary} onClick={reset}>취소</button>
-          </div>
-        )}
-
         {/* ── 처리 중 ── */}
         {step === "processing" && (
           <>
@@ -3367,14 +3362,30 @@ function ScanTabDriverQR({ companyId, session }) {
         )}
 
         {/* ── 탑승 완료 ── */}
+        {/* 🔴 확인 터치를 없앤 대신 "어느 버스에 탔는지"는 여기서 계속 보여준다
+            (예전 확인 화면과 같은 표). 이 표를 지우면 승객이 오탑승을 알아챌 곳이 사라진다. */}
         {step === "success" && (
           <>
             <div style={{ width:80, height:80, borderRadius:"50%", background:"#E6F7EB", border:"2px solid var(--color-positive)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:36, color:"#007A29" }}>✓</div>
             <div style={{ fontSize:22, fontWeight:800, color:"#007A29" }}>{alreadyBoarded ? "이미 탑승 처리됨" : "탑승 완료!"}</div>
-            <div style={{ fontSize:14, color:"var(--color-label)", fontWeight:700 }}>{session.name} ({session.dept})</div>
             {alreadyBoarded
               ? <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center", lineHeight:1.6 }}>오늘 이 차량 탑승은 이미 기록되어 있습니다<br/>중복 기록되지 않습니다</div>
               : <div style={{ fontSize:12, color:"var(--color-label-mute)" }}>{new Date().toLocaleTimeString("ko-KR")}</div>}
+            <div style={{ width:"100%", maxWidth:320 }}>
+              <div style={{ background:"var(--color-bg)", borderRadius:"var(--radius-16)", padding:20, border:"1px solid rgba(0,191,64,.3)", boxShadow:"var(--shadow-emphasize)" }}>
+                {result?.staticQr && (
+                  <div style={{ display:"flex", marginBottom:10 }}>
+                    <span style={{ marginLeft:"auto", fontSize:10, fontWeight:700, padding:"3px 8px", borderRadius:"var(--radius-pill)", background:"var(--color-primary-soft)", color:"var(--color-primary-deep)" }}>고정 QR</span>
+                  </div>
+                )}
+                {[["노선",result?.routeName||"–"],["차량",result?.vehicleNo||"–"],["탑승자",`${session.name} (${session.empNo})`],["부서",session.dept||"–"]].map(([k,v])=>(
+                  <div key={k} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:"1px solid var(--color-line)" }}>
+                    <span style={{ fontSize:12, color:"var(--color-label-mute)" }}>{k}</span>
+                    <span style={{ fontSize:13, fontWeight:700, color:"var(--color-label)" }}>{v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
             <button style={{ ...S.btnSecondary, marginTop:8, maxWidth:280 }} onClick={reset}>확인</button>
           </>
         )}
@@ -3385,7 +3396,7 @@ function ScanTabDriverQR({ companyId, session }) {
             <div style={{ width:72, height:72, borderRadius:"50%", background:"var(--color-atomic-red-90)", border:"2px solid var(--color-destructive)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:32, color:"var(--color-destructive)" }}>✕</div>
             <div style={{ fontSize:18, fontWeight:800, color:"var(--color-destructive)" }}>오류</div>
             <div style={{ fontSize:13, color:"var(--color-label-mute)", textAlign:"center", whiteSpace:"pre-line", lineHeight:1.6 }}>{errMsg}</div>
-            <button style={{ ...S.btn, maxWidth:280 }} onClick={reset}>다시 시도</button>
+            <button style={{ ...S.btn, maxWidth:280 }} onClick={retry}>다시 시도</button>
           </>
         )}
 

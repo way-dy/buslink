@@ -2,6 +2,19 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
+> **2026-09-02 — QR 탑승 4단계 → 3단계(세브란스병원 총무팀 요청 · 최우석 매니저 전달 · ✅ prod 배포 완료 · `main.593eab1f.js` · `--only hosting`)**: "qr탑승 누르면 바로 카메라 open > qr태깅 > 탑승완료". 직원앱 `EmployeeApp.js ScanTabDriverQR` 단독 — `ScanTabPassengerQR`·`BoardingApp`(폰 기본 카메라) 무변경 · **전 거래처 공통 기본 동작**(플래그 신설 0) · rules/CF/indexes 변경 0.
+> - [x] 진입 즉시 카메라(마운트 `startScan` + StrictMode 세대 가드 `scanGenRef`)
+> - [x] 태깅 즉시 탑승 처리(`confirm` 단계·`handleBoard` 제거 → 인자로 받는 `runBoarding({ staticQr, token })`)
+> - [x] 서버 왕복 절반(정적 QR `resolveStaticDispatch` 프리뷰 제거 · 동적 토큰 `boardingTokens` 사전 조회 제거)
+> - [x] 완료 화면에 노선·차량·탑승자·부서 표 이동(고정 QR 뱃지 유지)
+> - [x] 회귀 테스트 `scripts/test_quick_boarding.cjs` **40단언**(옛 코드 대조군 19건 실패로 공허하지 않음 확인) · 게이트 43→**44/44**
+> - [x] 실화면 `scripts/headless_check_quick_boarding.cjs`(카메라 있음/없음 2갈래 전부 통과 · 옛 빌드 대조군 4건 실패)
+> - [x] 빌드 신규 경고 0(21↔21) · 번들 −189B
+> - [x] **prod 배포**(2026-09-02 · `--only hosting` · 게이트 44/44 → `Deploy complete!`) · [x] **커밋·푸시**
+> **배포 실측** = 서빙 번들이 `main.4cc37866.js` → `main.593eab1f.js` 로 교체(옛 파일은 404→SPA 리라이트로만 응답) · 라이브 번들에 `boardStatic` **있고** `resolveStaticBoarding` **없음**(왕복 2→1 이 실제로 올라갔다는 증거) · 배포 전 카카오 운영키 `appkey=58bf34` 확인. ⚠ **실기기 태깅은 여전히 미검증** — 아래 ⓐ~ⓓ 를 실제 폰으로 볼 것.
+> 🔴 **회귀 가드(복원 금지)**: ready(카메라 열기) 폴백 화면 제거 금지 · 완료 화면의 노선·차량 표시 제거 금지 · 서버 오탑승 가드 3종(`boardingRouteId`·`token.includes("/")`·회사 불일치) 유지 · 완료 후 자동 재시작 금지 · `scanGenRef` 제거 금지. 상세는 `.claude/issues.md` 맨 위.
+> ⚠ **다음 사람에게 — 눈으로 볼 것**(실기기): ⓐ **iOS Safari** 에서 탭을 누르는 것만으로 카메라가 열리는지(안 열리면 오류 화면으로 떨어지고 "다시 시도"를 한 번 눌러야 한다 = iOS 만 예전 4단계) ⓑ 안드로이드에서 태깅 한 번으로 탑승이 적재되고 완료 화면에 **노선·차량이 뜨는지** ⓒ 같은 차량 재태깅 시 "이미 탑승 처리됨" ⓓ 완료 후 "확인" → 카메라가 **꺼진 채** ready 로 돌아오는지. 🔴 실제 태깅→적재는 prod boardings 에 쌓이므로 하네스에서 하지 않았다(2026-08-25 가짜 탑승 사고 교훈).
+
 > **2026-09-02 — 협력사 포털: 뒤로가기·인증 유지·PC 레이아웃(way 요청 · ✅ prod 배포 완료 · `main.4cc37866.js` · `--only hosting` · 커밋 `b787582`)**: way "뒤로가기하면 무조건 페이지를 빠져나온다 · 로그인 계속 유지 · 나갈 땐 모달로 확인 · 뒤로 갈 땐 기존 페이지로 / PC 에서는 화면이 가로로 채워져 어드민처럼(모바일 반응형은 그대로 두고)".
 > **배포 실측** = 5개 도메인(p·d·admin·partner·web.app) 번들 해시 일치 · **prod 실화면 E2E 전 항목 통과**(샘플 거래처 실로그인 → 탭 2회 이동 → 뒤로 2회 앱 안 복귀 → 3회째 확인 모달 → 머무르기 → 새로고침 인증 유지 → 나가기로 이전 페이지 복귀 → 모바일 폭 회귀 · 페이지 오류 0). 고객 설명서 `docs/manual/PARTNER_GUIDE.md` 도 같이 갱신(인증 30일 유지·인증 해제·뒤로가기·PC 표) — ⚠ **PDF 재빌드는 아직**(아래 별도 항목이 추적).
 > **신설** = `src/lib/backNav.js`(순수·앱 안 뒤로가기 판정) · `src/lib/useBackNav.js`(React 껍데기) · `src/lib/partnerSession.js`(업체코드만 30일 저장). **수정** = `PartnerApp.js`(탭 정본 `MAIN_TABS` · PC 셸 · 승객 관리 PC 표 · 통계/운영포털 2열) · `lib/partner.js`(만료일 널가드). 상세·회귀 가드는 `.claude/issues.md` 맨 위.
