@@ -49,9 +49,15 @@ export async function validatePartnerCode(code) {
   const data = snap.data();
   if (!data.active) throw new Error("비활성화된 업체코드입니다\n담당자에게 문의하세요");
 
+  // 🔴 `expiresAt` 이 없거나 null 이면 **만료 없음**으로 본다(2026-09-02 발견).
+  //    종전엔 `data.expiresAt.toDate()` 를 그냥 불러, 만료를 안 건 문서에서
+  //    `Cannot read properties of null (reading 'toDate')` 가 화면에 그대로 떴다
+  //    — 담당자에게는 "업체코드가 틀렸나?" 로만 보인다. 실제로 `seed_sample_partner.cjs`
+  //    가 만든 시연용 거래처(`expiresAt: null`)는 이 때문에 **한 번도 로그인된 적이 없다**.
+  //    `createPartnerCode` 는 늘 1년 뒤를 넣으므로 정상 발급분의 동작은 그대로다.
   const now = new Date();
-  const expiresAt = data.expiresAt.toDate();
-  if (now > expiresAt) throw new Error("만료된 업체코드입니다\n담당자에게 코드 갱신을 요청하세요");
+  const expiresAt = typeof data.expiresAt?.toDate === "function" ? data.expiresAt.toDate() : null;
+  if (expiresAt && now > expiresAt) throw new Error("만료된 업체코드입니다\n담당자에게 코드 갱신을 요청하세요");
 
   return data; // { companyId, partnerName, allowedRouteIds, ... }
 }

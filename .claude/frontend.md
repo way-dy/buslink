@@ -20,5 +20,6 @@ CRA 단일 SPA. 진입점 `src/index.js` → `src/App.js`. 페이지는 `src/pag
 ## 상태/패턴
 - 실시간 차량 위치: `onSnapshot` → `useAnimatedPositions`(rAF 보간) 훅 경유.
 - EmployeeApp 세션: localStorage `buslink_employee` 키에 `{empNo,name,dept,routeId,...}` 저장/복원. `/p` 홈탭은 헤더 "노선 변경" 모달로 `routeId` 갱신(`onSessionUpdate`→`saveSession` 영속, 기준노선), 지도 전 정류장 이름 표시·마커/라벨 클릭 시 정류장 정보 카드(사진/설명).
+- PartnerApp 세션·뒤로가기(2026-09-02): localStorage `buslink_partner` 에 **업체코드만**(30일) 저장 — 복원 시 `validatePartnerCode` 로 서버에 다시 묻는다(`lib/partnerSession.js`). 뒤로가기는 `lib/backNav.js`(순수)+`useBackNav` 가 우리 history 항목 수를 세어 **앱 내 화면 이동 → 뿌리에서만 나가기 확인 모달**로 가른다. 화면 폭 ≥1024px 이면 관리자 콘솔형 셸(고정 사이드바+가로 채움), 그 아래는 기존 카드 레이아웃 그대로.
 - AdminApp: 관리자 기능은 `httpsCallable`로 Cloud Functions 호출(@.claude/functions.md).
 - `companyId` 기본값 `dy001`이 다수 페이지에 하드코딩(@.claude/issues.md).

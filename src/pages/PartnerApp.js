@@ -32,6 +32,10 @@ import { useWakeTick } from "../lib/useWakeTick";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
 // 거래처 브랜딩(2026-07-16 회의 #5) — 메인 컬러 CSS 변수 덮어쓰기(포탈 진입 시 적용·이탈 시 복원).
 import { applyPartnerBranding, clearPartnerBranding } from "../lib/partnerBranding";
+// 인증 유지(2026-09-02 way) — 업체코드만 남기고 복원 때 서버에 다시 묻는다.
+import { savePartnerSession, loadPartnerSession, clearPartnerSession } from "../lib/partnerSession";
+// 뒤로가기 = 앱 안의 이전 화면, 나갈 때만 확인 모달(2026-09-02 way).
+import { useBackNav } from "../lib/useBackNav";
 
 // 버스 마커 "신호 지연" 임계 — 관리자 실시간 관제 MARKER_STALE_MS 와 같은 값(5분).
 // 🔴 60초(GPS 신선도)로 낮추지 말 것: 단말 차량은 서버 폴러가 1분 주기라 매 분 깜빡인다.
@@ -69,6 +73,91 @@ const PARTNER_NOTICE_LIMIT_PER_HOUR = 5;
 const PARTNER_NOTICE_TITLE_MAX = 50;
 const PARTNER_NOTICE_BODY_MAX = 500;
 
+// ── 메인 탭 정본(2026-09-02) ──────────────────────────────
+// 🔴 모바일 탭바와 PC 사이드바가 **같은 배열**을 그린다 — 두 벌로 두면 탭이 늘 때 한쪽만 는다.
+//    (AdminApp 이 2026-08-26 에 드롭다운/사이드바 목록을 하나로 합친 것과 같은 이유.)
+const MAIN_TABS = [
+  { key:"register", label:"승객 등록", emoji:"📋", icon:"plus",  desc:"엑셀·개별·카드로 승객을 등록합니다" },
+  { key:"manage",   label:"승객 관리", emoji:"👥", icon:"user",  desc:"등록된 승객을 찾아 수정·재발급합니다" },
+  { key:"stats",    label:"탑승 통계", emoji:"📊", icon:"chart", desc:"기간별 탑승 실적을 조회합니다" },
+  { key:"ops",      label:"운영 포털", emoji:"🚌", icon:"bus",   desc:"자사 노선의 실시간 운행 현황입니다" },
+];
+const tabMeta = (key) => MAIN_TABS.find(t => t.key === key) || MAIN_TABS[0];
+
+// ── PC 판정(2026-09-02 way "PC에서는 화면이 가로로 채워져서 어드민처럼") ──
+// 🔴 AdminApp 의 `MOBILE_MAX_W=768` 보다 높게 잡는다(1024) — 이 포털은 표·지도·폼이 한 화면에
+//    같이 서므로 태블릿 세로(768~1023)에서는 지금의 카드 레이아웃이 더 낫다.
+//    그 아래 폭은 **기존 모바일 반응형 그대로**(way "현재 버전은 모바일 반응형으로 잘 두고").
+const WIDE_MIN_W = 1024;
+function useIsWide() {
+  const [wide, setWide] = useState(() => typeof window !== "undefined" && window.innerWidth >= WIDE_MIN_W);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const h = () => setWide(window.innerWidth >= WIDE_MIN_W);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+  return wide;
+}
+
+// 탭별 본문 최대 폭 — 폼은 넓히면 오히려 읽기 어렵고, 표·지도는 넓을수록 좋다.
+const TAB_MAX_W = { register: 960, manage: 1320, stats: 1440, ops: 1440 };
+
+// ── 확인 모달(나가기·인증 해제 공용) ─────────────────────
+// 🔴 `window.confirm` 을 안 쓴다(2026-09-02 way "모달 팝업으로 알려주고 확인 과정") — 안드로이드
+//    크롬의 기본 confirm 은 주소창 위에 붙어 앱이 아니라 브라우저가 묻는 것처럼 보인다.
+// 🔴 배경(딤) 클릭으로 닫지 않는다 — 이 파일의 다른 모달들과 같은 규칙(실수로 닫히면 안 된다).
+function ConfirmDialog({ title, body, confirmLabel, cancelLabel, tone = "primary", onConfirm, onCancel }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onCancel(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+  return (
+    <div style={S.overlay} role="dialog" aria-modal="true">
+      <div style={{ ...S.modal, maxWidth:360, gap:12 }}>
+        <div style={S.modalTitle}>{title}</div>
+        <div style={{ fontSize:13, color:"var(--color-label-mute)", lineHeight:1.6, whiteSpace:"pre-line" }}>{body}</div>
+        <div style={{ display:"flex", gap:8, marginTop:4 }}>
+          <button style={{ ...S.btnSecondary, flex:1 }} onClick={onCancel} autoFocus>{cancelLabel}</button>
+          <button style={{ ...S.btn, flex:1,
+            background: tone === "danger" ? "var(--color-destructive)" : "var(--color-primary)",
+            boxShadow: tone === "danger" ? "0 2px 8px rgba(229,34,34,.22)" : S.btn.boxShadow }}
+            onClick={onConfirm}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 익명 인증 1회(2026-05-26) — `companies/**` read 규칙이 `isAuth()` 라 노선·명부를 읽으려면
+// 반드시 먼저 끝나 있어야 한다.
+// 🔴 프라미스를 memo 해서 **읽는 쪽이 기다릴 수 있게** 한다(2026-09-02). 예전에는 마운트
+//    시 fire-and-forget 이었고, 사람이 업체코드를 타이핑하는 시간이 우연히 그 지연을 덮고
+//    있었다 — 세션 복원은 타이핑이 없으므로 그 우연이 사라져 `Missing or insufficient
+//    permissions` 로 조용히 실패했다(실측). 인증 직후 경로도 같은 프라미스를 기다린다.
+let anonAuthPromise = null;
+function ensureAnonAuth() {
+  if (!anonAuthPromise) {
+    anonAuthPromise = signInAnonymously(auth).catch(e => {
+      console.warn("[PartnerApp] 익명 인증 실패:", e?.message);
+      anonAuthPromise = null;   // 다음 시도에서 다시 해 볼 수 있게 비운다
+      return null;
+    });
+  }
+  return anonAuthPromise;
+}
+
+// 노선 목록 로드 — 인증 직후와 세션 복원이 **같은 함수**를 쓴다(정렬 규칙이 갈리지 않게).
+// 🔴 관리자 노선 관리의 ▲▼ 순서(`routes.order`)를 여기서 한 번만 적용한다(2026-08-26 게시판
+//    DqF7nony). 이 배열이 노선 드롭다운·승객 관리·탑승 통계·운영 포털 노선도의 공통 원본이라
+//    여기서 정렬해 두면 아래 화면들은 입력 순서를 그대로 물려받는다.
+async function fetchPartnerRoutes(companyId) {
+  await ensureAnonAuth();
+  const snap = await getDocs(collection(db, "companies", companyId, "routes"));
+  return sortRoutes(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+}
+
 export default function PartnerApp() {
   const [step, setStep] = useState(STEPS.CODE);
   const [code, setCode] = useState("");
@@ -81,6 +170,75 @@ export default function PartnerApp() {
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
 
+  // PC 는 관리자 콘솔과 같은 형태(고정 사이드바 + 가로 채움), 그 아래 폭은 기존 카드 그대로.
+  const wide = useIsWide();
+  // 저장된 업체코드가 있으면 **첫 화면부터** 복원 중임을 알린다(빈 코드 입력칸을 먼저 보여주면
+  // 담당자가 코드를 다시 치기 시작한다).
+  const [restoring, setRestoring] = useState(() => !!loadPartnerSession());
+  const [exitAsk, setExitAsk] = useState(false);      // 나가기 확인 모달
+  const [logoutAsk, setLogoutAsk] = useState(false);  // 인증 해제 확인 모달
+  // 코드는 아직 이 기기에 있는데 못 들어간 상태(통신 실패 등) — 다시 시도 통로를 준다.
+  const [restoreFailed, setRestoreFailed] = useState(false);
+
+  // ── 앱 안의 뒤로가기(2026-09-02) ────────────────────────
+  // 화면 = {step, mainTab, regMode, result} 한 벌. 이동할 때 지금 화면을 스택에 얹고,
+  // 뒤로가기가 오면 하나 꺼내 되돌린다. 스택이 비면 그때만 "나가시겠습니까".
+  const viewStack = useRef([]);
+  const viewRef = useRef(null);
+  viewRef.current = { step, mainTab, regMode, result };
+
+  const nav = useBackNav({
+    onPop: () => {
+      const prev = viewStack.current.pop();
+      if (!prev) return false;   // 더 되돌릴 앱 화면이 없다 → 나가기 확인
+      setStep(prev.step); setMainTab(prev.mainTab); setRegMode(prev.regMode); setResult(prev.result);
+      return true;
+    },
+    onExitAsk: () => setExitAsk(true),
+  });
+
+  // 앱 안에서 한 화면 진입. 🔴 **인증 화면 → 메인은 이 함수를 쓰지 않는다** — 인증은 유지되므로
+  //    뒤로가기로 업체코드 입력 화면에 돌아가는 것은 이제 말이 안 된다(메인이 뿌리 화면이다).
+  const goto = (patch) => {
+    viewStack.current.push(viewRef.current);
+    nav.pushView();
+    if ("step" in patch) setStep(patch.step);
+    if ("mainTab" in patch) setMainTab(patch.mainTab);
+    if ("regMode" in patch) setRegMode(patch.regMode);
+    if ("result" in patch) setResult(patch.result);
+  };
+
+  // ── 저장된 인증 복원(2026-09-02 way "로그인 계속 유지") ──
+  // 🔴 저장해 둔 권한을 그대로 믿지 않고 `validatePartnerCode` 로 **서버에 다시 묻는다** —
+  //    관리자가 코드를 비활성화·만료시키면 다음 진입에서 바로 막혀야 한다.
+  useEffect(() => {
+    const saved = loadPartnerSession();
+    if (!saved) return undefined;
+    let alive = true;
+    (async () => {
+      try {
+        const data = await validatePartnerCode(saved.code);
+        const rs = await fetchPartnerRoutes(data.companyId);
+        if (!alive) return;
+        setCode(saved.code); setCodeData(data); setRoutes(rs); setStep(STEPS.MAIN);
+      } catch (e) {
+        // 🔴 **코드가 죽은 경우에만** 저장분을 지운다. 통신 실패로 지워 버리면 담당자는
+        //    멀쩡한 20자짜리 코드를 다시 타이핑해야 한다 — 이번에 없애려던 그 불편이다.
+        const dead = /유효하지 않은|비활성화된|만료된/.test(e?.message || "");
+        if (dead) clearPartnerSession();
+        if (alive) {
+          setRestoreFailed(!dead);
+          setError(dead
+            ? `저장된 업체코드를 더는 쓸 수 없습니다\n${e.message}`
+            : `저장된 업체코드로 들어가지 못했습니다\n${e.message}`);
+        }
+      } finally {
+        if (alive) setRestoring(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
   // SheetJS 로드
   useEffect(() => {
     if (!window.XLSX) {
@@ -92,9 +250,7 @@ export default function PartnerApp() {
 
   // 익명 인증 (2026-05-26): boardings/passengers/fcmTokens 등의 rules `isAuth()` 통과용.
   // 기존 EmployeeApp·PassengerApp 패턴과 동일. 백그라운드 진행 — UI 게이팅하지 않음(코드 입력은 partnerCodes public read).
-  useEffect(() => {
-    signInAnonymously(auth).catch(e => console.warn("[PartnerApp] 익명 인증 실패:", e?.message));
-  }, []);
+  useEffect(() => { ensureAnonAuth(); }, []);
 
   // 협력사앱 전용 PWA 아이콘/제목(2026-06) — 설치 시 'BusLink 협력사' + partner 아이콘.
   useEffect(() => {
@@ -105,29 +261,228 @@ export default function PartnerApp() {
     if (!code.trim()) return;
     setLoading(true); setError("");
     try {
-      const data = await validatePartnerCode(code.trim());
+      const trimmed = code.trim();
+      const data = await validatePartnerCode(trimmed);
       setCodeData(data);
-      const snap = await getDocs(collection(db, "companies", data.companyId, "routes"));
-      // 🔴 관리자 노선 관리의 ▲▼ 순서(`routes.order`)를 여기서 한 번만 적용한다(2026-08-26
-      //    게시판 DqF7nony). 이 포털만 정렬 없이 받아 **Firestore 문서 ID 순**으로 쓰고 있었다
-      //    — 관리자·승객앱·직원앱은 전부 `lib/routeOrder` 를 따르는데 여기만 빠져 있었다.
-      //    이 배열이 노선 드롭다운·승객 관리·탑승 통계·운영 포털 노선도의 공통 원본이라
-      //    여기서 정렬해 두면 아래 화면들은 입력 순서를 그대로 물려받는다.
-      setRoutes(sortRoutes(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+      setRoutes(await fetchPartnerRoutes(data.companyId));
+      // 이 기기에 인증을 남긴다 — 뒤로가기·새로고침·앱 전환에도 코드를 다시 안 묻는다.
+      savePartnerSession(trimmed);
+      viewStack.current = [];   // 메인이 뿌리 화면 — 여기서 뒤로가면 나가기 확인이다
       setStep(STEPS.MAIN);
     } catch (e) { setError(e.message); }
     setLoading(false);
   };
 
-  const handleDone = (res) => { setResult(res); setStep(STEPS.DONE); };
+  const handleDone = (res) => goto({ step: STEPS.DONE, result: res });
   // 🔴 "추가 등록하기" 는 **업체코드 인증을 유지**한 채 등록 화면으로만 돌아간다(2026-08-26 게시판
   //    HesnB7nD). 종전에는 step 을 CODE 로 되돌리며 code·codeData 까지 비워, 방금 인증한 담당자가
   //    한 명 더 넣을 때마다 업체코드를 다시 치고 노선까지 다시 받아야 했다.
-  //    ⚠ `result` 는 반드시 비운다 — 평문 비밀번호는 저장하지 않으므로 이 화면을 벗어나면 못 본다는
-  //      위 안내와 한 몸이다(그 값을 들고 다니면 안내가 거짓말이 된다).
-  //    ⚠ `regMode` 도 유지한다 — 개별로 넣던 사람을 파일 업로드로 되돌리지 않는다.
-  const registerMore = () => { setResult(null); setError(""); setStep(STEPS.MAIN); };
+  //    🔴 물리 뒤로가기와 **같은 길**로 되돌린다(`nav.back()`) — 여기서 따로 state 를 되돌리면
+  //      history 항목이 하나 남아 그 다음 뒤로가기가 아무 일도 안 하는 것처럼 보인다.
+  //    ⚠ 스택에 얹힌 직전 화면은 `result:null` 이라 평문 비밀번호는 그대로 사라진다
+  //      ("이 화면을 벗어나면 다시 볼 수 없습니다" 안내와 한 몸이다). regMode 도 그대로 물려받는다.
+  const registerMore = () => { setError(""); nav.back(); };
 
+  // 인증 해제 — 공용 PC 대비. 저장된 코드를 지우고 첫 화면으로 되돌린다.
+  const handleLogout = () => {
+    clearPartnerSession();
+    viewStack.current = [];
+    setLogoutAsk(false);
+    setCode(""); setCodeData(null); setRoutes([]); setResult(null); setError("");
+    setMainTab("register"); setRegMode(REG_MODES.FILE);
+    setStep(STEPS.CODE);
+  };
+
+  // ════════════════════════════════════════════════════════
+  // 화면 조각 — 모바일 카드와 PC 셸이 **같은 조각**을 그린다.
+  // 🔴 두 벌로 복사하지 말 것: 한쪽만 고쳐지면 "PC 에서만 안 되는" 결함이 생긴다.
+  // ════════════════════════════════════════════════════════
+  const tabBody = codeData && (
+    <>
+      {/* ── 승객 등록 탭 ── */}
+      {mainTab === "register" && (
+        <>
+          <div style={S.subTabBar}>
+            {[[REG_MODES.FILE,"📂 파일 업로드"],[REG_MODES.SINGLE,"👤 개별 등록"],[REG_MODES.MULTI,"👥 다중 등록"],[REG_MODES.NFC,"📇 카드 등록"]].map(([mode,label])=>(
+              <button key={mode} onClick={()=>{ if (regMode !== mode) goto({ regMode: mode }); }}
+                style={{ ...S.subTabBtn,
+                  background: regMode===mode ? "var(--color-bg)" : "transparent",
+                  color: regMode===mode ? "var(--color-primary)" : "var(--color-label-mute)",
+                  boxShadow: regMode===mode ? "0 1px 3px rgba(0,0,0,.08)" : "none",
+                  fontWeight: regMode===mode ? 700 : 500 }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {regMode===REG_MODES.FILE && <FileUploadMode codeData={codeData} code={code} routes={routes} onDone={handleDone}/>}
+          {regMode===REG_MODES.SINGLE && <SingleRegMode codeData={codeData} code={code} routes={routes} onDone={handleDone}/>}
+          {regMode===REG_MODES.MULTI && <MultiRegMode codeData={codeData} code={code} routes={routes} onDone={handleDone}/>}
+          {regMode===REG_MODES.NFC && <NfcRegMode codeData={codeData} code={code}/>}
+        </>
+      )}
+
+      {/* ── 승객 관리 탭 ── */}
+      {mainTab === "manage" && <EmployeeManageMode codeData={codeData} code={code} routes={routes} wide={wide} />}
+
+      {/* ── 탑승 통계 탭 ── */}
+      {mainTab === "stats" && <BoardingStatsMode codeData={codeData} code={code} routes={routes} wide={wide} />}
+
+      {/* ── 운영 포털 탭(Phase 1.3) ── */}
+      {mainTab === "ops" && <OperationsMode codeData={codeData} code={code} routes={routes} wide={wide} />}
+    </>
+  );
+
+  const doneBody = result && (
+    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:14, width:"100%", maxWidth:520, margin:"0 auto" }}>
+      <div style={{ width:76, height:76, borderRadius:"50%", background:"#E6F7EB", border:"2px solid var(--color-positive)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:34, color:"var(--color-positive)", fontWeight:800 }}>✓</div>
+      <div style={{ fontSize:20, fontWeight:800, color:"#007A29", fontFamily:"var(--font-brand)", letterSpacing:"-0.01em" }}>등록 완료!</div>
+      <div style={S.resultBox}>
+        {[
+          ["신규 등록", result.added, "var(--color-primary)"],
+          ["정보 업데이트", result.updated, "var(--color-cautionary)"],
+          ["비활성화 (퇴사)", result.deactivated, "var(--color-destructive)"],
+        ].map(([label, val, color]) => (
+          <div key={label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 0", borderBottom:"1px solid var(--color-line-soft)" }}>
+            <span style={{ fontSize:13, color:"var(--color-label-mute)" }}>{label}</span>
+            <span style={{ fontSize:15, fontWeight:800, color }}>{val}명</span>
+          </div>
+        ))}
+        {result.errors?.length > 0 && (
+          <div style={{ marginTop:10, fontSize:12, color:"var(--color-destructive)", fontWeight:600 }}>오류 {result.errors.length}건 스킵됨</div>
+        )}
+      </div>
+      {/* 초기 PIN 개인별 발급(2026-07-27) — 평문은 저장하지 않으므로 이 화면을
+          벗어나면 다시 볼 수 없다. 배부물 인쇄를 여기서 유도한다. */}
+      {result.credentials?.length > 0 ? (
+        <>
+          <div style={{ background:"#FFF8ED", border:"1px solid #FFD9A8", borderRadius:10, padding:"12px 14px", width:"100%" }}>
+            <div style={{ fontSize:13, fontWeight:800, color:"#8A5200", marginBottom:5 }}>
+              ⚠️ 지금 안내문을 인쇄하세요
+            </div>
+            <div style={{ fontSize:12, color:"#8A5200", lineHeight:1.6 }}>
+              승객마다 서로 다른 비밀번호가 발급되었습니다. 보안을 위해 비밀번호는 저장하지 않으므로,
+              <b> 이 화면을 벗어나면 다시 볼 수 없습니다.</b> 나중에 필요하면 “승객 관리”에서 재발급하면 됩니다.
+            </div>
+          </div>
+          <button style={S.btn} onClick={async () => {
+            const ok = await printAccountCards({ credentials: result.credentials, partnerName: codeData?.partnerName, routes, partnerCode: code });
+            if (!ok) alert("팝업이 차단되었습니다. 브라우저 팝업 차단을 해제한 뒤 다시 시도하세요.");
+          }}>
+            📄 계정 안내문 인쇄 ({result.credentials.length}명)
+          </button>
+        </>
+      ) : (
+        <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center", lineHeight:1.5 }}>
+          신규 등록된 승객이 없어 발급된 비밀번호가 없습니다
+        </div>
+      )}
+      <button style={S.btnSecondary} onClick={registerMore}>추가 등록하기</button>
+    </div>
+  );
+
+  // 확인 모달 — 어느 레이아웃에서든 같은 자리에 뜬다(fixed 오버레이).
+  const dialogs = (
+    <>
+      {exitAsk && (
+        <ConfirmDialog
+          title="포털을 나가시겠습니까?"
+          body={"지금 나가면 들어오기 전 페이지로 돌아갑니다.\n인증은 이 기기에 유지되므로 다시 들어올 때 업체코드를 또 입력하지 않아도 됩니다."}
+          confirmLabel="나가기" cancelLabel="머무르기"
+          onConfirm={() => { setExitAsk(false); nav.confirmExit(); }}
+          onCancel={() => { setExitAsk(false); nav.cancelExit(); }}
+        />
+      )}
+      {logoutAsk && (
+        <ConfirmDialog
+          title="인증을 해제할까요?"
+          body={"이 기기에 저장된 업체코드를 지웁니다.\n다음에 들어올 때 업체코드를 다시 입력해야 합니다."}
+          confirmLabel="인증 해제" cancelLabel="취소" tone="danger"
+          onConfirm={handleLogout}
+          onCancel={() => setLogoutAsk(false)}
+        />
+      )}
+    </>
+  );
+
+  // ── 저장된 인증 복원 중 ──
+  if (restoring) {
+    return (
+      <div style={S.wrap}>
+        <div style={{ ...S.card, maxWidth:360, alignItems:"center", textAlign:"center" }}>
+          <BusLinkLogo size={26} sub="협력사 포털" />
+          <div style={{ fontSize:13, color:"var(--color-label-mute)", marginTop:6 }}>저장된 업체코드로 들어가는 중...</div>
+        </div>
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════
+  // PC 레이아웃(≥1024px) — 관리자 콘솔과 같은 셸(고정 사이드바 + 가로 채움).
+  // 2026-09-02 way: "PC에서는 화면이 가로로 채워져서 우리 어드민 페이지처럼 관리했으면".
+  // 인증 화면은 PC 에서도 가운데 카드다(관리자 로그인 화면과 같은 형태).
+  // ════════════════════════════════════════════════════════
+  if (wide && step !== STEPS.CODE && codeData) {
+    return (
+      <div style={S.shell}>
+        <InstallPrompt />
+        {/* ── 사이드바 ── */}
+        <div style={S.sideCol}>
+          <div style={S.sideLogo}>
+            <BusLinkLogo size={22} sub="협력사 포털" />
+          </div>
+          <div style={S.sidePartner}>
+            <div style={{ fontSize:10, color:"var(--color-label-mute)", fontWeight:700 }}>인증된 업체</div>
+            <div style={{ fontSize:14, fontWeight:800, color:"var(--color-primary-deep)", fontFamily:"var(--font-brand)", letterSpacing:"-0.01em", marginTop:2, wordBreak:"keep-all" }}>{codeData.partnerName}</div>
+            <div style={{ fontSize:10, color:"var(--color-label-alt)", marginTop:2 }}>{codeData.companyId} 소속</div>
+          </div>
+          <div style={S.sideSection}>메뉴</div>
+          <nav style={S.sideNav}>
+            {MAIN_TABS.map(item => {
+              const on = step === STEPS.MAIN && mainTab === item.key;
+              return (
+                <div key={item.key} onClick={() => { if (!on) goto({ step: STEPS.MAIN, mainTab: item.key }); }}
+                  style={{ ...S.navItem, ...(on ? S.navActive : {}) }}>
+                  {on && <span style={S.navAccent} />}
+                  <span style={S.navIcon}><Icon name={item.icon} size={17} stroke={on ? 2 : 1.7} /></span>
+                  {item.label}
+                </div>
+              );
+            })}
+          </nav>
+          <button style={S.logoutBtn} onClick={() => setLogoutAsk(true)}>인증 해제</button>
+        </div>
+
+        {/* ── 콘텐츠 ── */}
+        <div style={S.contentCol}>
+          <div style={S.topbar}>
+            <div style={{ minWidth:0 }}>
+              <div style={{ fontSize:16, fontWeight:800, fontFamily:"var(--font-brand)", letterSpacing:"-0.02em", color:"var(--color-label)" }}>
+                {step === STEPS.DONE ? "등록 완료" : tabMeta(mainTab).label}
+              </div>
+              <div style={{ fontSize:12, color:"var(--color-label-mute)", marginTop:2 }}>
+                {step === STEPS.DONE ? "발급된 계정 안내문을 인쇄하세요" : tabMeta(mainTab).desc}
+              </div>
+            </div>
+            <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
+              <Pill tone="positive" dot>인증됨</Pill>
+              <span style={{ fontSize:12, color:"var(--color-label-alt)" }}>{codeData.partnerName}</span>
+            </div>
+          </div>
+          <div style={S.main}>
+            <div style={{ width:"100%", maxWidth: step === STEPS.DONE ? 560 : (TAB_MAX_W[mainTab] || 1200), margin:"0 auto", display:"flex", flexDirection:"column", gap:14 }}>
+              {step === STEPS.MAIN && tabBody}
+              {step === STEPS.DONE && doneBody}
+            </div>
+          </div>
+        </div>
+        {dialogs}
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════
+  // 모바일·태블릿(<1024px) — 기존 카드 레이아웃 그대로.
+  // ════════════════════════════════════════════════════════
   return (
     <div style={S.wrap}>
       <InstallPrompt />
@@ -138,6 +493,9 @@ export default function PartnerApp() {
         {/* 헤더 */}
         <div style={S.header}>
           <BusLinkLogo size={26} sub="협력사 포털" />
+          {step !== STEPS.CODE && codeData && (
+            <button style={{ ...S.smallBtn, marginLeft:"auto" }} onClick={() => setLogoutAsk(true)}>인증 해제</button>
+          )}
         </div>
 
         {/* Step 진행 표시 */}
@@ -177,11 +535,17 @@ export default function PartnerApp() {
               onClick={handleCodeSubmit} disabled={loading||!code.trim()}>
               {loading?"확인 중...":"인증하기"}
             </button>
+            {/* 저장된 코드는 그대로 있는데 통신 문제로 못 들어간 경우 — 다시 치게 하지 않는다. */}
+            {restoreFailed && (
+              <button style={S.btnSecondary} onClick={() => window.location.reload()}>
+                저장된 업체코드로 다시 시도
+              </button>
+            )}
             <div style={S.notice}>업체코드가 없으시면 통근버스 운영사 담당자에게 문의하세요</div>
           </>
         )}
 
-        {/* ─── STEP 2: 직원 등록 / 직원 관리 탭 ─── */}
+        {/* ─── STEP 2: 승객 등록 / 관리 탭 ─── */}
         {step === STEPS.MAIN && codeData && (
           <>
             <div style={S.partnerInfo}>
@@ -192,105 +556,25 @@ export default function PartnerApp() {
 
             {/* 메인 탭 선택 — 2026-05-28 Phase 1.3 운영 포털 탭 추가 (4번째) */}
             <div style={S.tabBar}>
-              {[["register","📋 승객 등록"],["manage","👥 승객 관리"],["stats","📊 탑승 통계"],["ops","🚌 운영 포털"]].map(([t,label])=>(
-                <button key={t} onClick={()=>setMainTab(t)}
+              {MAIN_TABS.map(item=>(
+                <button key={item.key} onClick={()=>{ if (mainTab !== item.key) goto({ mainTab: item.key }); }}
                   style={{ ...S.tabBtn,
-                    background: mainTab===t ? "var(--color-primary)" : "transparent",
-                    color: mainTab===t ? "#fff" : "var(--color-label-mute)",
-                    boxShadow: mainTab===t ? "0 2px 6px rgba(0,102,255,.25)" : "none" }}>
-                  {label}
+                    background: mainTab===item.key ? "var(--color-primary)" : "transparent",
+                    color: mainTab===item.key ? "#fff" : "var(--color-label-mute)",
+                    boxShadow: mainTab===item.key ? "0 2px 6px rgba(0,102,255,.25)" : "none" }}>
+                  {item.emoji} {item.label}
                 </button>
               ))}
             </div>
 
-            {/* ── 직원 등록 탭 ── */}
-            {mainTab === "register" && (
-              <>
-                <div style={S.subTabBar}>
-                  {[[REG_MODES.FILE,"📂 파일 업로드"],[REG_MODES.SINGLE,"👤 개별 등록"],[REG_MODES.MULTI,"👥 다중 등록"],[REG_MODES.NFC,"📇 카드 등록"]].map(([mode,label])=>(
-                    <button key={mode} onClick={()=>setRegMode(mode)}
-                      style={{ ...S.subTabBtn,
-                        background: regMode===mode ? "var(--color-bg)" : "transparent",
-                        color: regMode===mode ? "var(--color-primary)" : "var(--color-label-mute)",
-                        boxShadow: regMode===mode ? "0 1px 3px rgba(0,0,0,.08)" : "none",
-                        fontWeight: regMode===mode ? 700 : 500 }}>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {regMode===REG_MODES.FILE && <FileUploadMode codeData={codeData} code={code} routes={routes} onDone={handleDone}/>}
-                {regMode===REG_MODES.SINGLE && <SingleRegMode codeData={codeData} code={code} routes={routes} onDone={handleDone}/>}
-                {regMode===REG_MODES.MULTI && <MultiRegMode codeData={codeData} code={code} routes={routes} onDone={handleDone}/>}
-                {regMode===REG_MODES.NFC && <NfcRegMode codeData={codeData} code={code}/>}
-              </>
-            )}
-
-            {/* ── 직원 관리 탭 ── */}
-            {mainTab === "manage" && (
-              <EmployeeManageMode codeData={codeData} code={code} routes={routes} />
-            )}
-
-            {/* ── 탑승 통계 탭 ── */}
-            {mainTab === "stats" && (
-              <BoardingStatsMode codeData={codeData} code={code} routes={routes} />
-            )}
-
-            {/* ── 운영 포털 탭(Phase 1.3) ── */}
-            {mainTab === "ops" && (
-              <OperationsMode codeData={codeData} code={code} routes={routes} />
-            )}
+            {tabBody}
           </>
         )}
 
         {/* ─── 완료 ─── */}
-        {step === STEPS.DONE && result && (
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:14 }}>
-            <div style={{ width:76, height:76, borderRadius:"50%", background:"#E6F7EB", border:"2px solid var(--color-positive)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:34, color:"var(--color-positive)", fontWeight:800 }}>✓</div>
-            <div style={{ fontSize:20, fontWeight:800, color:"#007A29", fontFamily:"var(--font-brand)", letterSpacing:"-0.01em" }}>등록 완료!</div>
-            <div style={S.resultBox}>
-              {[
-                ["신규 등록", result.added, "var(--color-primary)"],
-                ["정보 업데이트", result.updated, "var(--color-cautionary)"],
-                ["비활성화 (퇴사)", result.deactivated, "var(--color-destructive)"],
-              ].map(([label, val, color]) => (
-                <div key={label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 0", borderBottom:"1px solid var(--color-line-soft)" }}>
-                  <span style={{ fontSize:13, color:"var(--color-label-mute)" }}>{label}</span>
-                  <span style={{ fontSize:15, fontWeight:800, color }}>{val}명</span>
-                </div>
-              ))}
-              {result.errors?.length > 0 && (
-                <div style={{ marginTop:10, fontSize:12, color:"var(--color-destructive)", fontWeight:600 }}>오류 {result.errors.length}건 스킵됨</div>
-              )}
-            </div>
-            {/* 초기 PIN 개인별 발급(2026-07-27) — 평문은 저장하지 않으므로 이 화면을
-                벗어나면 다시 볼 수 없다. 배부물 인쇄를 여기서 유도한다. */}
-            {result.credentials?.length > 0 ? (
-              <>
-                <div style={{ background:"#FFF8ED", border:"1px solid #FFD9A8", borderRadius:10, padding:"12px 14px", width:"100%" }}>
-                  <div style={{ fontSize:13, fontWeight:800, color:"#8A5200", marginBottom:5 }}>
-                    ⚠️ 지금 안내문을 인쇄하세요
-                  </div>
-                  <div style={{ fontSize:12, color:"#8A5200", lineHeight:1.6 }}>
-                    승객마다 서로 다른 비밀번호가 발급되었습니다. 보안을 위해 비밀번호는 저장하지 않으므로,
-                    <b> 이 화면을 벗어나면 다시 볼 수 없습니다.</b> 나중에 필요하면 “승객 관리”에서 재발급하면 됩니다.
-                  </div>
-                </div>
-                <button style={S.btn} onClick={async () => {
-                  const ok = await printAccountCards({ credentials: result.credentials, partnerName: codeData?.partnerName, routes, partnerCode: code });
-                  if (!ok) alert("팝업이 차단되었습니다. 브라우저 팝업 차단을 해제한 뒤 다시 시도하세요.");
-                }}>
-                  📄 계정 안내문 인쇄 ({result.credentials.length}명)
-                </button>
-              </>
-            ) : (
-              <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center", lineHeight:1.5 }}>
-                신규 등록된 승객이 없어 발급된 비밀번호가 없습니다
-              </div>
-            )}
-            <button style={S.btnSecondary} onClick={registerMore}>추가 등록하기</button>
-          </div>
-        )}
+        {step === STEPS.DONE && doneBody}
       </div>
+      {dialogs}
     </div>
   );
 }
@@ -785,7 +1069,7 @@ function NfcRegMode({ codeData, code }) {
 // ════════════════════════════════════════════════════════
 // 직원 관리 모드 — 조회 + 수정 + 비활성화
 // ════════════════════════════════════════════════════════
-function EmployeeManageMode({ codeData, code, routes }) {
+function EmployeeManageMode({ codeData, code, routes, wide = false }) {
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -924,25 +1208,83 @@ function EmployeeManageMode({ codeData, code, routes }) {
     .filter(u => u.registered > 0 || u.seats)
     .sort((a, b) => (b.over ? 1 : 0) - (a.over ? 1 : 0) || b.registered - a.registered);
 
+  // 행 조작 버튼 — 카드(모바일)와 표(PC)가 **같은 것**을 쓴다.
+  // 🔴 삭제는 되돌릴 수 없으므로 한 단계 확인을 거친다(2026-07-30 요청: 테스트·오류 계정 정리용).
+  //    퇴사 처리(재직 토글)와는 다른 동작임을 문구로 구분해 실수로 지우지 않게 한다.
+  const rowActions = (emp) => (
+    <div style={{ display:"inline-flex", gap:4, flexShrink:0, flexWrap:"wrap", justifyContent:"flex-end" }}>
+      <button onClick={()=>openEdit(emp)} style={S.smallBtn}>수정</button>
+      <button onClick={()=>handleResetPin(emp)} style={S.smallBtnWarn} disabled={pinBusy}>비밀번호 재발급</button>
+      {delTarget === emp.empNo ? (
+        <span style={{ display:"inline-flex", gap:4, alignItems:"center" }}>
+          <button onClick={()=>handleDelete(emp)} disabled={delBusy}
+            style={{ ...S.smallBtnWarn, background:"var(--color-destructive)", color:"#fff", borderColor:"var(--color-destructive)" }}>
+            {delBusy ? "삭제 중…" : "정말 삭제"}
+          </button>
+          <button onClick={()=>setDelTarget(null)} style={S.smallBtn}>취소</button>
+        </span>
+      ) : (
+        <button onClick={()=>{ setDelTarget(emp.empNo); setDelMsg(""); }} style={S.smallBtn}>삭제</button>
+      )}
+    </div>
+  );
+
+  // 남은 인원 안내 — 숫자는 늘 전체 기준이라 "몇 명 중 몇 명을 보고 있는지"를 밝힌다.
+  const moreRow = filtered.length > visible.length ? (
+    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6, padding:"10px 0 4px" }}>
+      <div style={{ fontSize:12, color:"var(--color-label-mute)", fontWeight:600 }}>
+        {filtered.length.toLocaleString()}명 중 {visible.length.toLocaleString()}명 표시 중 · 이름·사번으로 검색하면 바로 찾을 수 있습니다
+      </div>
+      <button onClick={() => setShown(n => n + PAGE)} style={{ ...S.btnSecondary, width:"auto", padding:"8px 18px" }}>
+        {Math.min(PAGE, filtered.length - visible.length)}명 더 보기
+      </button>
+    </div>
+  ) : null;
+
+  // 노선별 정원 — 초과면 먼저 보이게 정렬. PC 는 집계와 나란히, 모바일은 위아래로 쌓는다.
+  const seatCard = seatRows.length > 0 ? (
+    <div style={{ border:"1px solid var(--color-line)", borderRadius:10, padding:"10px 12px", background:"var(--color-bg-soft)" }}>
+      <div style={{ fontSize:12, fontWeight:800, color:"var(--color-label)", marginBottom:6 }}>노선별 인원 / 좌석</div>
+      <div style={{ display:"flex", flexDirection:"column", gap:4, maxHeight: wide ? 168 : "none", overflowY: wide ? "auto" : "visible" }}>
+        {seatRows.map(u => (
+          <div key={u.rid} style={{ display:"flex", justifyContent:"space-between", gap:8, fontSize:12 }}>
+            <span style={{ color:"var(--color-label-mute)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{u.name}</span>
+            <span style={{ fontWeight:800, flexShrink:0,
+              color: u.over ? "var(--color-destructive)" : !u.seats ? "var(--color-label-mute)" : u.ratio >= 0.9 ? "var(--color-cautionary)" : "var(--color-label)" }}>
+              {u.seats ? `${u.registered} / ${u.seats}석${u.over ? " 초과" : ""}` : `${u.registered}명 · 정원 미설정`}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  ) : null;
+
+  // 집계 — "미시작"(2026-07-27)은 계정을 아직 못 받았거나 안내문이 도달하지 않은 인원.
+  const statGrid = (
+    <div style={{ display:"grid", gridTemplateColumns:"repeat(4, minmax(0,1fr))", gap:8 }}>
+      {[
+        ["전체",employees.length,"var(--color-primary)"],
+        ["재직",employees.filter(e=>e.active).length,"var(--color-positive)"],
+        ["퇴사",employees.filter(e=>!e.active).length,"var(--color-destructive)"],
+        ["미시작",employees.filter(e=>e.active && isUnstarted(e)).length,"var(--color-cautionary)"],
+      ].map(([l,v,c])=>(
+        <div key={l} style={S.statCard}>
+          <div style={{ fontSize: wide ? 24 : 20, fontWeight:800, color:c, fontFamily:"var(--font-brand)" }}>{v.toLocaleString()}</div>
+          <div style={{ fontSize:11, color:"var(--color-label-mute)", fontWeight:600 }}>{l}</div>
+        </div>
+      ))}
+    </div>
+  );
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-      {/* 노선별 정원 — 초과면 먼저 보이게 정렬 */}
-      {seatRows.length > 0 && (
-        <div style={{ border:"1px solid var(--color-line)", borderRadius:10, padding:"10px 12px", background:"var(--color-bg-soft)" }}>
-          <div style={{ fontSize:12, fontWeight:800, color:"var(--color-label)", marginBottom:6 }}>노선별 인원 / 좌석</div>
-          <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
-            {seatRows.map(u => (
-              <div key={u.rid} style={{ display:"flex", justifyContent:"space-between", gap:8, fontSize:12 }}>
-                <span style={{ color:"var(--color-label-mute)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{u.name}</span>
-                <span style={{ fontWeight:800, flexShrink:0,
-                  color: u.over ? "var(--color-destructive)" : !u.seats ? "var(--color-label-mute)" : u.ratio >= 0.9 ? "var(--color-cautionary)" : "var(--color-label)" }}>
-                  {u.seats ? `${u.registered} / ${u.seats}석${u.over ? " 초과" : ""}` : `${u.registered}명 · 정원 미설정`}
-                </span>
-              </div>
-            ))}
-          </div>
+      {/* PC 는 정원·집계를 한 줄에 나란히(가로를 채운다), 모바일은 예전 순서 그대로 위아래로. */}
+      {wide ? (
+        <div style={{ display:"grid", gridTemplateColumns: seatCard ? "minmax(260px,1fr) minmax(360px,1.4fr)" : "1fr", gap:12, alignItems:"start" }}>
+          {seatCard}
+          {statGrid}
         </div>
-      )}
+      ) : seatCard}
 
       {/* 검색 + 필터 */}
       <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
@@ -966,33 +1308,60 @@ function EmployeeManageMode({ codeData, code, routes }) {
         </div>
       )}
 
-      {/* 집계 — "미접속"(2026-07-27)은 계정을 아직 못 받았거나 안내문이 도달하지 않은 인원. */}
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:8 }}>
-        {[
-          ["전체",employees.length,"var(--color-primary)"],
-          ["재직",employees.filter(e=>e.active).length,"var(--color-positive)"],
-          ["퇴사",employees.filter(e=>!e.active).length,"var(--color-destructive)"],
-          ["미시작",employees.filter(e=>e.active && isUnstarted(e)).length,"var(--color-cautionary)"],
-        ].map(([l,v,c])=>(
-          <div key={l} style={S.statCard}>
-            <div style={{ fontSize:20, fontWeight:800, color:c, fontFamily:"var(--font-brand)" }}>{v}</div>
-            <div style={{ fontSize:11, color:"var(--color-label-mute)", fontWeight:600 }}>{l}</div>
-          </div>
-        ))}
-      </div>
+      {!wide && statGrid}
 
       {/* 계정 배부 도우미 — 아직 한 번도 접속하지 않은 인원만 골라 재발급+인쇄. */}
-      <button style={{ ...S.btnSecondary, opacity: pinBusy ? 0.6 : 1 }} onClick={handleReissueUnvisited} disabled={pinBusy}>
+      <button style={{ ...S.btnSecondary, opacity: pinBusy ? 0.6 : 1, ...(wide ? { width:"auto", alignSelf:"flex-start", padding:"9px 16px" } : null) }}
+        onClick={handleReissueUnvisited} disabled={pinBusy}>
         {pinBusy ? "발급 중..." : "📄 미시작 승객 계정 안내문 만들기"}
       </button>
 
-      {/* 직원 목록 */}
+      {/* 승객 목록 — 모바일은 카드, PC 는 표(관리자 콘솔과 같은 형태).
+          🔴 두 표현이 **같은 `visible` 배열**을 그린다 — 표시 상한(2026-08-28)·검색·필터는 한 곳뿐이다. */}
       {loading ? (
         <div style={{ textAlign:"center", padding:20, color:"var(--color-label-mute)", fontSize:13 }}>로딩 중...</div>
       ) : filtered.length === 0 ? (
         <div style={{ textAlign:"center", padding:24, color:"var(--color-label-alt)", fontSize:13, background:"var(--color-bg-soft)", borderRadius:10 }}>
           {search ? "검색 결과가 없습니다" : "등록된 승객이 없습니다"}
         </div>
+      ) : wide ? (
+        <>
+          {/* 높이는 화면에서 남는 만큼(머리·검색·집계를 뺀 값). 행이 적으면 그만큼만 차지한다. */}
+          <div style={{ ...S.tableWrap, maxHeight:"calc(100dvh - 430px)" }}>
+            <table style={S.table}>
+              <thead>
+                <tr>
+                  {["이름","사번","부서","노선","상태","NFC 카드","작업"].map(h => (
+                    <th key={h} style={{ ...S.th, textAlign: h === "작업" ? "right" : "left" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map(emp => (
+                  <tr key={emp.id} style={{ background: emp.active ? "transparent" : "rgba(229,34,34,.03)" }}>
+                    <td style={{ ...S.td, fontWeight:700, whiteSpace:"nowrap" }}>{emp.name}</td>
+                    <td style={{ ...S.td, fontFamily:"var(--font-mono)", fontSize:12, color:"var(--color-label-mute)", whiteSpace:"nowrap" }}>{emp.empNo}</td>
+                    <td style={{ ...S.td, color:"var(--color-label-mute)" }}>{emp.dept || "–"}</td>
+                    <td style={{ ...S.td, color:"var(--color-label-mute)" }}>{emp.routeCode || "–"}</td>
+                    <td style={S.td}>
+                      <span style={{ display:"inline-flex", gap:4, flexWrap:"wrap", alignItems:"center" }}>
+                        <Pill tone={emp.active?"positive":"danger"} dot>{emp.active?"재직":"퇴사"}</Pill>
+                        {/* "미시작" 이 곧 "발급 비밀번호 그대로" 라 옛 PIN미변경 배지와 뜻이 겹친다 → 하나로 통합. */}
+                        {emp.active && isUnstarted(emp) && <Pill tone="warn">미시작</Pill>}
+                        {emp.pinLocked && <Pill tone="primary">🔒 PIN잠금</Pill>}
+                      </span>
+                    </td>
+                    <td style={{ ...S.td, fontFamily:"var(--font-mono)", fontSize:11, color:"var(--color-label-mute)", whiteSpace:"nowrap" }}>
+                      {emp.nfcUid ? formatNfcUid(emp.nfcUid) : "–"}
+                    </td>
+                    <td style={{ ...S.td, textAlign:"right", whiteSpace:"nowrap" }}>{rowActions(emp)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {moreRow}
+        </>
       ) : (
         <div style={{ display:"flex", flexDirection:"column", gap:8, maxHeight:360, overflowY:"auto" }}>
           {visible.map(emp => (
@@ -1009,7 +1378,6 @@ function EmployeeManageMode({ codeData, code, routes }) {
                     <span style={{ fontSize:14, fontWeight:700, color:"var(--color-label)" }}>{emp.name}</span>
                     <span style={{ fontSize:10, fontFamily:"monospace", color:"var(--color-label-mute)", background:"var(--color-bg-soft)", padding:"1px 6px", borderRadius:4 }}>{emp.empNo}</span>
                     <Pill tone={emp.active?"positive":"danger"} dot>{emp.active?"재직":"퇴사"}</Pill>
-                    {/* "미시작" 이 곧 "발급 비밀번호 그대로" 라 옛 PIN미변경 배지와 뜻이 겹친다 → 하나로 통합. */}
                     {emp.active && isUnstarted(emp) && <Pill tone="warn">미시작</Pill>}
                     {emp.pinLocked && <Pill tone="primary">🔒 PIN잠금</Pill>}
                     {emp.nfcUid && <Pill tone="positive">📇 NFC</Pill>}
@@ -1019,38 +1387,11 @@ function EmployeeManageMode({ codeData, code, routes }) {
                     {emp.nfcUid && <> · <span style={{ fontFamily:"monospace" }}>{formatNfcUid(emp.nfcUid)}</span></>}
                   </div>
                 </div>
-                <div style={{ display:"flex", gap:4, flexShrink:0, flexWrap:"wrap", justifyContent:"flex-end" }}>
-                  <button onClick={()=>openEdit(emp)} style={S.smallBtn}>수정</button>
-                  <button onClick={()=>handleResetPin(emp)} style={S.smallBtnWarn} disabled={pinBusy}>비밀번호 재발급</button>
-                  {/* 삭제 — 되돌릴 수 없으므로 한 단계 확인을 거친다(2026-07-30 요청:
-                      테스트·오류 계정 정리용). 퇴사 처리(재직 토글)와는 다른 동작임을
-                      문구로 구분해 실수로 지우지 않게 한다. */}
-                  {delTarget === emp.empNo ? (
-                    <span style={{ display:"inline-flex", gap:4, alignItems:"center" }}>
-                      <button onClick={()=>handleDelete(emp)} disabled={delBusy}
-                        style={{ ...S.smallBtnWarn, background:"var(--color-destructive)", color:"#fff", borderColor:"var(--color-destructive)" }}>
-                        {delBusy ? "삭제 중…" : "정말 삭제"}
-                      </button>
-                      <button onClick={()=>setDelTarget(null)} style={S.smallBtn}>취소</button>
-                    </span>
-                  ) : (
-                    <button onClick={()=>{ setDelTarget(emp.empNo); setDelMsg(""); }} style={S.smallBtn}>삭제</button>
-                  )}
-                </div>
+                {rowActions(emp)}
               </div>
             </div>
           ))}
-          {/* 남은 인원 안내 — 숫자는 늘 전체 기준이라 "몇 명 중 몇 명을 보고 있는지"를 밝힌다. */}
-          {filtered.length > visible.length && (
-            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6, padding:"10px 0 4px" }}>
-              <div style={{ fontSize:12, color:"var(--color-label-mute)", fontWeight:600 }}>
-                {filtered.length.toLocaleString()}명 중 {visible.length.toLocaleString()}명 표시 중 · 이름·사번으로 검색하면 바로 찾을 수 있습니다
-              </div>
-              <button onClick={() => setShown(n => n + PAGE)} style={{ ...S.btnSecondary, width:"auto", padding:"8px 18px" }}>
-                {Math.min(PAGE, filtered.length - visible.length)}명 더 보기
-              </button>
-            </div>
-          )}
+          {moreRow}
         </div>
       )}
 
@@ -1456,6 +1797,32 @@ const S = {
     color:"var(--color-label)",
     marginBottom:2,
   },
+
+  // ── PC 셸(≥1024px) — AdminApp 관리자 콘솔과 같은 치수·같은 시각 언어 ──────
+  // 🔴 `minWidth:0` 은 세로글씨의 예방책이다(2026-08-26 AdminApp) — flex 아이템 기본값이
+  //    min-width:auto 라 좁아질 때 안쪽 요소가 찌부러지며 한글이 글자당 한 줄로 쌓인다.
+  //    `minHeight:0` 과 짝이다(세로 스크롤). 둘 다 빼지 말 것.
+  shell: { display:"flex", height:"100dvh", background:"var(--color-bg-soft)", fontFamily:"var(--font-base)", color:"var(--color-label)", position:"relative", overflow:"hidden" },
+  sideCol: { width:236, flexShrink:0, background:"var(--color-bg)", borderRight:"1px solid var(--color-line)", display:"flex", flexDirection:"column", minHeight:0, padding:"18px 14px" },
+  sideLogo: { display:"flex", alignItems:"baseline", gap:8, flexShrink:0, padding:"4px 8px 14px", borderBottom:"1px solid var(--color-line)" },
+  sidePartner: { flexShrink:0, marginTop:12, padding:"10px 12px", borderRadius:10, background:"var(--color-primary-soft)", border:"1px solid rgba(0,102,255,.18)" },
+  sideSection: { fontSize:11, fontWeight:700, letterSpacing:"0.04em", color:"var(--color-label-alt)", flexShrink:0, padding:"14px 12px 8px" },
+  // 목록만 스크롤 — 탭이 늘어도 아래 항목이 잘리지 않는다(2026-08-11 AdminApp 사이드바 교훈).
+  sideNav: { display:"flex", flexDirection:"column", gap:2, flex:1, minHeight:0, overflowY:"auto", overflowX:"hidden" },
+  navItem: { display:"flex", alignItems:"center", gap:11, flexShrink:0, padding:"10px 12px", borderRadius:10, cursor:"pointer", fontSize:13, fontWeight:500, color:"var(--color-label-mute)", position:"relative", transition:"background .15s,color .15s", userSelect:"none", whiteSpace:"nowrap" },
+  navActive: { background:"var(--color-primary-soft)", color:"var(--color-primary-deep)", fontWeight:700 },
+  navAccent: { position:"absolute", left:3, top:"50%", transform:"translateY(-50%)", width:3, height:18, borderRadius:3, background:"var(--color-primary)" },
+  navIcon: { flexShrink:0, display:"flex", opacity:.92 },
+  logoutBtn: { display:"flex", alignItems:"center", justifyContent:"center", width:"100%", flexShrink:0, marginTop:10, background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:10, padding:"10px 12px", color:"var(--color-label-mute)", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit" },
+  contentCol: { flex:1, minWidth:0, display:"flex", flexDirection:"column", minHeight:0, overflow:"hidden" },
+  topbar: { display:"flex", alignItems:"center", justifyContent:"space-between", gap:16, padding:"14px 24px", background:"var(--color-bg)", borderBottom:"1px solid var(--color-line)", flexShrink:0 },
+  main: { flex:1, minHeight:0, overflowY:"auto", padding:"20px 24px 32px" },
+
+  // ── PC 표(승객 관리) — 관리자 콘솔 표와 같은 규격 ──────────────────────
+  tableWrap: { background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:12, overflow:"auto" },
+  table: { width:"100%", minWidth:820, borderCollapse:"collapse" },
+  th: { textAlign:"left", padding:"10px 14px", fontSize:11, color:"var(--color-label-mute)", fontWeight:700, borderBottom:"1px solid var(--color-line)", whiteSpace:"nowrap", background:"var(--color-bg-alt)", position:"sticky", top:0, zIndex:1 },
+  td: { padding:"10px 14px", fontSize:13, borderBottom:"1px solid var(--color-line-soft)", verticalAlign:"middle" },
 };
 
 // ════════════════════════════════════════════════════════
@@ -1463,7 +1830,7 @@ const S = {
 // ════════════════════════════════════════════════════════
 // companyId/boardings/{date}/list 컬렉션을 from~to 범위로 일자별 로딩 → partnerCode 일치 또는
 // 자기 협력사 직원 empNo 매칭(legacy 데이터 호환). 누적 표시: 일자별/직원별/노선별.
-function BoardingStatsMode({ codeData, code, routes }) {
+function BoardingStatsMode({ codeData, code, routes, wide = false }) {
   const todayStr = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
   const daysAgo = (n) => {
     const d = new Date();
@@ -1651,13 +2018,18 @@ function BoardingStatsMode({ codeData, code, routes }) {
         </div>
       </div>
 
+      {/* 결과 패널 — PC 는 2열로 나란히(가로를 채운다), 모바일은 예전대로 한 줄씩 쌓는다.
+          🔴 `auto-fit` 이라 패널이 하나뿐이면 그 하나가 가로를 다 쓴다(반쪽 칸이 안 남는다). */}
+      <div style={wide
+        ? { display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(420px, 1fr))", gap:14, alignItems:"start" }
+        : { display:"flex", flexDirection:"column", gap:14 }}>
       {/* 일자별 막대 */}
       {byDate.length > 0 && (
         <div style={{ background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 10, overflow: "hidden" }}>
           <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--color-line-soft)", fontSize: 12, fontWeight: 700, color: "var(--color-label)" }}>
             📅 일자별 탑승 추이
           </div>
-          <div style={{ padding: "10px 14px", maxHeight: 220, overflowY: "auto" }}>
+          <div style={{ padding: "10px 14px", maxHeight: wide ? 320 : 220, overflowY: "auto" }}>
             {byDate.map(([d, c]) => (
               <div key={d} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
                 <span style={{ fontSize: 11, color: "var(--color-label-mute)", fontFamily: "var(--font-mono)", width: 80, flexShrink: 0 }}>
@@ -1679,7 +2051,7 @@ function BoardingStatsMode({ codeData, code, routes }) {
           <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--color-line-soft)", fontSize: 12, fontWeight: 700, color: "var(--color-label)" }}>
             👤 승객별 탑승 ({byEmployee.length}명)
           </div>
-          <div style={{ maxHeight: 280, overflowY: "auto" }}>
+          <div style={{ maxHeight: wide ? 420 : 280, overflowY: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr style={{ background: "var(--color-bg-alt)" }}>
@@ -1766,6 +2138,7 @@ function BoardingStatsMode({ codeData, code, routes }) {
           </div>
         );
       })()}
+      </div>
 
       {boardings.length === 0 && !loading && (
         <div style={{ textAlign: "center", padding: 32, color: "var(--color-label-mute)", fontSize: 13, background: "var(--color-bg-soft)", borderRadius: 10 }}>
@@ -1786,7 +2159,7 @@ function BoardingStatsMode({ codeData, code, routes }) {
 // — BoardingStatsMode·EmployeeManageMode 인프라(props codeData/code/routes) 재사용.
 // — onSnapshot deps에 wakeTick + recoverTick 포함(백그라운드/오프라인 복귀 자동 재구독).
 // ════════════════════════════════════════════════════════
-function OperationsMode({ codeData, code, routes }) {
+function OperationsMode({ codeData, code, routes, wide = false }) {
   const companyId = codeData?.companyId;
   const wakeTick = useWakeTick();
   const recoverTick = useOnlineRecover({ forceFirestoreReconnect: true });
@@ -2268,7 +2641,7 @@ function OperationsMode({ codeData, code, routes }) {
             표시할 노선이 없습니다
           </div>
         ) : (
-          <div style={{ height: "40vh", minHeight: 280, position: "relative" }}>
+          <div style={{ height: wide ? "56vh" : "40vh", minHeight: wide ? 420 : 280, position: "relative" }}>
             <KakaoMap key={routeFilter || "all"} center={mapCenter} style={{ width: "100%", height: "100%" }} level={routeFilter ? 6 : 9}
               onCreate={m => { m.relayout(); setTimeout(() => m.relayout(), 300); mapKeyRef.current++; }}>
               {/* 노선 폴리라인 */}
@@ -2342,6 +2715,12 @@ function OperationsMode({ codeData, code, routes }) {
         )}
       </div>
       )}
+
+      {/* PC 는 아래 네 판을 2열로 나란히 놓는다(가로를 채운다). 모바일은 예전대로 한 줄씩.
+          🔴 `auto-fit` 이라 노출 옵션이 꺼져 판이 하나만 남아도 그 하나가 가로를 다 쓴다. */}
+      <div style={wide
+        ? { display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(420px, 1fr))", gap:14, alignItems:"start" }
+        : { display:"flex", flexDirection:"column", gap:14 }}>
 
       {/* ── 섹션 B2: 차량 운행 현황 — 노선도(정류장 진행) (2026-07-16 회의 #3) ── */}
       {opsEnabled && (
@@ -2661,6 +3040,7 @@ function OperationsMode({ codeData, code, routes }) {
             );
           })}
         </div>
+      </div>
       </div>
     </div>
   );

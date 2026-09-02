@@ -20,3 +20,7 @@
 - 2026-09-01 11:02 | 🔴 BLOCK 40/41 — scripts/test_login_help.cjs | 3b2266e
 - 2026-09-01 11:03 | PASS 41/41 | 3b2266e
 - 2026-09-01 11:03 | PASS 41/41 | 3b2266e
+- 2026-09-02 07:58 | 🔴 BLOCK 42/43 — scripts/test_partner_route_order.cjs | 008743d
+- 2026-09-02 07:59 | PASS 43/43 | 008743d
+- 2026-09-02 08:09 | 🔴 BLOCK 42/43 — scripts/test_partner_wide_shell.cjs | 008743d
+- 2026-09-02 08:10 | PASS 43/43 | 008743d

@@ -109,9 +109,18 @@ eq("보이는 노선 수 유지(거래처 지정 ∪ 승객 배정)", shown.leng
 
 console.log("\n④ 고친 자리가 파일에 남아 있는가");
 const src = fs.readFileSync(path.join(ROOT, "src/pages/PartnerApp.js"), "utf8");
-ok("업체코드 인증 직후 `sortRoutes` 로 받는다",
-  /setRoutes\(sortRoutes\(/.test(src),
-  "setRoutes(sortRoutes(...)) 가 사라졌다 — 포털이 다시 문서 ID 순으로 돌아간다");
+// 🔴 2026-09-02: 노선 로드가 `fetchPartnerRoutes` 한 함수로 모였다(인증 직후 + 세션 복원이
+//    같은 것을 쓴다). 그래서 «`setRoutes(sortRoutes(` 라는 글자» 가 아니라 **관계**를 잰다 —
+//    ⓐ 로더가 정렬해서 돌려주는가 ⓑ 노선을 담는 모든 경로가 그 로더를 타는가.
+//    (리터럴로 잠그면 이런 리팩터마다 빨개지고, 진짜 결함은 못 잡는다.)
+const loader = (src.match(/async function fetchPartnerRoutes\([\s\S]*?\n\}/) || [""])[0];
+ok("노선 로더가 관리자 순서(sortRoutes)로 정렬해 돌려준다",
+  /return sortRoutes\(/.test(loader),
+  "fetchPartnerRoutes 가 정렬을 안 한다 — 포털이 다시 문서 ID 순으로 돌아간다");
+const setRoutesCalls = src.match(/setRoutes\([^)]*\)/g) || [];
+ok("노선을 담는 모든 경로가 그 로더를 탄다",
+  setRoutesCalls.length > 0 && setRoutesCalls.every(c => /await fetchPartnerRoutes\(|\brs\b|\[\]/.test(c)),
+  `정렬을 안 거친 setRoutes 가 있다 → ${JSON.stringify(setRoutesCalls)}`);
 ok("운영 포털 노선도에 출발시각 재정렬이 없다",
   !/list\.sort\(\(a, b\) => \(a\.departTime/.test(src),
   "departTime 재정렬이 되살아났다 — 관리자 순서를 다시 덮어쓴다");
