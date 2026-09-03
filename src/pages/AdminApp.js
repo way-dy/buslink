@@ -4887,13 +4887,11 @@ function BoardingStatsTab({ companyId, allowed }) {
                       {routeGroups.map(g => (
                         <tbody key={g.routeId || g.routeName}>
                           <tr>
-                            <td colSpan={4} style={stopGroupHead}>
-                              <span style={{ fontWeight: 800, color: "var(--color-label)" }}>🛣 {g.routeName}</span>
-                              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--color-label-mute)" }}>
-                                정류장 {g.stops.length}{g.routeStopCount > 0 ? `/${g.routeStopCount}` : ""}곳
-                                {" · "}
-                                <span style={{ color: "var(--color-primary)", fontWeight: 800 }}>{g.total}건</span>
-                              </span>
+                            <td style={{ ...stopGroupHead, textAlign: "center" }}>🛣</td>
+                            <td style={{ ...stopGroupHead, fontWeight: 800, color: "var(--color-label)" }}>{g.routeName}</td>
+                            <td style={{ ...stopGroupHead, textAlign: "right", fontWeight: 800, color: "var(--color-primary)" }}>{g.total}건</td>
+                            <td style={{ ...stopGroupHead, textAlign: "right", fontSize: 11, fontWeight: 600, color: "var(--color-label-mute)" }}>
+                              정류장 {g.stops.length}{g.routeStopCount > 0 ? `/${g.routeStopCount}` : ""}곳
                             </td>
                           </tr>
                           {g.stops.map(m => (
@@ -5029,7 +5027,8 @@ const statUnit = { fontSize: 13, fontWeight: 600, color: "var(--color-label-mute
 const statSub = { fontSize: 11, color: "var(--color-label-alt)", marginTop: 2 };
 const panelBox = { background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.03)" };
 // 정류장별 탑승 — 노선 구분 머리줄 / 노선 내 정류장 순번 배지
-const stopGroupHead = { padding: "8px 16px", background: "var(--color-bg-soft)", borderTop: "1px solid var(--color-line)", borderBottom: "1px solid var(--color-line-soft)", fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" };
+// 🔴 `display:flex` 를 주지 말 것 — td 가 table-cell 을 벗어나면 열 정렬도 colSpan 도 죽는다(2026-09-03 실측).
+const stopGroupHead = { padding: "9px 16px", background: "var(--color-bg-soft)", borderTop: "1px solid var(--color-line)", borderBottom: "1px solid var(--color-line-soft)", fontSize: 13, whiteSpace: "nowrap", verticalAlign: "middle" };
 const stopSeqBadge = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: "50%", background: "var(--color-primary-soft)", border: "1px solid var(--color-primary)", color: "var(--color-primary-deep)", fontSize: 11, fontWeight: 700, fontFamily: "var(--font-mono)" };
 const panelHead = { padding: "12px 16px", fontWeight: 700, fontSize: 13, color: "var(--color-label)", borderBottom: "1px solid var(--color-bg-soft)", background: "var(--color-bg-alt)" };
 

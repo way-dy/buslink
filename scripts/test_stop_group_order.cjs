@@ -62,6 +62,8 @@ console.log("\n[2] 노선끼리는 섞이지 않는다 · 그룹은 합계 내�
   ok("rA 안은 s1→s3(운행 순서 유지)", g[1].stops.map(s => s.stopId).join(",") === "s1,s3", g[1].stops.map(s => s.stopId));
   ok("rA 순번은 1,3 — 건너뛴 s2 가 보인다", g[1].stops.map(s => s.seq).join(",") === "1,3", g[1].stops.map(s => s.seq));
   ok("노선 전체 정류장 수 노출", g[1].routeStopCount === 3 && g[0].routeStopCount === 2);
+  ok("🔴 노선 소계 = 그 노선 정류장 합", g[0].total === g[0].stops.reduce((a, s) => a + s.count, 0), g[0].total);
+  ok("🔴 소계 총합 = 전체 매핑 건수", g.reduce((a, x) => a + x.total, 0) === 13, g.map(x => x.total));
 }
 
 console.log("\n[3] 🔴 순번을 모르는 정류장도 버리지 않는다 — 그룹 맨 뒤로만 간다");
@@ -90,6 +92,22 @@ console.log("\n[4] stops 미로드(노선 정류장 못 읽음)여도 그룹은 
   ok("그룹 1개·2건", g.length === 1 && g[0].total === 2, g);
   ok("routeStopCount=0(모름)", g[0].routeStopCount === 0);
   ok("seq=null 이어도 표시 가능", g[0].stops[0].seq === null);
+}
+
+console.log("\n[5] 🔴 소스 가드 — 노선 머리줄을 한 칸에 몰지 않는다");
+{
+  // 2026-09-03 실측 회귀: 머리줄을 `<td colSpan={4} style={{ ..., display:"flex" }}>` 로 만들었더니
+  // td 가 table-cell 을 벗어나 colSpan 이 무효화되고, 머리줄이 첫 열(52px) 안으로 접혔다.
+  // 노선명이 세로로 쌓이고 소계가 «탑승» 열에서 벗어난다 — 눈으로만 잡히는 종류라 소스로 잠근다.
+  const HEAD_RE = /^const (stopGroupHead|pStopGroupHead) = /;
+  for (const f of ["src/pages/AdminApp.js", "src/pages/PartnerApp.js"]) {
+    const t = fs.readFileSync(path.join(__dirname, "..", f), "utf8");
+    const head = t.split(/\r?\n/).filter(l => HEAD_RE.test(l));
+    ok(f + " — 머리줄 스타일 상수 1개", head.length === 1, head);
+    ok(f + " — 머리줄에 display:flex 없음", !/display:\s*"flex"/.test(head[0] || ""), head[0]);
+    ok(f + " — 노선 소계(g.total)를 «탑승» 열에 표시", t.includes("{g.total}"), null);
+    ok(f + " — 머리줄을 colSpan 한 칸에 몰지 않음", !/colSpan=\{4\}/.test(t), null);
+  }
 }
 
 console.log(`\n결과: ✅ ${pass} / ❌ ${fail}`);

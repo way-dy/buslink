@@ -2119,12 +2119,12 @@ function BoardingStatsMode({ codeData, code, routes, wide = false }) {
                 {routeGroups.map(g => (
                   <tbody key={g.routeId || g.routeName}>
                     <tr>
-                      <td colSpan={4} style={{ padding: "7px 10px", background: "var(--color-bg-soft)", borderTop: "1px solid var(--color-line)", borderBottom: "1px solid var(--color-line-soft)", fontSize: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                        <span style={{ fontWeight: 800 }}>🛣 {g.routeName}</span>
-                        <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-label-mute)" }}>
-                          정류장 {g.stops.length}{g.routeStopCount > 0 ? `/${g.routeStopCount}` : ""}곳 ·{" "}
-                          <span style={{ color: "var(--color-primary)", fontWeight: 800 }}>{g.total}건</span>
-                        </span>
+                      {/* 🔴 display:flex 를 주지 말 것 — td 가 table-cell 을 벗어나면 열 정렬이 죽는다. */}
+                      <td style={{ ...pStopGroupHead, textAlign: "center" }}>🛣</td>
+                      <td style={{ ...pStopGroupHead, fontWeight: 800 }}>{g.routeName}</td>
+                      <td style={{ ...pStopGroupHead, textAlign: "right", fontWeight: 800, color: "var(--color-primary)" }}>{g.total}</td>
+                      <td style={{ ...pStopGroupHead, textAlign: "right", fontSize: 10, fontWeight: 600, color: "var(--color-label-mute)" }}>
+                        {g.stops.length}{g.routeStopCount > 0 ? `/${g.routeStopCount}` : ""}곳
                       </td>
                     </tr>
                     {g.stops.map(m => (
@@ -3058,3 +3058,6 @@ function OperationsMode({ codeData, code, routes, wide = false }) {
     </div>
   );
 }
+
+// 협력사 포털 «노선별 정류장 탑승» 머리줄 — 🔴 display:flex 금지(td 가 table-cell 을 벗어나면 열 정렬이 죽는다).
+const pStopGroupHead = { padding: "7px 10px", background: "var(--color-bg-soft)", borderTop: "1px solid var(--color-line)", borderBottom: "1px solid var(--color-line-soft)", fontSize: 12, whiteSpace: "nowrap", verticalAlign: "middle" };
