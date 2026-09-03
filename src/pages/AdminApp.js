@@ -4690,6 +4690,8 @@ function BoardingStatsTab({ companyId, allowed }) {
   const [search, setSearch] = useState("");
   // 정류장별 GPS 매핑용 — boardings에 등장한 routeId의 stops를 lazy 로드.
   const [stopsByRoute, setStopsByRoute] = useState({});
+  // 정류장 행을 눌러 «그 정류장에서 누가 탔나»를 펼친다(2026-09-03). 키 = `${routeId}::${stopId}`.
+  const [openStop, setOpenStop] = useState(null);
 
   // 선택 날짜 탑승 기록 실시간 구독
   useEffect(() => {
@@ -4894,18 +4896,59 @@ function BoardingStatsTab({ companyId, allowed }) {
                               정류장 {g.stops.length}{g.routeStopCount > 0 ? `/${g.routeStopCount}` : ""}곳
                             </td>
                           </tr>
-                          {g.stops.map(m => (
-                            <tr key={m.stopId} style={S.tr}>
-                              <td style={{ ...S.td, textAlign: "center" }}>
-                                <span style={stopSeqBadge}>{m.seq != null ? m.seq : "–"}</span>
-                              </td>
-                              <td style={{ ...S.td, fontWeight: 700 }}>{m.stopName}</td>
-                              <td style={{ ...S.td, textAlign: "right", fontWeight: 800, color: "var(--color-primary)" }}>{m.count}건</td>
-                              <td style={{ ...S.td, fontSize: 11, color: "var(--color-label-mute)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
-                                {m.minDist != null ? `${Math.round(m.minDist)}m` : "–"}
-                              </td>
-                            </tr>
-                          ))}
+                          {g.stops.flatMap(m => {
+                            const k = `${g.routeId || "_unknown"}::${m.stopId}`;
+                            const open = openStop === k;
+                            const rows = [(
+                              <tr key={k} style={{ ...S.tr, cursor: "pointer", background: open ? "var(--color-primary-soft)" : undefined }}
+                                onClick={() => setOpenStop(open ? null : k)}
+                                title="클릭하면 이 정류장에서 탄 사람 명단">
+                                <td style={{ ...S.td, textAlign: "center" }}>
+                                  <span style={stopSeqBadge}>{m.seq != null ? m.seq : "–"}</span>
+                                </td>
+                                <td style={{ ...S.td, fontWeight: 700 }}>
+                                  <span style={{ color: "var(--color-label-mute)", marginRight: 6, fontSize: 11 }}>{open ? "▾" : "▸"}</span>
+                                  {m.stopName}
+                                </td>
+                                <td style={{ ...S.td, textAlign: "right", fontWeight: 800, color: "var(--color-primary)" }}>{m.count}건</td>
+                                <td style={{ ...S.td, fontSize: 11, color: "var(--color-label-mute)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
+                                  {m.minDist != null ? `${Math.round(m.minDist)}m` : "–"}
+                                </td>
+                              </tr>
+                            )];
+                            if (open) {
+                              // 집계와 같은 원본(items)을 쓴다 — 명단을 따로 필터링하면 합계와 어긋난다.
+                              const list = [...(m.items || [])].sort((a, b) =>
+                                (a.boardedAt?.toMillis?.() || 0) - (b.boardedAt?.toMillis?.() || 0));
+                              rows.push(
+                                <tr key={k + "::detail"}>
+                                  <td colSpan={4} style={stopDetailCell}>
+                                    <table style={S.table}>
+                                      <thead>
+                                        <tr>{["시각", "사번", "이름", "협력사", "차량"].map(h => (
+                                          <th key={h} style={{ ...S.th, fontSize: 10 }}>{h}</th>
+                                        ))}</tr>
+                                      </thead>
+                                      <tbody>
+                                        {list.map(b => (
+                                          <tr key={b.id} style={S.tr}>
+                                            <td style={{ ...S.td, fontFamily: "var(--font-mono)", fontSize: 11 }}>{fmtTime(b.boardedAt)}</td>
+                                            <td style={{ ...S.td, fontFamily: "var(--font-mono)", fontSize: 11 }}>{b.empNo}</td>
+                                            <td style={{ ...S.td, fontWeight: 700, fontSize: 12 }}>{b.name || "–"}</td>
+                                            <td style={{ ...S.td, fontSize: 11, color: "var(--color-label-mute)" }}>
+                                              {b.partnerCode ? partnerNameOf(b.partnerCode) : "미지정"}
+                                            </td>
+                                            <td style={{ ...S.td, fontFamily: "var(--font-mono)", fontSize: 11 }}>{b.vehicleNo || "–"}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </td>
+                                </tr>
+                              );
+                            }
+                            return rows;
+                          })}
                         </tbody>
                       ))}
                     </table>
@@ -5029,6 +5072,8 @@ const panelBox = { background: "var(--color-bg)", border: "1px solid var(--color
 // 정류장별 탑승 — 노선 구분 머리줄 / 노선 내 정류장 순번 배지
 // 🔴 `display:flex` 를 주지 말 것 — td 가 table-cell 을 벗어나면 열 정렬도 colSpan 도 죽는다(2026-09-03 실측).
 const stopGroupHead = { padding: "9px 16px", background: "var(--color-bg-soft)", borderTop: "1px solid var(--color-line)", borderBottom: "1px solid var(--color-line-soft)", fontSize: 13, whiteSpace: "nowrap", verticalAlign: "middle" };
+// 펼친 정류장의 탑승자 명단이 들어가는 칸 — 🔴 여기 colSpan 은 정상이다(머리줄과 달리 flex 를 안 쓴다).
+const stopDetailCell = { padding: "0 0 0 52px", background: "var(--color-bg-alt)", borderBottom: "1px solid var(--color-line)" };
 const stopSeqBadge = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: "50%", background: "var(--color-primary-soft)", border: "1px solid var(--color-primary)", color: "var(--color-primary-deep)", fontSize: 11, fontWeight: 700, fontFamily: "var(--font-mono)" };
 const panelHead = { padding: "12px 16px", fontWeight: 700, fontSize: 13, color: "var(--color-label)", borderBottom: "1px solid var(--color-bg-soft)", background: "var(--color-bg-alt)" };
 

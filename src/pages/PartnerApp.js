@@ -1845,6 +1845,8 @@ function BoardingStatsMode({ codeData, code, routes, wide = false }) {
   const [error, setError] = useState("");
   // 정류장별 GPS 매핑용 — boardings 에 등장한 routeId의 stops를 lazy 로드
   const [stopsByRoute, setStopsByRoute] = useState({});
+  // 정류장 행을 눌러 «그 정류장에서 누가 탔나»를 펼친다(2026-09-03). 관리자 탑승 통계와 같은 동작.
+  const [openStop, setOpenStop] = useState(null);
 
   // 협력사 직원 empNo 세트 로드 (legacy boarding 매칭용)
   useEffect(() => {
@@ -2127,16 +2129,49 @@ function BoardingStatsMode({ codeData, code, routes, wide = false }) {
                         {g.stops.length}{g.routeStopCount > 0 ? `/${g.routeStopCount}` : ""}곳
                       </td>
                     </tr>
-                    {g.stops.map(m => (
-                      <tr key={m.stopId} style={{ borderTop: "1px solid var(--color-line-soft)" }}>
-                        <td style={{ padding: "6px 10px", textAlign: "center", fontSize: 11, fontWeight: 700, color: "var(--color-primary-deep)", fontFamily: "var(--font-mono)" }}>{m.seq != null ? m.seq : "–"}</td>
-                        <td style={{ padding: "6px 10px", fontWeight: 700 }}>{m.stopName}</td>
-                        <td style={{ padding: "6px 10px", fontWeight: 800, color: "var(--color-primary)", textAlign: "right" }}>{m.count}</td>
-                        <td style={{ padding: "6px 10px", fontSize: 10, color: "var(--color-label-mute)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
-                          {m.minDist != null ? `${Math.round(m.minDist)}m` : "–"}
-                        </td>
-                      </tr>
-                    ))}
+                    {g.stops.flatMap(m => {
+                      const k = `${g.routeId || "_unknown"}::${m.stopId}`;
+                      const open = openStop === k;
+                      const rows = [(
+                        <tr key={k} style={{ borderTop: "1px solid var(--color-line-soft)", cursor: "pointer", background: open ? "var(--color-primary-soft)" : undefined }}
+                          onClick={() => setOpenStop(open ? null : k)}
+                          title="클릭하면 이 정류장에서 탄 사람 명단">
+                          <td style={{ padding: "6px 10px", textAlign: "center", fontSize: 11, fontWeight: 700, color: "var(--color-primary-deep)", fontFamily: "var(--font-mono)" }}>{m.seq != null ? m.seq : "–"}</td>
+                          <td style={{ padding: "6px 10px", fontWeight: 700 }}>
+                            <span style={{ color: "var(--color-label-mute)", marginRight: 5, fontSize: 10 }}>{open ? "▾" : "▸"}</span>
+                            {m.stopName}
+                          </td>
+                          <td style={{ padding: "6px 10px", fontWeight: 800, color: "var(--color-primary)", textAlign: "right" }}>{m.count}</td>
+                          <td style={{ padding: "6px 10px", fontSize: 10, color: "var(--color-label-mute)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
+                            {m.minDist != null ? `${Math.round(m.minDist)}m` : "–"}
+                          </td>
+                        </tr>
+                      )];
+                      if (open) {
+                        // 집계와 같은 원본(items)을 쓴다 — 명단을 따로 필터링하면 합계와 어긋난다.
+                        const list = [...(m.items || [])].sort((a, b) =>
+                          (a.boardedAt?.toMillis?.() || 0) - (b.boardedAt?.toMillis?.() || 0));
+                        rows.push(
+                          <tr key={k + "::detail"}>
+                            <td colSpan={4} style={{ padding: "0 0 0 34px", background: "var(--color-bg-alt)", borderTop: "1px solid var(--color-line-soft)" }}>
+                              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                                <tbody>
+                                  {list.map(b => (
+                                    <tr key={b.id} style={{ borderTop: "1px solid var(--color-line-soft)" }}>
+                                      <td style={{ padding: "5px 8px", fontFamily: "var(--font-mono)", color: "var(--color-label-mute)", width: 70 }}>{fmtBoardTime(b.boardedAt)}</td>
+                                      <td style={{ padding: "5px 8px", fontFamily: "var(--font-mono)", color: "var(--color-label-mute)" }}>{b.empNo}</td>
+                                      <td style={{ padding: "5px 8px", fontWeight: 700 }}>{b.name || "–"}</td>
+                                      <td style={{ padding: "5px 8px", fontFamily: "var(--font-mono)", color: "var(--color-label-mute)", textAlign: "right" }}>{b.vehicleNo || "–"}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </td>
+                          </tr>
+                        );
+                      }
+                      return rows;
+                    })}
                   </tbody>
                 ))}
               </table>
@@ -3061,3 +3096,10 @@ function OperationsMode({ codeData, code, routes, wide = false }) {
 
 // 협력사 포털 «노선별 정류장 탑승» 머리줄 — 🔴 display:flex 금지(td 가 table-cell 을 벗어나면 열 정렬이 죽는다).
 const pStopGroupHead = { padding: "7px 10px", background: "var(--color-bg-soft)", borderTop: "1px solid var(--color-line)", borderBottom: "1px solid var(--color-line-soft)", fontSize: 12, whiteSpace: "nowrap", verticalAlign: "middle" };
+
+// 탑승 시각 표기 — 관리자 탑승 통계(AdminApp fmtTime)와 같은 규칙.
+function fmtBoardTime(ts) {
+  if (!ts) return "–";
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}

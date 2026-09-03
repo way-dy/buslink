@@ -94,7 +94,28 @@ console.log("\n[4] stops 미로드(노선 정류장 못 읽음)여도 그룹은 
   ok("seq=null 이어도 표시 가능", g[0].stops[0].seq === null);
 }
 
-console.log("\n[5] 🔴 소스 가드 — 노선 머리줄을 한 칸에 몰지 않는다");
+console.log("\n[5] 🔴 펼침 명단(items) 은 집계와 같은 원본이어야 한다");
+{
+  // 정류장을 눌러 보여주는 «누가 탔나»가 집계 숫자와 어긋나면 화면이 스스로를 반박한다.
+  const p1 = { empNo: "A1", routeId: "rA", routeName: "06:48 광명", vehicleLat: STOPS.rA[1].lat, vehicleLng: STOPS.rA[1].lng };
+  const p2 = { empNo: "A2", routeId: "rA", routeName: "06:48 광명", vehicleLat: STOPS.rA[1].lat, vehicleLng: STOPS.rA[1].lng };
+  const p3 = { empNo: "B1", routeId: "rB", routeName: "06:55 행신", vehicleLat: STOPS.rB[0].lat, vehicleLng: STOPS.rB[0].lng };
+  const { mapped } = aggregateBoardingsByStop([p1, p2, p3], STOPS, 300);
+  const g = groupMappedByRoute(mapped, STOPS);
+  const all = g.flatMap(x => x.stops);
+  ok("모든 정류장에서 items.length === count", all.every(m => (m.items || []).length === m.count), all.map(m => [m.stopName, m.count, (m.items || []).length]));
+  const s2 = all.find(m => m.stopId === "s2");
+  ok("s2 명단이 실제 그 사람들", s2.items.map(b => b.empNo).sort().join(",") === "A1,A2", s2.items.map(b => b.empNo));
+  ok("🔴 다른 노선 사람이 섞이지 않는다", !s2.items.some(b => b.routeId !== "rA"), s2.items.map(b => b.routeId));
+  // GPS 없음/임계 초과는 어느 명단에도 들어가면 안 된다(집계에서 뺀 건을 명단이 되살리면 안 맞는다).
+  const far = { empNo: "Z", routeId: "rA", routeName: "06:48 광명", vehicleLat: 38.9, vehicleLng: 127.9 };
+  const noGpsB = { empNo: "Y", routeId: "rA", routeName: "06:48 광명" };
+  const r2 = aggregateBoardingsByStop([p1, far, noGpsB], STOPS, 300);
+  ok("임계 초과 1 · GPS 없음 1", r2.unmapped === 1 && r2.noGps === 1, [r2.unmapped, r2.noGps]);
+  ok("🔴 제외된 건은 명단에도 없다", r2.mapped.flatMap(m => m.items).every(b => b.empNo === "A1"), r2.mapped.flatMap(m => m.items.map(b => b.empNo)));
+}
+
+console.log("\n[6] 🔴 소스 가드 — 노선 머리줄을 한 칸에 몰지 않는다 · 정류장 행은 펼쳐진다");
 {
   // 2026-09-03 실측 회귀: 머리줄을 `<td colSpan={4} style={{ ..., display:"flex" }}>` 로 만들었더니
   // td 가 table-cell 을 벗어나 colSpan 이 무효화되고, 머리줄이 첫 열(52px) 안으로 접혔다.
@@ -106,7 +127,15 @@ console.log("\n[5] 🔴 소스 가드 — 노선 머리줄을 한 칸에 몰지 
     ok(f + " — 머리줄 스타일 상수 1개", head.length === 1, head);
     ok(f + " — 머리줄에 display:flex 없음", !/display:\s*"flex"/.test(head[0] || ""), head[0]);
     ok(f + " — 노선 소계(g.total)를 «탑승» 열에 표시", t.includes("{g.total}"), null);
-    ok(f + " — 머리줄을 colSpan 한 칸에 몰지 않음", !/colSpan=\{4\}/.test(t), null);
+    // 머리줄은 4칸(순번·노선명·소계·정류장수)이어야 한다 — 한 칸에 몰면 이 spread 가 줄어든다.
+    const cells = (t.match(/\.\.\.(stopGroupHead|pStopGroupHead)/g) || []).length;
+    ok(f + " — 머리줄이 컬럼에 맞춘 4칸", cells === 4, cells);
+    // 🔴 colSpan 자체는 정당하다(펼친 탑승자 명단 행). 금지 대상은 «colSpan + flex» 조합뿐이다.
+    ok(f + " — colSpan td 에 display:flex 없음",
+      !/<td[^>]*colSpan=\{[0-9]+\}[^>]*display:\s*"flex"/.test(t), null);
+    // 정류장 행은 눌러서 명단을 펼친다 — onClick 과 items 사용이 둘 다 있어야 한다.
+    ok(f + " — 정류장 행에 setOpenStop 배선", /onClick=\{\(\) => setOpenStop\(/.test(t), null);
+    ok(f + " — 명단은 집계 원본(m.items)을 쓴다", t.includes("m.items"), null);
   }
 }
 

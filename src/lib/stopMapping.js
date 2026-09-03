@@ -4,7 +4,8 @@
 //     좌표가 maxMeters 초과면 null(미매핑) — 정밀성 보존.
 //   - aggregateBoardingsByStop(boardings, stopsByRoute, maxMeters):
 //     boardings 배열 → routeId별 stops에 매핑 → 정류장별 카운트 집계.
-//     반환: { mapped: [{ routeId, routeName, stopId, stopName, stopOrder, count, minDist }], unmapped, noGps }
+//     반환: { mapped: [{ routeId, routeName, stopId, stopName, stopOrder, count, minDist, items }], unmapped, noGps }
+//     items = 그 정류장으로 판정된 boarding 원본들(화면에서 «누가 탔나»를 펼쳐 보여주는 근거).
 //   - groupMappedByRoute(mapped, stopsByRoute): mapped 를 노선 그룹으로 묶고
 //     **정류장을 버스가 지나는 순서대로** 정렬 + 노선 내 몇 번째 정류장인지(seq/routeStopCount) 부여.
 // 순수 함수, Firebase/외부 SDK import 없음. routeProgress.haversine 재사용.
@@ -42,8 +43,9 @@ export function aggregateBoardingsByStop(boardings, stopsByRoute, maxMeters = DE
       // 순번은 노선 stops 에서 되찾는다. 정류장 문서가 지워졌으면 null → 그룹 맨 뒤로.
       const cur = byKey.get(k) || { routeId: b.routeId, routeName: b.routeName || "노선 미지정",
         stopId: b.stopId, stopName: b.stopName, stopOrder: stopOrderOf(stops, b.stopId),
-        count: 0, minDist: null };
+        count: 0, minDist: null, items: [] };
       cur.count++;
+      cur.items.push(b);
       byKey.set(k, cur);
       continue;
     }
@@ -62,9 +64,10 @@ export function aggregateBoardingsByStop(boardings, stopsByRoute, maxMeters = DE
       routeId: b.routeId, routeName: b.routeName || "노선 미지정",
       stopId: match.stop.id, stopName: match.stop.name,
       stopOrder: typeof match.stop.order === "number" ? match.stop.order : null,
-      count: 0, minDist: match.distance,
+      count: 0, minDist: match.distance, items: [],
     };
     cur.count++;
+    cur.items.push(b);
     if (cur.minDist == null || match.distance < cur.minDist) cur.minDist = match.distance;
     byKey.set(k, cur);
   }
