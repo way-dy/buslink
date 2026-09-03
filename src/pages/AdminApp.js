@@ -39,7 +39,7 @@ import { loadSeenMap, markSeen, isUnread } from "../lib/improvementSeen";
 import { sanitizeContentHtml, looksLikeHtml, htmlToPlainText, htmlByteSize, contentHasImage } from "../lib/richText";
 import RichTextEditor from "../components/RichTextEditor";
 import { planTimeForStop, offsetMinFromPlanTime, computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
-import { aggregateBoardingsByStop } from "../lib/stopMapping";
+import { aggregateBoardingsByStop, groupMappedByRoute } from "../lib/stopMapping";
 // 리디자인 3단계 — 실시간 관제(MapTab) 라이트 리스킨 전용. 타 탭 미사용.
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 // 협력사 필터 공통 컴포넌트 — 다수 탭에서 재사용
@@ -4861,9 +4861,12 @@ function BoardingStatsTab({ companyId, allowed }) {
 
           {/* 정류장별 GPS 매핑 집계 */}
           <div style={panelBox}>
-            <div style={panelHead}>📍 정류장별 탑승 <span style={{ fontSize: 11, fontWeight: 600, color: "var(--color-label-mute)", marginLeft: 6 }}>(GPS 매핑·반경 300m)</span></div>
+            <div style={panelHead}>📍 노선별 정류장 탑승 <span style={{ fontSize: 11, fontWeight: 600, color: "var(--color-label-mute)", marginLeft: 6 }}>(GPS 매핑·반경 300m · 운행 순서)</span></div>
             {(() => {
               const { mapped, unmapped, noGps } = aggregateBoardingsByStop(filtered, stopsByRoute, 300);
+              // 노선으로 묶고 그 안은 버스가 지나는 순서 — 탑승수 내림차순 한 줄 나열은
+              // 노선이 뒤섞여 «어느 구간에서 사람이 타는가»를 못 읽는다(2026-09-03).
+              const routeGroups = groupMappedByRoute(mapped, stopsByRoute);
               if (mapped.length === 0 && unmapped === 0 && noGps === 0) {
                 return <div style={{ ...S.empty, padding: 24 }}>매핑 가능한 데이터 없음</div>;
               }
@@ -4874,22 +4877,39 @@ function BoardingStatsTab({ companyId, allowed }) {
                   ) : (
                     <table style={S.table}>
                       <thead>
-                        <tr>{["노선", "정류장", "탑승", "근접 거리"].map(h => (
-                          <th key={h} style={S.th}>{h}</th>
-                        ))}</tr>
+                        <tr>
+                          <th style={{ ...S.th, width: 52, textAlign: "center" }}>순번</th>
+                          <th style={S.th}>정류장</th>
+                          <th style={{ ...S.th, textAlign: "right" }}>탑승</th>
+                          <th style={{ ...S.th, textAlign: "right" }}>근접 거리</th>
+                        </tr>
                       </thead>
-                      <tbody>
-                        {mapped.map((m, i) => (
-                          <tr key={i} style={S.tr}>
-                            <td style={{ ...S.td, color: "var(--color-label-mute)" }}>{m.routeName}</td>
-                            <td style={{ ...S.td, fontWeight: 700 }}>{m.stopName}</td>
-                            <td style={{ ...S.td, textAlign: "right", fontWeight: 800, color: "var(--color-primary)" }}>{m.count}건</td>
-                            <td style={{ ...S.td, fontSize: 11, color: "var(--color-label-mute)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
-                              {m.minDist != null ? `${Math.round(m.minDist)}m` : "–"}
+                      {routeGroups.map(g => (
+                        <tbody key={g.routeId || g.routeName}>
+                          <tr>
+                            <td colSpan={4} style={stopGroupHead}>
+                              <span style={{ fontWeight: 800, color: "var(--color-label)" }}>🛣 {g.routeName}</span>
+                              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--color-label-mute)" }}>
+                                정류장 {g.stops.length}{g.routeStopCount > 0 ? `/${g.routeStopCount}` : ""}곳
+                                {" · "}
+                                <span style={{ color: "var(--color-primary)", fontWeight: 800 }}>{g.total}건</span>
+                              </span>
                             </td>
                           </tr>
-                        ))}
-                      </tbody>
+                          {g.stops.map(m => (
+                            <tr key={m.stopId} style={S.tr}>
+                              <td style={{ ...S.td, textAlign: "center" }}>
+                                <span style={stopSeqBadge}>{m.seq != null ? m.seq : "–"}</span>
+                              </td>
+                              <td style={{ ...S.td, fontWeight: 700 }}>{m.stopName}</td>
+                              <td style={{ ...S.td, textAlign: "right", fontWeight: 800, color: "var(--color-primary)" }}>{m.count}건</td>
+                              <td style={{ ...S.td, fontSize: 11, color: "var(--color-label-mute)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
+                                {m.minDist != null ? `${Math.round(m.minDist)}m` : "–"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      ))}
                     </table>
                   )}
                   {(unmapped > 0 || noGps > 0) && (
@@ -5008,6 +5028,9 @@ const statValue = { fontSize: 28, fontWeight: 800, marginTop: 4, fontFamily: "va
 const statUnit = { fontSize: 13, fontWeight: 600, color: "var(--color-label-mute)", marginLeft: 4 };
 const statSub = { fontSize: 11, color: "var(--color-label-alt)", marginTop: 2 };
 const panelBox = { background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.03)" };
+// 정류장별 탑승 — 노선 구분 머리줄 / 노선 내 정류장 순번 배지
+const stopGroupHead = { padding: "8px 16px", background: "var(--color-bg-soft)", borderTop: "1px solid var(--color-line)", borderBottom: "1px solid var(--color-line-soft)", fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" };
+const stopSeqBadge = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: "50%", background: "var(--color-primary-soft)", border: "1px solid var(--color-primary)", color: "var(--color-primary-deep)", fontSize: 11, fontWeight: 700, fontFamily: "var(--font-mono)" };
 const panelHead = { padding: "12px 16px", fontWeight: 700, fontSize: 13, color: "var(--color-label)", borderBottom: "1px solid var(--color-bg-soft)", background: "var(--color-bg-alt)" };
 
 // ═══════════════════════════════════════════════════════

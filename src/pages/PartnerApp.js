@@ -16,7 +16,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { BusLinkLogo, Pill, Icon } from "../components/ui";
 import InstallPrompt from "../components/InstallPrompt";
 import { applyAppManifest } from "../lib/pwaManifest";
-import { aggregateBoardingsByStop } from "../lib/stopMapping";
+import { aggregateBoardingsByStop, groupMappedByRoute } from "../lib/stopMapping";
 // Phase 1.3 (2026-05-28): mainTab="ops" 운영 포털 — 실시간 버스 위치 지도.
 // 카카오 SDK import — react-kakao-maps-sdk의 `Map`이 native `Map` 클래스를 shadow하므로
 // 이 파일 내에서 `new Map()` 쓸 일 있으면 반드시 `new window.Map()`(issues.md `[패턴]`).
@@ -2096,10 +2096,12 @@ function BoardingStatsMode({ codeData, code, routes, wide = false }) {
       {boardings.length > 0 && (() => {
         const { mapped, unmapped, noGps } = aggregateBoardingsByStop(boardings, stopsByRoute, 300);
         if (mapped.length === 0 && noGps === boardings.length) return null; // 전부 legacy → 미표시
+        // 노선 그룹 + 노선 내 운행 순서(관리자 탑승 통계와 같은 규칙, 2026-09-03).
+        const routeGroups = groupMappedByRoute(mapped, stopsByRoute);
         return (
           <div style={{ background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 10, overflow: "hidden" }}>
             <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--color-line-soft)", fontSize: 12, fontWeight: 700, color: "var(--color-label)" }}>
-              📍 정류장별 탑승 <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-label-mute)", marginLeft: 4 }}>(GPS·반경 300m)</span>
+              📍 노선별 정류장 탑승 <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-label-mute)", marginLeft: 4 }}>(GPS·반경 300m · 운행 순서)</span>
             </div>
             {mapped.length === 0 ? (
               <div style={{ padding: 20, fontSize: 12, color: "var(--color-label-alt)", textAlign: "center" }}>
@@ -2109,23 +2111,34 @@ function BoardingStatsMode({ codeData, code, routes, wide = false }) {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: "var(--color-bg-alt)" }}>
-                    {["노선", "정류장", "탑승", "거리"].map(h => (
-                      <th key={h} style={{ padding: "6px 10px", textAlign: h === "탑승" || h === "거리" ? "right" : "left", color: "var(--color-label-mute)", fontWeight: 700, fontSize: 11 }}>{h}</th>
+                    {["순번", "정류장", "탑승", "거리"].map(h => (
+                      <th key={h} style={{ padding: "6px 10px", textAlign: h === "정류장" ? "left" : (h === "순번" ? "center" : "right"), color: "var(--color-label-mute)", fontWeight: 700, fontSize: 11 }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
-                <tbody>
-                  {mapped.map((m, i) => (
-                    <tr key={i} style={{ borderTop: "1px solid var(--color-line-soft)" }}>
-                      <td style={{ padding: "6px 10px", color: "var(--color-label-mute)" }}>{m.routeName}</td>
-                      <td style={{ padding: "6px 10px", fontWeight: 700 }}>{m.stopName}</td>
-                      <td style={{ padding: "6px 10px", fontWeight: 800, color: "var(--color-primary)", textAlign: "right" }}>{m.count}</td>
-                      <td style={{ padding: "6px 10px", fontSize: 10, color: "var(--color-label-mute)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
-                        {m.minDist != null ? `${Math.round(m.minDist)}m` : "–"}
+                {routeGroups.map(g => (
+                  <tbody key={g.routeId || g.routeName}>
+                    <tr>
+                      <td colSpan={4} style={{ padding: "7px 10px", background: "var(--color-bg-soft)", borderTop: "1px solid var(--color-line)", borderBottom: "1px solid var(--color-line-soft)", fontSize: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontWeight: 800 }}>🛣 {g.routeName}</span>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-label-mute)" }}>
+                          정류장 {g.stops.length}{g.routeStopCount > 0 ? `/${g.routeStopCount}` : ""}곳 ·{" "}
+                          <span style={{ color: "var(--color-primary)", fontWeight: 800 }}>{g.total}건</span>
+                        </span>
                       </td>
                     </tr>
-                  ))}
-                </tbody>
+                    {g.stops.map(m => (
+                      <tr key={m.stopId} style={{ borderTop: "1px solid var(--color-line-soft)" }}>
+                        <td style={{ padding: "6px 10px", textAlign: "center", fontSize: 11, fontWeight: 700, color: "var(--color-primary-deep)", fontFamily: "var(--font-mono)" }}>{m.seq != null ? m.seq : "–"}</td>
+                        <td style={{ padding: "6px 10px", fontWeight: 700 }}>{m.stopName}</td>
+                        <td style={{ padding: "6px 10px", fontWeight: 800, color: "var(--color-primary)", textAlign: "right" }}>{m.count}</td>
+                        <td style={{ padding: "6px 10px", fontSize: 10, color: "var(--color-label-mute)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
+                          {m.minDist != null ? `${Math.round(m.minDist)}m` : "–"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                ))}
               </table>
             )}
             {(unmapped > 0 || noGps > 0) && (
