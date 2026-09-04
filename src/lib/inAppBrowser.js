@@ -91,7 +91,29 @@ export function withExternalBrowserParam(url) {
 }
 
 /**
- * 지금 주소를 일반 브라우저에서 다시 열 URL. 탈출 수단이 없으면 null.
+ * 안드로이드 전용 — 크롬으로 직행하는 intent URL. 만들 수 없으면 null.
+ * 웹뷰가 `intent:` 를 **OS 로 넘겨** 버리므로 인앱 브라우저가 붙잡지 못한다.
+ * `S.browser_fallback_url` 에 파라미터 URL 을 실어, 크롬이 없는 기기에서도 죽지 않게 한다.
+ * ⚠ «#Intent» 가 프래그먼트 자리를 쓰므로 원래 해시는 버린다(이 앱은 해시 라우팅을 쓰지 않는다).
+ */
+function buildIntentUrl(href) {
+  const m = /^https?:\/\/(.+)$/i.exec(String(href == null ? "" : href));
+  if (!m) return null;
+  const noHash = m[1].split("#")[0];
+  const fallback = encodeURIComponent(withExternalBrowserParam(href));
+  return "intent://" + noHash
+    + "#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=" + fallback + ";end";
+}
+
+/**
+ * 지금 주소를 일반 브라우저에서 다시 열 **첫 번째** 수단. 없으면 null.
+ *
+ * 🔴 2026-09-04 실기기(안드·카카오톡)에서 고쳤다 — 처음엔 카카오 계열에 `openExternalBrowser=1`
+ *    을 썼는데 **눌러도 카톡 안에 그대로 머물렀다**. 카카오톡은 이 파라미터를 «링크를 처음 열 때»
+ *    가로챌 뿐, 이미 열린 웹뷰 안의 `location.href` 이동에는 적용하지 않는다.
+ *    → **안드로이드는 카카오도 `intent://`** 로 간다(OS 로 넘어가므로 카톡이 못 붙잡는다).
+ *    파라미터 방식은 `buildEscapeFallbackUrl` 로 내려가 2단 폴백이 된다.
+ *
  * @param {string} href 현재 전체 주소(window.location.href)
  * @param {{isIOS:boolean,isAndroid:boolean,inApp:string|null}} env detectBrowserEnv 결과
  */
@@ -100,21 +122,28 @@ export function buildEscapeUrl(href, env) {
   const e = env || {};
   if (!e.inApp || !s) return null;
 
-  // 카카오 계열은 파라미터 한 개면 끝난다(안드로이드·iOS 공통으로 동작).
+  if (e.isAndroid) return buildIntentUrl(s);
+
+  // iOS 카카오는 `intent:` 가 없으므로 파라미터가 유일한 수단이다(카카오가 지원한다).
   if (e.inApp === IN_APP.KAKAOTALK || e.inApp === IN_APP.KAKAOT) {
     return withExternalBrowserParam(s);
   }
 
-  // 🔴 iOS 는 카카오 말고는 표준 탈출 수단이 없다. intent: 는 안드로이드 전용이라
-  //    사파리에서 누르면 아무 일도 안 일어난다 → 버튼을 만들지 않고 안내만 한다.
-  if (!e.isAndroid) return null;
+  // 🔴 그 밖의 iOS 인앱은 표준 탈출 수단이 없다 → 버튼을 만들지 않고 손안내만 한다.
+  //    여기서 억지로 URL 을 내주면 «눌러도 아무 일도 안 일어나는 먹통 버튼» 이 된다.
+  return null;
+}
 
-  // 안드로이드 기타 인앱: 크롬 직행. «#Intent» 가 프래그먼트 자리를 쓰므로 원래 해시는 버린다
-  // (이 앱은 해시 라우팅을 쓰지 않는다 — react-router 없이 경로 기반 분기).
-  const m = /^https?:\/\/(.+)$/i.exec(s);
-  if (!m) return null;
-  const noHash = m[1].split("#")[0];
-  return "intent://" + noHash + "#Intent;scheme=https;package=com.android.chrome;end";
+/**
+ * 첫 수단이 안 먹었을 때 이어서 시도할 URL. 없으면 null.
+ * 안드로이드에서 `intent:` 가 조용히 무시되는 기기(크롬 부재·제조사 웹뷰)를 위한 2단이다.
+ * 🔴 iOS 는 2단이 없다 — 첫 수단이 곧 마지막이라 여기서 같은 URL 을 또 주면 무한 재시도가 된다.
+ */
+export function buildEscapeFallbackUrl(href, env) {
+  const s = String(href == null ? "" : href);
+  const e = env || {};
+  if (!e.inApp || !s || !e.isAndroid) return null;
+  return withExternalBrowserParam(s);
 }
 
 /**
@@ -126,30 +155,28 @@ export function buildEscapeGuide(href, env) {
   if (!e.inApp) return null;
   const where = e.appLabel || "다른 앱";
   const escapeUrl = buildEscapeUrl(href, e);
+  const escapeFallbackUrl = buildEscapeFallbackUrl(href, e);
 
-  if (escapeUrl) {
-    return {
-      inApp: e.inApp,
-      appLabel: where,
-      escapeUrl,
-      title: "앱으로 설치하려면 한 번만 더",
-      body: "지금은 " + where + " 안에서 열려 있어 설치 버튼이 나오지 않습니다. "
-        + "아래 버튼을 누르면 인터넷 브라우저로 옮겨지고, 거기서 설치할 수 있어요.",
-      buttonLabel: "인터넷 브라우저로 열기",
-      manualHint: null,
-    };
-  }
+  // 🔴 손안내는 **버튼이 있어도 항상** 띄운다(2026-09-04 실기기 실패로 바꿨다).
+  //    자동 탈출은 기기·앱 버전에 따라 조용히 안 먹을 수 있고, 그때 화면에 아무 대안이 없으면
+  //    승객은 «눌렀는데 아무 일도 안 일어난다» 에서 멈춘다. 손으로 하는 길을 늘 함께 준다.
+  // 🔴 카카오톡 안드로이드의 메뉴는 **하단바 오른쪽 ⋮** 다(way 실기기 스크린샷 실측).
+  //    «오른쪽 위» 라고 적으면 승객이 못 찾는다 — 위에는 닫기(X)·주소·가가·채널 아이콘뿐이다.
+  const manualHint = e.isIOS
+    ? "안 열리면 화면 아래쪽 «⋯»(또는 공유 버튼)을 누르고 «Safari로 열기» 를 선택해 주세요."
+    : "안 열리면 화면 오른쪽 아래 «⋮» 를 누르고 «다른 브라우저로 열기» 를 선택해 주세요.";
 
-  // 탈출 버튼을 만들 수 없는 환경(주로 iOS 의 카카오 외 인앱) — 손으로 하는 법만 알려 준다.
   return {
     inApp: e.inApp,
     appLabel: where,
-    escapeUrl: null,
+    escapeUrl,
+    escapeFallbackUrl,
     title: "앱으로 설치하려면 한 번만 더",
-    body: "지금은 " + where + " 안에서 열려 있어 설치 버튼이 나오지 않습니다.",
-    buttonLabel: null,
-    manualHint: e.isIOS
-      ? "화면 오른쪽 아래 «⋯» 를 누르고 «Safari로 열기» 를 선택해 주세요."
-      : "화면 오른쪽 위 «⋮» 를 누르고 «다른 브라우저로 열기» 를 선택해 주세요.",
+    body: escapeUrl
+      ? "지금은 " + where + " 안에서 열려 있어 설치 버튼이 나오지 않습니다. "
+        + "아래 버튼을 누르면 인터넷 브라우저로 옮겨지고, 거기서 설치할 수 있어요."
+      : "지금은 " + where + " 안에서 열려 있어 설치 버튼이 나오지 않습니다.",
+    buttonLabel: escapeUrl ? "인터넷 브라우저로 열기" : null,
+    manualHint,
   };
 }

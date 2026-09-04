@@ -85,27 +85,30 @@ async function readEscape(page) {
       ok("🔴 «설치» 버튼은 없다", !(e.buttons || []).some((b) => b.trim() === "설치"), JSON.stringify(e.buttons));
       ok("🔴 «이미 설치했어요» 도 없다(인앱에선 성립하지 않는다)",
         !(e.buttons || []).some((b) => b.indexOf("이미 설치했어요") !== -1), JSON.stringify(e.buttons));
+      // 🔴 자동 탈출이 안 먹는 기기가 실재한다(way 폰). 그때 화면에 손으로 하는 길이 없으면
+      //    승객은 «눌렀는데 아무 일도 안 일어난다» 에서 멈춘다. 문구는 스크린샷 실측 기준이다.
+      ok("🔴 손안내가 버튼과 함께 떠 있다", (e.text || "").indexOf("다른 브라우저로 열기") !== -1, e.text);
+      ok("🔴 손안내가 «오른쪽 아래» 를 가리킨다(카톡 메뉴는 하단바에 있다)",
+        (e.text || "").indexOf("오른쪽 아래") !== -1, e.text);
 
-      // 🔴 버튼을 **실제로 누르고 어디로 갔는지**를 잰다. `window.location.href` 를 가로채려
-      //    했더니 최신 크롬은 그 속성을 재정의하지 못하게 막는다(«Cannot redefine property»).
-      //    카카오 경로는 같은 오리진 + 파라미터 한 개라 헤드리스에서도 진짜로 이동한다 →
-      //    이동 후 주소를 읽는 게 가로채기보다 강한 증거다(눌러도 안 움직이면 여기서 빨간불).
-      //    ⚠ 안드로이드 기타 인앱의 `intent://` 는 여기서 안 통하므로 [3] 에서는 누르지 않는다.
+      // 🔴 여기서 재는 것은 **2단 폴백**이다(2026-09-04 실기기 실패로 설계가 바뀌었다).
+      //    안드 카톡의 1단은 `intent://…com.android.chrome` 인데, 헤드리스 크롬에는 그 인텐트를
+      //    받을 OS 가 없어 **조용히 무시된다** — 이는 실기기에서 «크롬이 없거나 제조사 웹뷰라
+      //    intent 가 안 먹는» 경우와 같은 상황이다. 그러니 이 환경은 폴백을 재기에 딱 맞다:
+      //    누른 뒤 1.2초가 지나면 파라미터 URL 로 한 번 더 이동해야 한다.
+      //    ⚠ 1단(`intent:`) 자체가 실기기에서 크롬을 여는지는 **여기서 못 잰다**(미검증으로 남는다).
       const before = page.url();
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => null),
-        page.evaluate(() => {
-          const el = Array.from(document.querySelectorAll('[role="dialog"] button'))
-            .find((b) => (b.innerText || "").indexOf("인터넷 브라우저로 열기") !== -1);
-          if (el) el.click();
-        }),
-      ]);
-      await page.waitForTimeout(800);
+      await page.evaluate(() => {
+        const el = Array.from(document.querySelectorAll('[role="dialog"] button'))
+          .find((b) => (b.innerText || "").indexOf("인터넷 브라우저로 열기") !== -1);
+        if (el) el.click();
+      });
+      await page.waitForTimeout(3000); // 폴백 타이머 1.2초 + 이동 여유
       const after = page.url();
-      ok("버튼을 누르면 실제로 주소가 바뀐다", after !== before, before + " → " + after);
-      ok("옮긴 주소에 openExternalBrowser=1 이 붙는다",
+      ok("🔴 1단이 무시되면 2단 폴백이 이어진다", after !== before, before + " → " + after);
+      ok("폴백 주소에 openExternalBrowser=1 이 붙는다",
         after.indexOf("openExternalBrowser=1") !== -1, after);
-      ok("옮긴 주소가 사번 프리필을 유지한다(다시 안 친다)",
+      ok("폴백 주소가 사번 프리필을 유지한다(다시 안 친다)",
         after.indexOf("emp=99999") !== -1, after);
       await ctx.close();
       opened.pop();

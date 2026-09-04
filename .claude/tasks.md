@@ -2,6 +2,8 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
+> 🔴 **2026-09-04 진행중 — 카톡 탈출이 실기기에서 실패(1차 배포 `main.ae22e811.js` 이후)**: way 실기기(안드·KT) 카톡에서 배너는 정상으로 떴으나 **「인터넷 브라우저로 열기」를 눌러도 카톡 안에 머문다**. 원인 추정 = 카카오톡은 `openExternalBrowser=1` 을 **링크를 처음 열 때만** 가로채고, 이미 열린 웹뷰 안의 `location.href` 이동에는 적용하지 않는다. 고침 = **안드로이드는 카카오도 `intent://` 로**(웹뷰가 OS 에 넘기므로 카톡이 못 붙잡는다) + 실패 시 파라미터 URL 로 2단 폴백 + 손안내 상시 노출. 🔴 **손안내 문구는 스크린샷 실측 기준 «화면 오른쪽 아래 ⋮ → 다른 브라우저로 열기»**(카톡 안드 메뉴는 하단바 우측이다 — 위가 아니다). 다음: 수정→게이트→배포→way 실기기 재확인.
+
 > **2026-09-04 — 승객앱 설치율: 인앱 브라우저 탈출 + «설치할 때까지 팝업»(way) · ⚠ 구현·검증 완료 · 🔴 미배포**: 발단은 way 의 「안드로이드만 설치버전(APK)으로 배포할까」였다. **APK 사이드로딩은 안 만들었다** — 거래처가 든 이유가 「어르신들이 설치를 어려워한다」인데, 사이드로딩은 «출처 불명 앱 허용» + «Play Protect 경고 무시» 를 요구해 홈 화면 추가보다 **더 어렵다**(방향이 정확히 반대). 대신 진짜 원인을 먼저 팠다.
 > **실측한 원인** = 승객앱엔 이미 원탭 설치가 있었다(`InstallPrompt.js` BIP 배너). 막힌 건 **카카오톡 인앱 브라우저** — 거기선 `beforeinstallprompt` 가 발생하지 않고 `isAndroidPwaCapable()` 이 카톡을 UA 로 제외해 **설치 안내가 아예 안 뜬다**. 🔴 **prod 실측으로 확인**: 카톡 UA 로 `p.buslink.co.kr/p` 를 열면 팝업이 `{"present":false}` 다. 「어렵다」의 정체는 「없다」였다.
 > **신설** = `src/lib/inAppBrowser.js`(순수 · `detectBrowserEnv`·`withExternalBrowserParam`·`buildEscapeUrl`·`buildEscapeGuide`) · `scripts/test_in_app_browser.cjs` · `scripts/headless_check_inapp_escape.cjs`.

@@ -453,12 +453,26 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
   // 인앱 브라우저 탈출 — 같은 주소를 일반 브라우저에서 다시 연다.
   // 🔴 여기서 닫기 기록을 남기지 않는다: 브라우저가 바뀌면 저장소도 갈리므로 의미가 없고,
   //    옮겨간 브라우저에서는 팝업이 **떠야** 승객이 설치를 마칠 수 있다.
-  const handleEscape = (url) => {
+  //
+  // 🔴 2단 폴백(2026-09-04 실기기 실패로 추가). 안드로이드는 먼저 `intent:` 로 크롬에 직행하고,
+  //    그게 조용히 무시되면(크롬 부재·제조사 웹뷰) 잠시 뒤 파라미터 URL 로 한 번 더 시도한다.
+  //    ⚠ 판정은 «아직 이 화면이 보이는가» 로 한다 — 탈출에 성공하면 앱이 뒤로 넘어가
+  //    `document.hidden` 이 참이 되므로, 성공한 기기에서 두 번째 이동이 겹치지 않는다.
+  const handleEscape = (url, fallbackUrl) => {
     try {
       window.location.href = url;
     } catch {
       /* 차단되면 아무 일도 일어나지 않는다 — 아래 손안내가 그대로 남아 있다 */
     }
+    if (!fallbackUrl) return;
+    setTimeout(() => {
+      try {
+        if (document.hidden) return; // 탈출 성공 — 여기 남아 있지 않다
+        window.location.href = fallbackUrl;
+      } catch {
+        /* 무해 처리 — 손안내가 남아 있다 */
+      }
+    }, 1200);
   };
 
   const handleInstall = async () => {
@@ -661,7 +675,7 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
               <Btn
                 variant="primary"
                 size="md"
-                onClick={() => handleEscape(escapeGuide.escapeUrl)}
+                onClick={() => handleEscape(escapeGuide.escapeUrl, escapeGuide.escapeFallbackUrl)}
               >
                 {escapeGuide.buttonLabel}
               </Btn>
