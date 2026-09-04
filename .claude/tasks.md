@@ -2,6 +2,20 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
+> **2026-09-04 — 승객/포털 인증 P3-b 1단계(발급 화면부터 · 전 거래처 «꺼짐») · ✅ prod 배포 완료 · `main.567e088a.js`**: 협력사 포털에 진짜 인증을 신설했다. 이번 범위는 설계의 **①«발급 화면부터 배포(끄고)»만** — P3-c(명부 CRUD 서버 이관)·P4(rules 잠금)는 안 넣었다.
+> **신설** = `functions/partnerAuth.js`(판정 순수 모듈) · `src/lib/partnerAuthPolicy.js`(클라 거울 · 상수 대조로 잠금) · `src/lib/partnerAuth.js`(CF 호출부) · CF 5종(`partnerLogin`/`partnerResume`/`partnerLogout`/`partnerSetPassword`/`partnerIssuePassword`) · Firestore 2종(`companies/{cid}/partnerSecrets/{code}`·`partnerSessions/{tokenHash}` — 둘 다 rules `if false`) · `partnerCodes.{code}.authRequired`(**기본 꺼짐**)·`passwordIssuedAt`.
+> **수정** = `assertPartnerCaller`(켠 거래처는 토큰 필수 · 토큰이 정본) · `PartnerApp`(비밀번호 칸·변경 강제·승계) · `AdminApp` 협력사 관리(🔐 포털 로그인 모달 + 평문 1회 표시 + 켜기 토글) · `partnerSession.js`(resumeToken 선택 저장).
+> **검증** = 격리 90단언(`scripts/test_partner_auth.cjs` · 대조군 7/7 실패 확인) · 게이트 45→**46/46** · rules dry-run compile OK · 빌드 신규 경고 0(18↔18)·+2.94kB.
+> ⚠ **다음 사람에게 — 배포 순서**: `functions` → `firestore:rules` → `hosting`(반대로 하면 새 번들이 없는 CF 를 부른다). 배포 직후 **실호출 1건**을 반드시 재라 — `createCustomToken` 은 IAM(`serviceAccountTokenCreator`)을 타므로 «함수는 떠 있는데 로그인만 안 되는» 상태가 가능하다(P1 때 같은 이유로 `test_passenger_login_live.cjs` 를 만들었다).
+> 🔴 **운영이 선행이다** — 켜기 전에 ① 관리자 화면에서 거래처별 비밀번호 발급(평문은 그 화면에서 한 번만 보인다) ② 담당자에게 전달 ③ 그 거래처만 토글. **한 번에 전부 켜지 말 것**. 현재 켠 거래처 **0곳**(배포해도 화면 변화 0).
+> ⚠ **미검증** = 실호출·실화면·재발급 시 세션 일괄 해제. 상세·회귀 가드는 `.claude/issues.md` 맨 위.
+> **배포 실측(2026-09-04 · way 「배포 해줘」)** = ① `functions` 7종(신규 5 create + `partnerImportPassengers`·`partnerReissuePins` update — `assertPartnerCaller` 가 바뀌어 **함께 재배포 필수**) → ② `firestore:rules`(compiled successfully) → ③ `hosting`(게이트 **46/46** → Deploy complete). 배포 전 카카오 운영키 `appkey=58bf34` 확인.
+> **올라간 증거** = 4개 도메인(partner·p·admin·web.app) 전부 `main.567e088a.js` 서빙 · 라이브 번들에 `partnerLogin`·`partnerResume`·`partnerSetPassword`·`partnerIssuePassword`·`authRequired` **전부 있음** · `functions:list` 에 신규 5종 확인(us-central1).
+> ✅ **꺼진 거래처 회귀 0 — prod 실화면으로 확인**: 신촌세브란스 `authRequired = undefined`(실측) · 로그인 화면 input **1개(업체코드만·비밀번호 칸 없음)**·버튼 「인증하기」 1개 = **현행 그대로** · 코드만으로 진입 성공(`인증됨`) · 콘솔 오류 0. 하네스 3종 prod 통과(`headless_check_partner_manage_scale`(16,158명·7.1초·DOM 1,839)·`_ops_routes`·`_kind_filter`).
+> ⚠ **여전히 미검증** = `partnerLogin`·`partnerIssuePassword` **실호출 0건**(켠 거래처가 0곳이라 오늘은 아무도 이 경로를 안 탄다). 🔴 **첫 거래처를 켜기 전에 반드시 실호출 1건**을 잴 것 — IAM(`serviceAccountTokenCreator`) 때문에 «함수는 떠 있는데 로그인만 안 되는» 상태가 가능하다. 다만 같은 런타임 SA 가 `passengerLogin` 으로 매일 `createCustomToken` 을 성공시키고 있어 위험은 낮다(코드 대조: 클레임 3개 전부 문자열 — P1 이 밟은 «null 클레임 거부» 함정 없음).
+> 🔴 **부수 발견 — 협력사 포털 헤드리스 하네스 5개가 2026-09-02 이래 전부 죽어 있었다**: `b787582`(PC 어드민형 셸)가 탭을 `<button>` → `<nav><div onClick>` 으로 바꿨는데 하네스는 전부 `locator("button",{hasText:"운영 포털"/"승객 관리"})` 로 잡고 viewport 가 **전부 1280px**(=PC 셸)이라 0개를 반환했다. 2026-09-01 「정류장이 `<button>` 이 아니라 `<div onClick>`」과 **같은 계열의 두 번째 사고** — 다행히 이번엔 조용히 거짓 통과하지 않고 타임아웃으로 죽었다. 고침 = 태그가 아니라 **라벨**로 잡는 `tabByLabel(page,label)`(`nav div, button` 필터) 5파일 일괄. ⚠ 이 하네스들은 게이트 밖(`headless_check_*`)이라 **아무도 몰랐다**.
+> 🔴 **함께 드러난 하네스 거짓실패 1건** — `_manage_scale` [3] 이 화면의 `16,158`(천단위 콤마)을 `String(16158)` 과 비교해 **명부가 1,000명을 넘은 순간부터 영원히 실패**하는 단언이었다. 콤마만 걷어내도록 고침(불변식은 «표시 상한 100 이 아니라 전체를 보여주는가» 그대로).
+
 > **2026-09-02 — QR 탑승 4단계 → 3단계(세브란스병원 총무팀 요청 · 최우석 매니저 전달 · ✅ prod 배포 완료 · `main.593eab1f.js` · `--only hosting`)**: "qr탑승 누르면 바로 카메라 open > qr태깅 > 탑승완료". 직원앱 `EmployeeApp.js ScanTabDriverQR` 단독 — `ScanTabPassengerQR`·`BoardingApp`(폰 기본 카메라) 무변경 · **전 거래처 공통 기본 동작**(플래그 신설 0) · rules/CF/indexes 변경 0.
 > - [x] 진입 즉시 카메라(마운트 `startScan` + StrictMode 세대 가드 `scanGenRef`)
 > - [x] 태깅 즉시 탑승 처리(`confirm` 단계·`handleBoard` 제거 → 인자로 받는 `runBoarding({ staticQr, token })`)

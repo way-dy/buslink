@@ -51,6 +51,11 @@ import { isValidHexColor, mixHex, THEME_PRESETS, resolveTheme, readableOn } from
 // 문의 게시판(2026-08-06 미팅) — 거래처별 dycs CS 위젯 매핑.
 import { resolveInquiryConfig, isValidTenantId, buildInquiryPreviewUrl } from "../lib/inquiry";
 import { isValidHomepageUrl, resolveHomepageConfig } from "../lib/homepage";
+// 협력사 포털 로그인(2026-09-04 P3-b) — 초기 비밀번호 발급·재발급 + 거래처 단위 켜기.
+// 🔴 안내 문구는 `PARTNER_PASSWORD_ISSUE_NOTICE` 상수를 **그대로** 쓴다 — 화면에서 따로
+//    타이핑하면 «평문을 저장하지 않는다» 는 서버 계약과 문구가 갈린다(2026-09-01 사고 계열).
+import { partnerIssuePassword } from "../lib/partnerAuth";
+import { PARTNER_PASSWORD_ISSUE_NOTICE, isPartnerAuthRequired } from "../lib/partnerAuthPolicy";
 import { resolveTagSoundConfig } from "../lib/tagSound";
 import { normalizeWindowOpts, WINDOW_PRE_MIN_DEFAULT, WINDOW_POST_MIN_DEFAULT } from "../lib/routeWindow";
 // 탭 단위 에러 경계 — 자식 throw 시 흰 화면 방지 + 에러 메시지 가시화
@@ -5112,6 +5117,11 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
   const [pLogo, setPLogo] = useState(null);         // data URI | null
   const [pLogoHeight, setPLogoHeight] = useState(28);
   const [pLoading, setPLoading] = useState(false);
+  // 포털 로그인 모달(2026-09-04 P3-b) — 초기 비밀번호 발급/재발급 + authRequired 토글.
+  const [authEditTarget, setAuthEditTarget] = useState(null); // partnerCodes doc | null
+  const [authIssued, setAuthIssued] = useState(null);         // { password, reissued, revokedSessions } — 평문 1회 표시
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authCopied, setAuthCopied] = useState(false);
 
   useEffect(() => {
     if (!companyId) return;
@@ -5173,6 +5183,53 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
       alert("오류: " + (e?.message || String(e)));
     }
     setModeEditLoading(false);
+  };
+
+  // ── 포털 로그인 (2026-09-04 P3-b) ─────────────────────────
+  // 🔴 순서가 곧 안전장치다: ① 발급 → ② 담당자에게 전달 → ③ 그 거래처만 켠다.
+  //    한 번에 전부 켜지 말 것 — 못 받은 담당자가 그날 업무를 못 한다(설계 문서 «운영이 선행»).
+  const openAuthEdit = (code) => { setAuthEditTarget(code); setAuthIssued(null); setAuthCopied(false); };
+
+  const handleIssuePassword = async () => {
+    if (!authEditTarget) return;
+    const already = !!authEditTarget.passwordIssuedAt;
+    // 재발급은 «지금 쓰고 있는 값»을 죽인다 — 무엇이 끊기는지 먼저 말한다.
+    if (already && !window.confirm(
+      `'${authEditTarget.partnerName}' 의 포털 비밀번호를 새로 발급합니다.\n\n` +
+      `• 지금 쓰고 있는 비밀번호는 즉시 못 쓰게 됩니다\n` +
+      `• 로그인해 있던 담당자도 로그아웃됩니다\n` +
+      `• 새 비밀번호를 다시 전달해야 합니다\n\n계속할까요?`
+    )) return;
+    setAuthBusy(true);
+    try {
+      const res = await partnerIssuePassword({ companyId, partnerCode: authEditTarget.id });
+      setAuthIssued(res);
+      setAuthCopied(false);
+    } catch (e) { alert("오류: " + (e?.message || String(e))); }
+    setAuthBusy(false);
+  };
+
+  const handleToggleAuthRequired = async (on) => {
+    if (!authEditTarget) return;
+    if (on) {
+      // 🔴 비밀번호가 없는데 켜면 그 거래처는 포털에 **아예 못 들어온다** — 저장 단계에서 막는다.
+      if (!authEditTarget.passwordIssuedAt && !authIssued) {
+        alert("먼저 초기 비밀번호를 발급하고 담당자에게 전달하세요.\n\n비밀번호 없이 켜면 이 거래처는 포털에 들어올 수 없습니다.");
+        return;
+      }
+      if (!window.confirm(
+        `'${authEditTarget.partnerName}' 포털에 비밀번호 로그인을 켭니다.\n\n` +
+        `🔴 비밀번호를 아직 전달받지 못한 담당자는 오늘 업무를 할 수 없습니다.\n` +
+        `   (승객 등록·명부 수정·탑승 통계가 전부 막힙니다)\n\n` +
+        `전달을 마쳤는지 확인한 뒤 켜세요. 계속할까요?`
+      )) return;
+    }
+    setAuthBusy(true);
+    try {
+      await updateDoc(doc(db, "partnerCodes", authEditTarget.id), { authRequired: on });
+      setAuthEditTarget({ ...authEditTarget, authRequired: on });
+    } catch (e) { alert("오류: " + (e?.message || String(e))); }
+    setAuthBusy(false);
   };
 
   // 포탈 설정 모달 열기/저장 (2026-07-16 회의 #3·#5)
@@ -5377,6 +5434,12 @@ ${chk.missing.slice(0,8).join(", ")}
                           💬 문의 {resolveInquiryConfig(c).tenantId}
                         </span>
                       )}
+                      {/* 포털 로그인 배지 — 켠 거래처만(부재=꺼짐=현행 코드-only 진입). 2026-09-04 */}
+                      {isPartnerAuthRequired(c) && (
+                        <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#E6F7EB", color: "#007A29", border: "1px solid #BFE8CD", fontWeight: 700 }}>
+                          🔐 비밀번호 로그인
+                        </span>
+                      )}
                       {/* 홈페이지 연결 배지 — 켠 거래처만. 이게 켜져 있으면 문의 탭은 없다(대체). 2026-08-25 */}
                       {resolveHomepageConfig(c).enabled && (
                         <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#FFF3DC", color: "#8A5200", border: "1px solid #FFDFA8", fontWeight: 700 }}>
@@ -5411,6 +5474,10 @@ ${chk.missing.slice(0,8).join(", ")}
                       </button>
                       <button style={{ ...S.editBtn, padding: "4px 10px", fontSize: 11 }} onClick={() => openPortalEdit(c)}>
                         ⚙️ 포탈 설정
+                      </button>
+                      {/* 포털 로그인(2026-09-04 P3-b) — 초기 비밀번호 발급·재발급 + 거래처 단위 켜기 */}
+                      <button style={{ ...S.editBtn, padding: "4px 10px", fontSize: 11 }} onClick={() => openAuthEdit(c)}>
+                        🔐 포털 로그인
                       </button>
                       {c.active ? (
                         <button style={S.delBtn} onClick={() => handleDeactivate(c)}>비활성화</button>
@@ -5520,6 +5587,76 @@ ${chk.missing.slice(0,8).join(", ")}
               {modeEditLoading ? "저장 중..." : "저장"}
             </button>
             <button style={{ ...S.closeBtn, flex: 1 }} onClick={() => setModeEditTarget(null)}>취소</button>
+          </div>
+        </div></div>
+      )}
+
+      {/* ── 포털 로그인 모달 — 초기 비밀번호 발급/재발급 + 거래처 단위 켜기 (2026-09-04 P3-b) ── */}
+      {authEditTarget && (
+        <div style={S.overlay}><div style={{ ...S.modal, maxHeight: "88vh", overflowY: "auto" }}>
+          <div style={S.modalTitle}>🔐 포털 로그인 — {authEditTarget.partnerName}</div>
+
+          <div style={{ background: "#FFF7E6", border: "1px solid #FFE0A3", borderRadius: 8, padding: "10px 12px", fontSize: 11, color: "#7A4F00", lineHeight: 1.6 }}>
+            ⓘ 협력사 포털은 지금 <b>업체코드만 알면</b> 들어갑니다. 그런데 업체코드는 공개 값이라
+            누구나 읽을 수 있습니다 — 비밀번호 로그인을 켜면 그 거래처 포털에 담당자만 들어옵니다.<br />
+            순서: <b>① 비밀번호 발급 → ② 담당자에게 전달 → ③ 이 거래처만 켜기</b>
+          </div>
+
+          {/* ── ① 초기 비밀번호 ── */}
+          <label style={{ ...S.label, marginTop: 12 }}>초기 비밀번호</label>
+          <div style={{ fontSize: 12, color: "var(--color-label-mute)", lineHeight: 1.6, marginBottom: 6 }}>
+            {authEditTarget.passwordIssuedAt
+              ? <>이미 발급되어 있습니다 ({formatDate(authEditTarget.passwordIssuedAt)}). 담당자가 값을 잃어버렸거나 바뀌었을 때만 재발급하세요.</>
+              : <>아직 발급된 적이 없습니다. 발급하면 <b>이 화면에 한 번만</b> 표시됩니다.</>}
+          </div>
+          <button style={{ ...S.editBtn, padding: "6px 14px", fontSize: 12 }}
+            onClick={handleIssuePassword} disabled={authBusy}>
+            {authBusy ? "처리 중..." : (authEditTarget.passwordIssuedAt ? "🔁 비밀번호 재발급" : "🔑 초기 비밀번호 발급")}
+          </button>
+
+          {/* 🔴 평문은 여기서만 존재한다 — 서버에도 우리 DB 에도 저장하지 않는다. */}
+          {authIssued && (
+            <div style={{ marginTop: 10, background: "#E6F7EB", border: "1px solid #BFE8CD", borderRadius: 8, padding: "12px 14px" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#007A29", marginBottom: 6 }}>
+                {authIssued.reissued ? "재발급 완료" : "발급 완료"}
+                {authIssued.revokedSessions > 0 && ` · 기존 로그인 ${authIssued.revokedSessions}건 해제`}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <code style={{ fontSize: 18, fontWeight: 800, letterSpacing: "0.06em", background: "#fff", border: "1px solid #BFE8CD", borderRadius: 6, padding: "6px 12px", userSelect: "all" }}>
+                  {authIssued.password}
+                </code>
+                <button style={{ ...S.editBtn, padding: "4px 10px", fontSize: 11 }}
+                  onClick={() => { navigator.clipboard.writeText(authIssued.password); setAuthCopied(true); }}>
+                  {authCopied ? "✓ 복사됨" : "복사"}
+                </button>
+              </div>
+              {/* 🔴 문구는 상수 하나에서 온다 — 여기서 따로 타이핑하면 서버 계약과 갈린다. */}
+              <div style={{ marginTop: 8, fontSize: 11, color: "#A81818", lineHeight: 1.6, fontWeight: 600 }}>
+                {PARTNER_PASSWORD_ISSUE_NOTICE}
+              </div>
+              <div style={{ marginTop: 4, fontSize: 11, color: "#007A29", lineHeight: 1.6 }}>
+                담당자는 이 비밀번호로 처음 로그인한 뒤 <b>본인 비밀번호를 정하는 화면</b>을 반드시 거칩니다.
+              </div>
+            </div>
+          )}
+
+          {/* ── ② 거래처 단위 켜기 ── */}
+          <label style={{ ...S.label, marginTop: 16 }}>비밀번호 로그인 요구</label>
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, color: "var(--color-label)", cursor: "pointer" }}>
+            <input type="checkbox" checked={isPartnerAuthRequired(authEditTarget)} disabled={authBusy}
+              onChange={e => handleToggleAuthRequired(e.target.checked)} style={{ marginTop: 2 }} />
+            <span>이 거래처 포털에 <b>업체코드 + 비밀번호</b>를 요구합니다</span>
+          </label>
+          <div style={{ marginTop: 6, background: isPartnerAuthRequired(authEditTarget) ? "#E6F7EB" : "#F4F5F7", border: "1px solid var(--color-line)", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "var(--color-label-mute)", lineHeight: 1.6 }}>
+            {isPartnerAuthRequired(authEditTarget)
+              ? "켜져 있습니다. 이 거래처 담당자는 업체코드만으로는 들어올 수 없습니다."
+              : "꺼져 있습니다 — 지금까지와 똑같이 업체코드만으로 들어옵니다(기본값)."}
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
+            <button style={{ ...S.addBtn, flex: 1 }} onClick={() => { setAuthEditTarget(null); setAuthIssued(null); }}>
+              닫기
+            </button>
           </div>
         </div></div>
       )}

@@ -1474,6 +1474,12 @@ exports.resolveStaticBoarding = onCall(async (request) => {
 // ════════════════════════════════════════════════════════
 const crypto = require("crypto");
 const { planRosterWrites, planReissue } = require("./passengerRoster");
+// 협력사 포털 인증(2026-09-04 P3-b) — 판정은 전부 이 순수 모듈이 한다.
+const {
+  hashPartnerPassword, generateInitialPartnerPassword, checkNewPartnerPassword,
+  normalizePartnerCode, partnerUidOf, partnerSessionDocId,
+  partnerPortalProfile, planPartnerLogin, planPartnerResume, planPartnerCallerCheck,
+} = require("./partnerAuth");
 
 // 클라 `hashPin`(src/lib/partner.js)과 **같은 값이어야 한다**. 한쪽만 바꾸면 전원 로그인 불가.
 const PASSENGER_PIN_SALT = "buslink_salt_2026";
@@ -4099,18 +4105,31 @@ exports.onImprovementRequestUpdate = onDocumentUpdated(
 //    🔴 업체코드는 `partnerCodes` read 가 공개라 **비밀이 아니다**(2026-08-28 실측) —
 //    이건 인증이 아니라 **소속 강제와 감사 로그**를 얻는 것이고, 진짜 인증은 P3-b 다.
 
-/** 포털 호출자 검증 — 업체코드가 그 회사의 활성 코드인지. 통과하면 코드 문서를 준다. */
+/**
+ * 포털 호출자 검증 — 업체코드가 그 회사의 활성 코드인지.
+ *
+ * 🔴 2026-09-04 P3-b: 판정을 순수 모듈 `planPartnerCallerCheck` 로 옮겼다. 바뀐 것은 두 가지 —
+ *    ⓐ `authRequired` 를 켠 거래처는 **포털 커스텀 토큰이 없으면 거부**한다
+ *    ⓑ 토큰이 있으면 **토큰이 정본**이라 클라가 보낸 업체코드가 토큰과 달라도 거부한다
+ *       (안 그러면 자기 토큰으로 남의 거래처 명부를 고칠 수 있다).
+ *    `authRequired` 가 꺼진(=부재) 거래처는 **글자 그대로 현행 동작**이다.
+ */
 async function assertPartnerCaller(db, request, companyId, partnerCode) {
   if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
   if (!companyId || typeof companyId !== "string") {
     throw new HttpsError("invalid-argument", "companyId가 필요합니다");
   }
-  const code = String(partnerCode || "").trim();
+  const code = normalizePartnerCode(partnerCode);
   if (!code) throw new HttpsError("permission-denied", "업체코드가 필요합니다");
   const snap = await db.collection("partnerCodes").doc(code).get();
   const cd = snap.exists ? (snap.data() || {}) : null;
-  if (!cd || cd.active === false || cd.companyId !== companyId) {
-    throw new HttpsError("permission-denied", "유효하지 않은 업체코드입니다");
+  const verdict = planPartnerCallerCheck({
+    codeData: cd, companyId, requestedCode: code,
+    claims: (request.auth && request.auth.token) || {},
+  });
+  if (!verdict.ok) {
+    console.warn("[포털인증:거부] " + verdict.message + " cid=" + companyId + " code=" + code);
+    throw new HttpsError(verdict.status, verdict.message);
   }
   return { code, data: cd };
 }
@@ -4245,4 +4264,242 @@ exports.partnerReissuePins = onCall({ timeoutSeconds: 300, memory: "512MiB" }, a
 
   console.log("[명부] " + code + " PIN 재발급 " + credentials.length + "명 · 오류 " + errors.length);
   return { credentials, errors };
+});
+
+// ════════════════════════════════════════════════════════
+// 협력사 포털 인증 (2026-09-04 P3-b · 1단계 «발급 화면부터 배포(끄고)»)
+//
+// 무엇을 고치나: 포털은 지금 **업체코드만 알면 들어간다**. 그 코드는 `partnerCodes` read 가
+//   공개라 익명으로 11개가 전부 읽힌다(2026-08-28 실측) — 즉 인증이 없는 것과 같고,
+//   남의 거래처 명부 16,409건을 보고 고칠 수 있다.
+//
+// 구조는 **승객 P1 을 그대로 복제**한다(passengerLogin/Resume/Logout/SetPin + mintPassengerSession).
+//   해시 = companies/{cid}/partnerSecrets/{code}      (rules read,write:false)
+//   승계 = companies/{cid}/partnerSessions/{tokenHash}(rules read,write:false)
+// 🔴 비밀번호(해시 포함)를 `partnerCodes` 문서에 넣지 말 것 — 그 컬렉션은 read 가 공개다.
+// 🔴 `partnerCodes.{code}.authRequired` 가 **부재·falsy 면 지금과 완전히 같다**. 켜는 것은
+//    거래처 단위 수동 작업이고, 한 번에 전부 켜지 말 것(못 받은 담당자가 그날 업무를 못 한다).
+// 판정은 전부 순수 모듈 `functions/partnerAuth.js` — 여기는 읽기·쓰기·토큰 발급만 한다.
+// ════════════════════════════════════════════════════════
+
+function partnerSecretRef(db, companyId, code) {
+  return db.collection("companies").doc(companyId).collection("partnerSecrets").doc(normalizePartnerCode(code));
+}
+function partnerSessionRef(db, companyId, resumeToken) {
+  return db.collection("companies").doc(companyId)
+    .collection("partnerSessions").doc(partnerSessionDocId(resumeToken));
+}
+/** partnerCodes 문서의 만료 시각(ms). 부재·null = 만료 없음(클라 validatePartnerCode 와 같은 계약). */
+function partnerExpiresAtMs(codeData) {
+  const e = codeData ? codeData.expiresAt : null;
+  return e && typeof e.toMillis === "function" ? e.toMillis() : null;
+}
+
+/**
+ * 커스텀 토큰 + (필요하면) 새 resumeToken 발급 — `mintPassengerSession` 의 포털판.
+ * 🔴 uid 는 `partner_{cid}_{code}` 로 승객(`passenger_{cid}_{empNo}`)과 겹치지 않는다.
+ * 🔴 reuseToken 이 오면 재발급하지 않는다(탭 여러 개가 서로 무효화하는 것 방지 — 승객과 동일).
+ */
+async function mintPartnerSession(db, companyId, code, codeData, reuseToken, passwordInitial) {
+  const profile = partnerPortalProfile(code, codeData);
+  let token;
+  try {
+    token = await admin.auth().createCustomToken(partnerUidOf(companyId, profile.code), {
+      role: "partner",
+      companyId,
+      partnerCode: profile.code,
+    });
+  } catch (e) {
+    // 거의 항상 IAM(signBlob) 이다 — 재시도해도 소용없다는 걸 화면이 말해야 한다.
+    console.error("[포털인증] 커스텀 토큰 발급 실패 — IAM(serviceAccountTokenCreator) 확인:", e.message);
+    throw new HttpsError("internal", "로그인 서버 설정 오류입니다. 담당자에게 문의하세요");
+  }
+  const resumeToken = reuseToken || crypto.randomBytes(32).toString("hex");
+  const ref = partnerSessionRef(db, companyId, resumeToken);
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  if (reuseToken) {
+    await ref.set({ lastUsedAt: now }, { merge: true });
+  } else {
+    await ref.set({ companyId, partnerCode: profile.code, createdAt: now, lastUsedAt: now });
+  }
+  return { token, resumeToken, partner: profile, passwordInitial: !!passwordInitial };
+}
+
+// partnerLogin({ companyId, code, password }) — 업체코드 + 비밀번호 대조 후 포털 신원 발급.
+// 반환: { token, resumeToken, partner, passwordInitial }.
+// 🔴 시도 제한 없음 — 승객 `passengerLogin` 과 같은 상태다. P4(rules 잠금)와 함께 넣을 것.
+exports.partnerLogin = onCall({ invoker: "public" }, async (request) => {
+  const { companyId, code, password } = request.data || {};
+  if (!companyId || typeof companyId !== "string") {
+    throw new HttpsError("invalid-argument", "companyId가 필요합니다");
+  }
+  const c = normalizePartnerCode(code);
+  if (!c) throw new HttpsError("invalid-argument", "업체코드를 입력해주세요");
+
+  const db = admin.firestore();
+  const snap = await db.collection("partnerCodes").doc(c).get();
+  const cd = snap.exists ? (snap.data() || {}) : null;
+  const secSnap = await partnerSecretRef(db, companyId, c).get();
+  const sec = secSnap.exists ? (secSnap.data() || {}) : null;
+
+  const verdict = planPartnerLogin({
+    codeData: cd, companyId, password, secret: sec,
+    nowMs: Date.now(), expiresAtMs: partnerExpiresAtMs(cd),
+  });
+  if (!verdict.ok) {
+    console.warn("[포털인증:거부] " + verdict.message + " cid=" + companyId + " code=" + c);
+    throw new HttpsError(verdict.status, verdict.message);
+  }
+
+  // 배부 진행 상황을 재는 유일한 신호(«전달했는데 들어왔나»). best-effort.
+  // 🔴 여기에 비밀번호와 관련된 값은 절대 쓰지 않는다 — partnerCodes 는 read 가 공개다.
+  snap.ref.update({ lastPortalLoginAt: admin.firestore.FieldValue.serverTimestamp() }).catch(() => {});
+
+  return await mintPartnerSession(db, companyId, c, cd, null, verdict.passwordInitial);
+});
+
+// partnerResume({ companyId, resumeToken }) — 기기에 보관한 승계표로 세션 재발급.
+// 포털도 `inMemoryPersistence`(firebase.js 익명 앱 라우트)라 **새로고침마다 필요**하다.
+exports.partnerResume = onCall({ invoker: "public" }, async (request) => {
+  const { companyId, resumeToken } = request.data || {};
+  if (!companyId || !resumeToken || typeof resumeToken !== "string") {
+    throw new HttpsError("invalid-argument", "다시 로그인해주세요");
+  }
+  const db = admin.firestore();
+  const sessRef = partnerSessionRef(db, companyId, resumeToken);
+  const sess = await sessRef.get();
+  if (!sess.exists) throw new HttpsError("unauthenticated", "다시 로그인해주세요");
+  const c = normalizePartnerCode((sess.data() || {}).partnerCode);
+  if (!c) {
+    await sessRef.delete().catch(() => {});
+    throw new HttpsError("unauthenticated", "다시 로그인해주세요");
+  }
+
+  const snap = await db.collection("partnerCodes").doc(c).get();
+  const cd = snap.exists ? (snap.data() || {}) : null;
+  const secSnap = await partnerSecretRef(db, companyId, c).get();
+  const sec = secSnap.exists ? (secSnap.data() || {}) : null;
+
+  const verdict = planPartnerResume({
+    codeData: cd, companyId, secret: sec,
+    nowMs: Date.now(), expiresAtMs: partnerExpiresAtMs(cd),
+  });
+  if (!verdict.ok) {
+    // 코드가 죽었으면 승계표도 같이 버린다(되살아나지 않게 — 승객과 같은 규칙).
+    await sessRef.delete().catch(() => {});
+    throw new HttpsError(verdict.status, verdict.message);
+  }
+  return await mintPartnerSession(db, companyId, c, cd, resumeToken, verdict.passwordInitial);
+});
+
+// partnerLogout({ companyId, resumeToken }) — 승계표를 서버에서 없앤다(공용 PC 대비).
+// 실패해도 클라는 로그아웃을 진행한다.
+exports.partnerLogout = onCall({ invoker: "public" }, async (request) => {
+  const { companyId, resumeToken } = request.data || {};
+  if (!companyId || !resumeToken) return { ok: true };
+  await partnerSessionRef(admin.firestore(), companyId, resumeToken).delete().catch(() => {});
+  return { ok: true };
+});
+
+// partnerSetPassword({ currentPassword, newPassword }) — 첫 로그인 시 변경 강제·이후 자발적 변경.
+// 신원은 **클레임에서만** 읽는다(업체코드 인자 없음 — `passengerSetPin` 과 같은 계약).
+exports.partnerSetPassword = onCall({ invoker: "public" }, async (request) => {
+  const claims = (request.auth && request.auth.token) || {};
+  if (claims.role !== "partner" || !claims.companyId || !claims.partnerCode) {
+    throw new HttpsError("unauthenticated", "다시 로그인해주세요");
+  }
+  const companyId = claims.companyId;
+  const code = normalizePartnerCode(claims.partnerCode);
+  const { currentPassword, newPassword } = request.data || {};
+
+  const chk = checkNewPartnerPassword(newPassword, { currentCode: code });
+  if (!chk.ok) throw new HttpsError("invalid-argument", chk.message);
+
+  const db = admin.firestore();
+  const secRef = partnerSecretRef(db, companyId, code);
+  const secSnap = await secRef.get();
+  const sec = secSnap.exists ? (secSnap.data() || {}) : null;
+  if (!sec || !sec.passwordHash) {
+    throw new HttpsError("failed-precondition", "발급된 비밀번호가 없습니다. 운영사 담당자에게 요청하세요");
+  }
+  // 첫 설정(passwordInitial)은 현재 비밀번호를 다시 묻지 않는다 — 방금 그 값으로 로그인해 왔다.
+  if (sec.passwordInitial !== true) {
+    if (!currentPassword || hashPartnerPassword(currentPassword) !== String(sec.passwordHash)) {
+      throw new HttpsError("permission-denied", "현재 비밀번호가 올바르지 않습니다");
+    }
+  }
+  await secRef.set({
+    companyId, partnerCode: code,
+    passwordHash: hashPartnerPassword(newPassword),
+    passwordInitial: false,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+  console.log("[포털인증] 비밀번호 변경 " + code);
+  return { ok: true, passwordInitial: false };
+});
+
+// partnerIssuePassword({ companyId, partnerCode }) — 🔴 **관리자 전용** 초기 비밀번호 발급·재발급.
+// 평문은 **응답에 1회만** 돌려주고 어디에도 저장하지 않는다(승객 안내문과 같은 계약).
+// 🔴 `invoker: "public"` 은 **Cloud Run IAM 게이트**를 여는 것이지 권한을 여는 게 아니다 —
+//    실제 권한은 바로 아래 `assertAdmin` + 회사 일치 검사다. 안 적으면 IAM 이 HTTP 401 로
+//    먼저 막고 SDK 가 그걸 `functions/unauthenticated` 로 매핑해 **우리 거부와 구별이 안 된다**
+//    (2026-08-25 P1 배포에서 같은 이유로 신규 onCall 전부에 명시했다).
+exports.partnerIssuePassword = onCall({ invoker: "public" }, async (request) => {
+  await assertAdmin(request);
+  const { companyId, partnerCode } = request.data || {};
+  if (!companyId || typeof companyId !== "string") {
+    throw new HttpsError("invalid-argument", "companyId가 필요합니다");
+  }
+  const code = normalizePartnerCode(partnerCode);
+  if (!code) throw new HttpsError("invalid-argument", "업체코드가 필요합니다");
+
+  const db = admin.firestore();
+  // 🔴 회사 격리 — assertAdmin 은 role 만 본다. 다른 회사 협력사에 비밀번호를 발급하면
+  //    그 회사 포털에 들어갈 수 있다(superadmin 만 예외).
+  const meSnap = await db.collection("users").doc(request.auth.uid).get();
+  const me = meSnap.exists ? (meSnap.data() || {}) : {};
+  if (me.role !== "superadmin" && me.companyId !== companyId) {
+    throw new HttpsError("permission-denied", "다른 회사의 협력사는 관리할 수 없습니다");
+  }
+
+  const snap = await db.collection("partnerCodes").doc(code).get();
+  const cd = snap.exists ? (snap.data() || {}) : null;
+  if (!cd || cd.companyId !== companyId) {
+    throw new HttpsError("permission-denied", "유효하지 않은 업체코드입니다");
+  }
+
+  const secRef = partnerSecretRef(db, companyId, code);
+  const before = await secRef.get();
+  const password = generateInitialPartnerPassword();
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  await secRef.set({
+    companyId, partnerCode: code,
+    passwordHash: hashPartnerPassword(password),
+    passwordInitial: true,
+    issuedAt: now, issuedBy: request.auth.uid, updatedAt: now,
+  }, { merge: true });
+  // 🔴 발급 **시각만** 공개 문서에 남긴다 — 해시·평문은 절대 아니다. 관리자 화면이 «누구에게
+  //    아직 안 줬나» 를 알아야 거래처 단위 롤아웃(발급 → 전달 → 켜기)이 가능하고, 그 값을
+  //    얻자고 CF 를 한 번 더 부르는 것보다 싸다.
+  await snap.ref.set({ passwordIssuedAt: now }, { merge: true });
+
+  // 🔴 재발급이면 살아 있는 승계표를 끊는다 — 안 끊으면 «비밀번호를 새로 줬는데 옛 브라우저는
+  //    그대로 들어가 있는» 상태가 된다(담당자 교체가 재발급의 주된 이유다).
+  let revoked = 0;
+  if (before.exists) {
+    const sessions = await db.collection("companies").doc(companyId)
+      .collection("partnerSessions").where("partnerCode", "==", code).get();
+    const batch = db.batch();
+    sessions.docs.forEach((d) => { batch.delete(d.ref); });
+    if (sessions.size) await batch.commit();
+    revoked = sessions.size;
+  }
+
+  console.log("[포털인증] 초기 비밀번호 " + (before.exists ? "재발급" : "발급") + " " + code
+    + " · 끊은 세션 " + revoked + " · by=" + request.auth.uid);
+  // 🔴 평문은 여기서만 존재한다 — 로그에 찍지 말 것.
+  return {
+    ok: true, partnerCode: code, partnerName: cd.partnerName || "",
+    password, reissued: before.exists, revokedSessions: revoked,
+  };
 });

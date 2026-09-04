@@ -123,6 +123,25 @@ service cloud.firestore {
         allow read, write: if false;
       }
 
+      // ─── 협력사 포털 비밀번호 (2026-09-04 P3-b) ────────
+      // `passwordHash` 만 담는다. 🔴 왜 `partnerCodes` 에 안 두나 = 그 컬렉션은
+      // **read 가 `true`(공개)** 라 익명으로 업체코드 11개가 전부 읽힌다(2026-08-28 실측).
+      // 거기에 해시를 두면 ⓐ 값이 새고 ⓑ 남이 덮어써 그 거래처 포털로 들어간다
+      // — `passengerSecrets` 를 분리한 것(P3-a)과 **같은 이유·같은 모양**이다.
+      // 🔴 클라 접근 전면 차단 — 읽기·쓰기 모두 Admin SDK(CF) 전용.
+      //    쓰는 곳 = partnerIssuePassword(관리자 발급) · partnerSetPassword(본인 변경).
+      match /partnerSecrets/{code} {
+        allow read, write: if false;
+      }
+
+      // ─── 협력사 포털 세션 승계표 (2026-09-04 P3-b) ────
+      // CF partnerLogin/partnerResume 가 발급한 resumeToken 의 **해시만** 담긴다.
+      // 🔴 클라 접근 전면 차단 — 이 문서 ID 를 얻는 것은 곧 그 거래처 포털 로그인이다.
+      //    passengerSessions 와 같은 패턴. 읽기·쓰기 모두 Admin SDK(CF) 전용.
+      match /partnerSessions/{tokenHash} {
+        allow read, write: if false;
+      }
+
       match /boardings/{date}/list/{boardingId} {
         // 협력사 포털 탑승 통계 view용으로 isAuth() 허용 (2026-05-26).
         // passengers·fcmTokens와 동일 패턴 — companyId 경로 자체가 회사 분리,

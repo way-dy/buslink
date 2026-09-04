@@ -36,6 +36,10 @@ import { applyPartnerBranding, clearPartnerBranding } from "../lib/partnerBrandi
 import { savePartnerSession, loadPartnerSession, clearPartnerSession } from "../lib/partnerSession";
 // 뒤로가기 = 앱 안의 이전 화면, 나갈 때만 확인 모달(2026-09-02 way).
 import { useBackNav } from "../lib/useBackNav";
+// 포털 인증(2026-09-04 P3-b) — 🔴 `authRequired` 를 켠 거래처만 비밀번호를 묻는다.
+//    부재·falsy 면 아래 경로가 **지금과 글자 그대로 같다**(업체코드만으로 진입).
+import { partnerLogin, partnerResume, partnerLogout, partnerSetPassword } from "../lib/partnerAuth";
+import { isPartnerAuthRequired, checkNewPartnerPassword } from "../lib/partnerAuthPolicy";
 
 // 버스 마커 "신호 지연" 임계 — 관리자 실시간 관제 MARKER_STALE_MS 와 같은 값(5분).
 // 🔴 60초(GPS 신선도)로 낮추지 말 것: 단말 차량은 서버 폴러가 1분 주기라 매 분 깜빡인다.
@@ -130,6 +134,57 @@ function ConfirmDialog({ title, body, confirmLabel, cancelLabel, tone = "primary
   );
 }
 
+// ── 첫 로그인 비밀번호 변경(강제) ───────────────────────
+// 승객 `FirstPinSetup`(2026-07-27)과 **같은 패턴**: 발급받은 초기 비밀번호로는 업무를 못 하고,
+// 본인 비밀번호를 정해야 통과한다. 🔴 «건너뛰기» 를 만들지 않는다 — 만들면 초기 비밀번호가
+//    영영 살아 있고, 그 값은 발급 화면을 본 사람 전부가 아는 값이다.
+// 🔴 «로그인은 되었다» 를 먼저 말한다 — 2026-09-01 승객 사고에서 배운 것. 같은 화면이 반복
+//    되면 사용자는 «로그인이 안 된다» 로 읽고 비밀번호를 계속 다시 넣는다(무한 루프처럼 보인다).
+function PartnerPasswordSetup({ partnerName, code, onDone, onLogout }) {
+  const [pw1, setPw1] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const submit = async () => {
+    setErr("");
+    // 판정은 정본 한 곳(`partnerAuthPolicy`) — 서버 `checkNewPartnerPassword` 와 같은 규칙이다.
+    const chk = checkNewPartnerPassword(pw1, { currentCode: code });
+    if (!chk.ok) { setErr(chk.message); return; }
+    if (pw1 !== pw2) { setErr("두 번 입력한 비밀번호가 다릅니다"); return; }
+    setBusy(true);
+    try { await partnerSetPassword({ newPassword: pw1 }); onDone(); }
+    catch (e) { setErr(e?.message || String(e)); }
+    setBusy(false);
+  };
+
+  return (
+    <div style={S.wrap}>
+      <div style={{ ...S.card, maxWidth:420 }}>
+        <div style={S.header}><BusLinkLogo size={26} sub="협력사 포털" /></div>
+        <div style={S.title}>비밀번호를 새로 정해주세요</div>
+        <div style={S.desc}>
+          <b>{partnerName}</b> 로그인은 정상적으로 되었습니다.<br />
+          발급받은 초기 비밀번호는 이번 한 번만 쓸 수 있습니다 — 본인만 아는 비밀번호를 정하면 바로 이용하실 수 있습니다.
+        </div>
+        <input style={S.input} type="password" placeholder="새 비밀번호" autoComplete="new-password"
+          value={pw1} onChange={e => setPw1(e.target.value)} autoFocus />
+        <input style={S.input} type="password" placeholder="새 비밀번호 확인" autoComplete="new-password"
+          value={pw2} onChange={e => setPw2(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && submit()} />
+        {err && <div style={S.errorMsg}>{err}</div>}
+        <button style={{ ...S.btn, marginTop:4, opacity: pw1 && pw2 ? 1 : 0.5 }}
+          onClick={submit} disabled={busy || !pw1 || !pw2}>
+          {busy ? "저장 중..." : "설정하고 시작하기"}
+        </button>
+        {/* 잘못 들어온 사람에게 나갈 길은 남긴다(승객앱 «다른 계정으로 로그인» 과 같은 자리). */}
+        <button style={S.btnSecondary} onClick={onLogout}>다른 업체코드로 로그인</button>
+        <div style={S.notice}>비밀번호는 8자 이상이어야 하며, 업체코드와 같은 값은 쓸 수 없습니다</div>
+      </div>
+    </div>
+  );
+}
+
 // 익명 인증 1회(2026-05-26) — `companies/**` read 규칙이 `isAuth()` 라 노선·명부를 읽으려면
 // 반드시 먼저 끝나 있어야 한다.
 // 🔴 프라미스를 memo 해서 **읽는 쪽이 기다릴 수 있게** 한다(2026-09-02). 예전에는 마운트
@@ -180,6 +235,14 @@ export default function PartnerApp() {
   // 코드는 아직 이 기기에 있는데 못 들어간 상태(통신 실패 등) — 다시 시도 통로를 준다.
   const [restoreFailed, setRestoreFailed] = useState(false);
 
+  // ── 포털 인증(2026-09-04 P3-b) ─────────────────────────
+  // 🔴 `authRequired` 가 꺼진(=부재) 거래처에서는 이 셋이 **전부 비어 있고**, 아래 경로들이
+  //    예전과 똑같이 돈다. 켠 거래처에서만 비밀번호 화면·승계표·변경 강제가 생긴다.
+  const [password, setPassword] = useState("");
+  const [authPending, setAuthPending] = useState(null);   // { code, data } — 비밀번호 대기 중
+  const [resumeToken, setResumeToken] = useState(null);   // 🔴 화면에 찍거나 URL 에 싣지 말 것
+  const [mustSetPassword, setMustSetPassword] = useState(false);
+
   // ── 앱 안의 뒤로가기(2026-09-02) ────────────────────────
   // 화면 = {step, mainTab, regMode, result} 한 벌. 이동할 때 지금 화면을 스택에 얹고,
   // 뒤로가기가 오면 하나 꺼내 되돌린다. 스택이 비면 그때만 "나가시겠습니까".
@@ -208,6 +271,20 @@ export default function PartnerApp() {
     if ("result" in patch) setResult(patch.result);
   };
 
+  // ── 인증 통과 후 공통 진입 ──────────────────────────────
+  // 🔴 코드-only 경로와 비밀번호 경로가 **같은 함수**를 쓴다 — 두 벌로 두면 한쪽만 고쳐져
+  //    «비밀번호를 켠 거래처에서만 노선이 안 뜬다» 같은 결함이 생긴다.
+  const enterPortal = async (trimmed, data, rt) => {
+    setCodeData(data);
+    setRoutes(await fetchPartnerRoutes(data.companyId));
+    setResumeToken(rt || null);
+    // 코드-only 거래처는 예전과 똑같이 **코드만** 남긴다(승계표 인자 없음).
+    savePartnerSession(trimmed, rt ? { resumeToken: rt } : undefined);
+    viewStack.current = [];   // 메인이 뿌리 화면 — 여기서 뒤로가면 나가기 확인이다
+    setAuthPending(null); setPassword(""); setError("");
+    setStep(STEPS.MAIN);
+  };
+
   // ── 저장된 인증 복원(2026-09-02 way "로그인 계속 유지") ──
   // 🔴 저장해 둔 권한을 그대로 믿지 않고 `validatePartnerCode` 로 **서버에 다시 묻는다** —
   //    관리자가 코드를 비활성화·만료시키면 다음 진입에서 바로 막혀야 한다.
@@ -218,6 +295,27 @@ export default function PartnerApp() {
     (async () => {
       try {
         const data = await validatePartnerCode(saved.code);
+        if (!alive) return;
+        // 🔴 켠 거래처는 승계표(resumeToken)로 되살린다 — 없으면 비밀번호를 다시 묻는다.
+        //    승계가 실패해도 **업체코드는 지우지 않는다**(2026-09-02 에 없앤 재타이핑이 돌아온다).
+        if (isPartnerAuthRequired(data)) {
+          if (saved.resumeToken) {
+            try {
+              const res = await partnerResume({ companyId: data.companyId, resumeToken: saved.resumeToken });
+              if (!alive) return;
+              setCode(saved.code);
+              await enterPortal(saved.code, data, res.resumeToken);
+              if (res.passwordInitial) setMustSetPassword(true);
+              return;
+            } catch (re) {
+              savePartnerSession(saved.code);   // 죽은 승계표만 버린다(코드는 남긴다)
+            }
+          }
+          if (!alive) return;
+          setCode(saved.code);
+          setAuthPending({ code: saved.code, data });
+          return;
+        }
         const rs = await fetchPartnerRoutes(data.companyId);
         if (!alive) return;
         setCode(saved.code); setCodeData(data); setRoutes(rs); setStep(STEPS.MAIN);
@@ -263,13 +361,33 @@ export default function PartnerApp() {
     try {
       const trimmed = code.trim();
       const data = await validatePartnerCode(trimmed);
-      setCodeData(data);
-      setRoutes(await fetchPartnerRoutes(data.companyId));
-      // 이 기기에 인증을 남긴다 — 뒤로가기·새로고침·앱 전환에도 코드를 다시 안 묻는다.
-      savePartnerSession(trimmed);
-      viewStack.current = [];   // 메인이 뿌리 화면 — 여기서 뒤로가면 나가기 확인이다
-      setStep(STEPS.MAIN);
+      // 🔴 켠 거래처만 여기서 멈추고 비밀번호를 묻는다. 꺼진 거래처는 곧장 enterPortal —
+      //    예전 코드와 같은 순서·같은 부작용이다(코드만 저장·viewStack 비움·MAIN).
+      if (isPartnerAuthRequired(data)) {
+        setAuthPending({ code: trimmed, data });
+        setPassword("");
+        setLoading(false);
+        return;
+      }
+      await enterPortal(trimmed, data, null);
     } catch (e) { setError(e.message); }
+    setLoading(false);
+  };
+
+  // 비밀번호 로그인 — 켠 거래처 전용.
+  const handlePasswordSubmit = async () => {
+    if (!authPending || !password) return;
+    setLoading(true); setError("");
+    try {
+      // 🔴 익명 로그인을 **먼저 끝낸다** — 늦게 착지하면 방금 받은 포털 커스텀 토큰을 덮는다
+      //    (2026-09-02 «사람이 타이핑하는 시간이 비동기 선행조건을 덮고 있었다» 와 같은 축).
+      await ensureAnonAuth();
+      const res = await partnerLogin({
+        companyId: authPending.data.companyId, code: authPending.code, password,
+      });
+      await enterPortal(authPending.code, authPending.data, res.resumeToken);
+      if (res.passwordInitial) setMustSetPassword(true);
+    } catch (e) { setError(e?.message || String(e)); }
     setLoading(false);
   };
 
@@ -285,10 +403,16 @@ export default function PartnerApp() {
 
   // 인증 해제 — 공용 PC 대비. 저장된 코드를 지우고 첫 화면으로 되돌린다.
   const handleLogout = () => {
+    // 🔴 서버 승계표까지 끊는다(공용 PC 대비 — 기기 localStorage 만 지우면 그 값이 복사돼
+    //    있을 때 계속 살아 있다). best-effort: 실패해도 화면 로그아웃은 진행한다.
+    if (resumeToken && codeData?.companyId) {
+      partnerLogout({ companyId: codeData.companyId, resumeToken });
+    }
     clearPartnerSession();
     viewStack.current = [];
     setLogoutAsk(false);
     setCode(""); setCodeData(null); setRoutes([]); setResult(null); setError("");
+    setResumeToken(null); setMustSetPassword(false); setAuthPending(null); setPassword("");
     setMainTab("register"); setRegMode(REG_MODES.FILE);
     setStep(STEPS.CODE);
   };
@@ -416,6 +540,23 @@ export default function PartnerApp() {
     );
   }
 
+  // ── 첫 로그인 비밀번호 변경 강제 ──
+  // 🔴 통과 전에는 포털 어느 화면도 열지 않는다(승객 FirstPinSetup 과 같은 계약).
+  if (mustSetPassword && codeData) {
+    return (
+      <>
+        <PartnerPasswordSetup
+          partnerName={codeData.partnerName} code={code}
+          onDone={() => setMustSetPassword(false)}
+          onLogout={handleLogout}
+        />
+        {/* 🔴 확인 모달을 여기서도 그린다 — 이 화면에서 뒤로가기를 누르면 나가기 확인이
+            떠야 한다. 안 그리면 «뒤로가기가 아무 일도 안 하는» 상태가 된다. */}
+        {dialogs}
+      </>
+    );
+  }
+
   // ════════════════════════════════════════════════════════
   // PC 레이아웃(≥1024px) — 관리자 콘솔과 같은 셸(고정 사이드바 + 가로 채움).
   // 2026-09-02 way: "PC에서는 화면이 가로로 채워져서 우리 어드민 페이지처럼 관리했으면".
@@ -525,16 +666,42 @@ export default function PartnerApp() {
         {/* ─── STEP 1: 업체코드 ─── */}
         {step === STEPS.CODE && (
           <>
-            <div style={S.title}>업체코드를 입력해주세요</div>
-            <div style={S.desc}>버스 운영사로부터 발급받은 업체코드를 입력하세요</div>
-            <input style={S.input} placeholder="예) DY001-SAMSUNG-2026-A3F9"
-              value={code} onChange={e => setCode(e.target.value.toUpperCase())}
-              onKeyDown={e => e.key === "Enter" && handleCodeSubmit()} autoFocus />
-            {error && <div style={S.errorMsg}>{error}</div>}
-            <button style={{ ...S.btn, marginTop:4, opacity: code.trim()?1:0.5 }}
-              onClick={handleCodeSubmit} disabled={loading||!code.trim()}>
-              {loading?"확인 중...":"인증하기"}
-            </button>
+            {/* 🔴 authPending 은 `authRequired` 를 켠 거래처에서만 채워진다 — 꺼진 곳은
+                이 분기에 들어오지 않고 아래 업체코드 화면이 예전 그대로 뜬다. */}
+            {authPending ? (
+              <>
+                <div style={S.title}>비밀번호를 입력해주세요</div>
+                <div style={S.desc}>
+                  <b>{authPending.data.partnerName}</b> 담당자 비밀번호를 입력하세요.<br />
+                  운영사에서 받은 초기 비밀번호를 넣으면 새 비밀번호를 정하는 화면으로 넘어갑니다.
+                </div>
+                <input style={S.input} type="password" placeholder="비밀번호" autoComplete="current-password"
+                  value={password} onChange={e => setPassword(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handlePasswordSubmit()} autoFocus />
+                {error && <div style={S.errorMsg}>{error}</div>}
+                <button style={{ ...S.btn, marginTop:4, opacity: password ? 1 : 0.5 }}
+                  onClick={handlePasswordSubmit} disabled={loading || !password}>
+                  {loading ? "확인 중..." : "로그인"}
+                </button>
+                <button style={S.btnSecondary}
+                  onClick={() => { setAuthPending(null); setPassword(""); setError(""); }}>
+                  다른 업체코드 입력
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={S.title}>업체코드를 입력해주세요</div>
+                <div style={S.desc}>버스 운영사로부터 발급받은 업체코드를 입력하세요</div>
+                <input style={S.input} placeholder="예) DY001-SAMSUNG-2026-A3F9"
+                  value={code} onChange={e => setCode(e.target.value.toUpperCase())}
+                  onKeyDown={e => e.key === "Enter" && handleCodeSubmit()} autoFocus />
+                {error && <div style={S.errorMsg}>{error}</div>}
+                <button style={{ ...S.btn, marginTop:4, opacity: code.trim()?1:0.5 }}
+                  onClick={handleCodeSubmit} disabled={loading||!code.trim()}>
+                  {loading?"확인 중...":"인증하기"}
+                </button>
+              </>
+            )}
             {/* 저장된 코드는 그대로 있는데 통신 문제로 못 들어간 경우 — 다시 치게 하지 않는다. */}
             {restoreFailed && (
               <button style={S.btnSecondary} onClick={() => window.location.reload()}>

@@ -15,6 +15,11 @@ const BASE = process.env.BASE || "http://localhost:3000";
 const COMPANY = "dy001";
 const ROOT = path.join(__dirname, "..");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// 🔴 탭은 셸에 따라 태그가 다르다 — PC(2026-09-02 어드민형 셸)는 <nav><div onClick>, 모바일은 <button>.
+//    `locator("button",{hasText})` 로 잡으면 1280px 에서 0개가 되어 하네스가 통째로 죽는다
+//    (2026-09-04 실측: 포털 하네스 5개가 09-02 이래 전부 죽어 있었다). 태그가 아니라 **라벨**로 잡는다.
+const tabByLabel = (page, label) => page.locator("nav div, button").filter({ hasText: label }).first();
+
 
 function loadDb() {
   const admin = require(path.join(ROOT, "functions", "node_modules", "firebase-admin"));
@@ -61,7 +66,7 @@ function loadDb() {
   const btn = page.locator('button:has-text("확인"), button:has-text("인증"), button:has-text("다음")');
   if (await btn.count()) await btn.first().click().catch(() => {});
   await sleep(3500);
-  await page.locator("button", { hasText: "운영 포털" }).first().click({ timeout: 10000 });
+  await tabByLabel(page, "운영 포털").click({ timeout: 10000 });
   await sleep(5000);
 
   // "🛣 자사 노선" 섹션의 카드 = 노선명 + '👤 N명' 을 함께 가진 요소

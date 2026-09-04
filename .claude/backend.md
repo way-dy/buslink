@@ -34,7 +34,9 @@
 - `boardingTokens`/`partnerCodes`: read 공개(`true`), 소각/생성은 인증 사용자.
 - `nfcRejects/{date}/list/{id}`(2026-07-22): read=`isAdmin(companyId)`, **write=`false`**(CF Admin SDK 전용 — 클라 위조 부정승차 기록 차단). `companies/**` 는 catch-all 이 없어 하위 컬렉션마다 명시 블록 필수.
 - `boardings/{date}/list/{id}`: read·create = `isAuth()`(2026-05-26 완화 — 협력사 포털 통계 view 위해 admin→isAuth), update/delete는 admin. ⚠ BoardingApp·EmployeeApp·PassengerApp·PartnerApp·DriverApp 모든 진입점이 `signInAnonymously` 호출 필요(인증 누락 시 silent create 차단 → 통계 결측, 2026-05-26 BoardingApp 결함 사례 참조).
-- `partnerCodes`: read 공개, create/update = `isAuth()`, delete = `isAdmin(resource.data.companyId)`(2026-05-26 — admin이 자기 회사 협력사 영구 삭제 가능, UI는 비활성 상태에서만 허용).
+- `partnerCodes`: read 공개, create/update = `isAuth()`, delete = `isAdmin(resource.data.companyId)`(2026-05-26 — admin이 자기 회사 협력사 영구 삭제 가능, UI는 비활성 상태에서만 허용). + (선택, 2026-09-04 P3-b) **`authRequired:boolean`**(부재·falsy=꺼짐=현행 코드-only 진입. 켜면 포털이 업체코드+비밀번호를 요구한다. **거래처 단위 수동 토글** — 한 번에 전부 켜지 말 것) · **`passwordIssuedAt`**(발급 시각만. 🔴 해시·평문은 절대 여기 두지 말 것 — read 가 공개다).
+- **`companies/{cid}/partnerSecrets/{code}`**(2026-09-04 P3-b): 협력사 포털 비밀번호 `passwordHash`(sha256 + salt `buslink_partner_salt_2026` — 🔴 승객 salt 와 일부러 다르다) + `passwordInitial`. rules **`allow read, write: if false`** — Admin SDK(CF) 전용. 쓰는 곳 = `partnerIssuePassword`·`partnerSetPassword`.
+- **`companies/{cid}/partnerSessions/{sha256(resumeToken)}`**(2026-09-04 P3-b): `{companyId, partnerCode, createdAt, lastUsedAt}`. rules **`allow read, write: if false`**. `passengerSessions` 와 같은 패턴 — 이 문서 ID 를 얻는 것이 곧 그 거래처 포털 로그인이다.
 - `fcmQueue`: create만 인증, read는 admin(자기 회사 companyId 일치), update는 `false`(CF 전용). admin read 필요 이유=NoticeTab이 발송 결과(status/successCount/totalTokens) 실시간 onSnapshot 구독.
 - `improvement_requests`(2026-07-13): read/create/update/delete = `isSuperAdmin() || isAdmin(companyId)`(create 는 request.resource.data.companyId, 나머지는 resource.data.companyId). `config/{docId}`: read/write=`isSuperAdmin()`. catch-all 없어 명시 블록 필수.
 - ⚠️ `src/firestore.rules`는 **오래된 사본** — @.claude/issues.md.

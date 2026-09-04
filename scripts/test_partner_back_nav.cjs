@@ -249,7 +249,13 @@ console.log("\n[9] 인증 세션 — 코드만 남기고, 늙으면 스스로 �
 console.log("\n[10] 소스 회귀 가드 — 배선이 살아 있는가");
 {
   ok("PartnerApp 이 뒤로가기 훅을 쓴다", /useBackNav\(\{/.test(partnerSrc));
-  ok("인증 성공 시 세션을 남긴다", /savePartnerSession\(trimmed\)/.test(partnerSrc));
+  // ⚠ 2026-09-04(P3-b): 저장 호출이 `handleCodeSubmit` 에서 공통 진입 `enterPortal` 로 옮겨졌고
+  //    켠 거래처면 승계표를 함께 남기느라 인자가 하나 늘었다. **지키려는 불변식은 그대로**다 —
+  //    «인증에 성공한 그 코드로 세션을 남긴다». 리터럴이 아니라 그 불변식을 잰다.
+  ok("인증 성공 시 세션을 남긴다", /savePartnerSession\(trimmed/.test(partnerSrc));
+  ok("코드 인증이 공통 진입(enterPortal)으로 수렴한다",
+    /await enterPortal\(trimmed, data, null\)/.test(partnerSrc)
+    && /const enterPortal = async \(trimmed, data, rt\)/.test(partnerSrc));
   ok("복원 때 서버에 다시 묻는다(캐시한 권한을 안 믿는다)",
     /loadPartnerSession\(\);[\s\S]{0,600}validatePartnerCode\(saved\.code\)/.test(partnerSrc));
   // 🔴 나가기 안내를 window.confirm 으로 되돌리지 말 것(2026-09-02 way "모달 팝업으로").

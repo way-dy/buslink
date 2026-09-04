@@ -171,6 +171,32 @@ EmployeeApp 본인 문서 read/update(즐겨찾기·PIN 변경 — 클레임으�
 (`partnerCodes.{code}.authRequired`) → ④ 전부 켜지면 코드-only 진입 경로 제거.
 🔴 **한 번에 전 거래처를 켜지 말 것** — 못 받은 담당자가 그날 업무를 못 한다.
 
+### P3-b 1단계 구현 기록 (2026-09-04 · 코드 완료 · 🚧 미배포 · 전 거래처 «꺼짐»)
+
+**한 일** — 위 표를 그대로 구현했다. 새로 발명한 것은 없고 승객 P1 을 복제했다.
+- 판정 순수 모듈 **`functions/partnerAuth.js`**(`planPartnerLogin`·`planPartnerResume`·
+  `planPartnerCallerCheck`·`hashPartnerPassword`·`generateInitialPartnerPassword`·
+  `checkNewPartnerPassword`·`partnerUidOf`·`partnerSessionDocId`) — `index.js` 는 얇게.
+- CF 5종 `partnerLogin`/`partnerResume`/`partnerLogout`/`partnerSetPassword`/`partnerIssuePassword`.
+- 컬렉션 2종 `companies/{cid}/partnerSecrets/{code}` · `partnerSessions/{tokenHash}` (rules `if false`).
+- `partnerCodes.{code}.authRequired`(**기본 꺼짐**) + `passwordIssuedAt`(시각만).
+- 클라 거울 **`src/lib/partnerAuthPolicy.js`** — 길이·글자집합·안내 문구 상수를 서버와 공유하고
+  `scripts/test_partner_auth.cjs` 가 **양쪽을 대조**한다(2026-09-01 승객 초기 PIN 사고 재발 방지).
+- `assertPartnerCaller` 강화 — 켠 거래처는 토큰 필수, **토큰이 있으면 토큰이 정본**.
+
+**설계와 갈린 판단 3건(근거)**
+1. **초기 비밀번호 = 랜덤 10자리**(승객은 고정 `000000`). 근거 = 업체코드가 공개값이라 고정
+   기본값을 쓰면 «코드 목록 + 알려진 값» 으로 전 거래처가 한 번에 열린다. 대상이 담당자 11곳뿐이라
+   개별 전달이 실제로 가능하다. 헷갈리는 글자(0 O o 1 l I)는 뺀다(화면에서 읽어 옮겨 적는 값).
+2. **`passwordInitial` 은 `partnerSecrets` 안에** 둔다(승객은 명부 문서에 `pinInitial` 이 있다).
+   `partnerCodes` 는 read 가 공개라 «아직 초기 비밀번호를 쓰는 거래처» 를 광고하지 않는다.
+3. **`passwordIssuedAt`(시각만) 은 `partnerCodes` 에** 남긴다. 관리자 화면이 «누구에게 아직 안
+   줬나» 를 알아야 거래처 단위 롤아웃이 성립하고, 그 한 값 때문에 CF 를 또 부르는 것보다 싸다.
+   🔴 해시·평문은 절대 여기 두지 않는다.
+
+**검증** — 격리 **90단언**(대조군 7/7 실패 확인 = 공허하지 않음) · 게이트 45→46/46 ·
+rules dry-run compile OK · 빌드 신규 경고 0. **미검증 = 실호출·실화면**.
+
 ### 그다음(P3-c → P4)에 남는 것
 - P3-c: 목록·수정·삭제·집계를 포털 CF 로(토큰이 생겼으니 인증이 진짜가 된다)
 - P4: `passengers` read 를 신원으로 좁히고 **write 는 `false`** · `partnerCodes` 공개분을

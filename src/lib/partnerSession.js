@@ -25,12 +25,23 @@ function pick(storage) {
   } catch { return null; }
 }
 
-/** 인증 성공 직후 호출. 코드 문자열 하나만 남긴다. */
-export function savePartnerSession(code, { now = Date.now(), storage } = {}) {
+/**
+ * 인증 성공 직후 호출. 코드 문자열(+ 켠 거래처면 승계표)만 남긴다.
+ *
+ * 🔴 `resumeToken` 은 2026-09-04(P3-b)에 추가됐다 — 포털에 진짜 인증이 생겼고, 이 라우트는
+ *    `inMemoryPersistence` 라(firebase.js 익명 앱) **새로고침하면 커스텀 토큰이 사라지기**
+ *    때문이다. 승객앱이 `resumeToken` 을 기기에 두는 것과 **같은 구조**다.
+ *    ⚠ 이건 «권한 정보»가 아니라 **자격증명**이다 — 서버엔 해시만 남고, 이 값이 있어도
+ *      코드가 비활성·만료면 `partnerResume` 이 거부하고 승계표를 지운다.
+ *    ⚠ `authRequired` 를 안 켠 거래처는 이 값이 **없다**(현행 코드-only 경로 그대로).
+ */
+export function savePartnerSession(code, { now = Date.now(), storage, resumeToken } = {}) {
   const s = pick(storage);
   if (!s || !code) return false;
   try {
-    s.setItem(PARTNER_SESSION_KEY, JSON.stringify({ code: String(code).trim(), savedAt: now }));
+    const rec = { code: String(code).trim(), savedAt: now };
+    if (resumeToken) rec.resumeToken = String(resumeToken);
+    s.setItem(PARTNER_SESSION_KEY, JSON.stringify(rec));
     return true;
   } catch { return false; }
 }
@@ -50,7 +61,13 @@ export function loadPartnerSession({ now = Date.now(), storage } = {}) {
   if (!data || typeof data.code !== "string" || !data.code.trim()) return null;
   const savedAt = typeof data.savedAt === "number" ? data.savedAt : 0;
   if (!savedAt || now - savedAt > PARTNER_SESSION_TTL_MS) return null;
-  return { code: data.code.trim(), savedAt };
+  // 🔴 `resumeToken` 부재 = 예전에 저장된 기기(또는 안 켠 거래처). 그 경우에도 `code` 는
+  //    그대로 살아 있어야 한다 — 없다고 지우면 2026-09-02 에 없앤 «코드 재타이핑» 이 돌아온다.
+  return {
+    code: data.code.trim(),
+    savedAt,
+    resumeToken: typeof data.resumeToken === "string" && data.resumeToken ? data.resumeToken : null,
+  };
 }
 
 /** '인증 해제' · 복원 실패(비활성·만료) 시 호출. */
