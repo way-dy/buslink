@@ -2,6 +2,18 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
+> **2026-09-04 — 게시판 `Fk7rY3Ey…`(배시현) 배차일정 «거래처 통합 운행일 설정» · ✅ prod 배포 완료 · `--only hosting`**: 요청 = 방학·재량휴업일·공휴일처럼 여러 노선이 같이 쉬는 기간을 **일정마다 건별로 고치지 않고 한 번에**. 첨부는 **AI 로 만든 모형**(정본 아님).
+> **실측으로 확인한 것 — 새 데이터 모델이 필요 없다**: 일정별 휴무일은 이미 `dispatchSchedules/{id}.excludeDates: string[]` 이고 판정 정본은 `src/lib/dispatchSchedule.js shouldExpandOn`, 이미 펼쳐진 배차 정리는 `AdminApp.js:2073 pruneScheduleDispatches` 다. 즉 이번 건은 **그 둘을 여러 일정에 한 번에 거는 화면**이다.
+> **설계** = 신규 순수 모듈 `src/lib/bulkOperatingDays.js`(기간 전개·대상 선별·일정별 excludeDates 계획) + `DispatchScheduleTab` 에 「📅 통합 운행일 설정」 모달. 거래처·구분(`routeKind`)·기간·운행/운행중지 → 대상 일정 수를 **적용 전에 보여주고** 확인받는다.
+> 🔴 **모형의 「기존 설정 유지」 라디오는 만들지 않는다** — 고르고 눌러도 아무 일도 안 일어나는 버튼이라 «먹통» 으로 신고된다. 기본값을 **운행 중지**(실제 용례: 방학·재량휴업일)로 두고 「운행」을 되돌리기로 쓴다.
+> 🔴 **«운행» 은 만능이 아니다** — `excludeDates` 에서 빼는 것뿐이라 공휴일(`excludeHolidays`)·운행 요일이 아닌 날은 그대로 쉰다. 화면에 그 한계를 적는다(안 적으면 «켰는데 안 나온다» 가 된다).
+> **검증** = 격리 **62단언**(`scripts/test_bulk_operating_days.cjs`) · 게이트 47→**48/48** · 빌드 신규 경고 0(21↔21) · 실화면 **26단언**(신규 `scripts/headless_check_bulk_operating_days.cjs` — local·prod 둘 다 통과. 🔴 **「일괄 적용」은 누르지 않는다**).
+> 🔴 **게이트가 진짜 결함을 잡았다** — `partnerOptions` 를 `new Map(...)` 으로 썼는데 이 파일은 카카오 SDK 의 `Map` 을 import 해 **내장 Map 이 가려진다**(2026-08-10 에 이미 밟은 함정). 그대로 나갔으면 **모달을 여는 순간 관리자 콘솔이 통째로 죽는다**. `test_shadowed_globals.cjs` 가 배포 전에 잡았고 `new window.Map()` 으로 고쳤다.
+> **뮤테이션 대조군 4종** = 비활성 제외 삭제·원래 운행일 필터 삭제·거래처 가드 삭제는 전부 빨간불. 「역순 가드 삭제」만 **동치 뮤턴트**(while 루프가 같은 결과를 낸다). 🔴 「거래처 가드」는 처음에 **소스 가드만** 잡고 동작 단언은 통과했다 = 진짜 구멍 → 표본에 `partnerCode: ""` 노선을 넣어 막았다(이제 동작으로 잡힌다).
+> 🔴 **실화면이 잡은 것** = 채드윅 칩 `[전체 노선, 등교, 하교, 방과후]` · 전체 **29개 → 등교 16개**(모형이 그린 시나리오가 실제로 돈다) · 역순 기간이면 「일괄 적용」이 **눌리지 않는다**.
+> ⚠ **미검증 = 「일괄 적용」 쓰기 경로 실호출 0건**. 하네스는 일부러 안 누른다(실제 일정 수십 개가 바뀐다). 샘플 거래처로 태우려 했으나 **그 거래처엔 배차 일정이 0개**라(`scripts/inspect_bulk_sample_scope.cjs` 실측 — 신촌 43·채드윅 29·나머지 1~3) 안전한 표본이 없다. 대신 **위험이 실제로 있는 부분(내가 새로 짠 그룹핑)을 순수 함수 `collectByScheduleDay` 로 빼내** 가짜 배차로 «무엇이 지워지는지» 까지 쟀다([F] 8단언 — 남의 일정·수동 배차·운행 흔적이 삭제 대상에 안 들어오는지).
+> **다음 사람에게 — 첫 실사용 때 볼 것**: ⓐ 채드윅 방학 기간으로 한 번 걸고 목록의 `휴무 N일` 이 늘어나는지 ⓑ 오늘~+13일에 이미 만들어진 배차가 있으면 «함께 삭제할까요» 가 뜨는지 ⓒ 「운행」으로 되돌린 뒤 **「지금 펼치기」를 눌러야** 배차가 다시 생긴다(안내 문구로 알려 준다).
+
 > **2026-09-04 — 게시판 `ELDcdSFD…`(배시현) 승객앱 QR 탑승 노출 스위치 · ✅ prod 배포 완료 · `main.579ffd9f.js` · `--only hosting` · done**: 요청 = 「승객어플 홈 화면 중 QR탑승을 노출 안 시킬 수 있게 관리자가 설정」(첨부 = 채드윅 홈 우하단 `QR 탑승` 버튼에 빨간 밑줄).
 > **신설** = `src/lib/qrBoarding.js`(순수 · `resolveQrBoardingConfig`) · `partnerCodes/{code}.qrBoarding.visible` · 격리 `scripts/test_qr_boarding_visibility.cjs`.
 > **수정** = `EmployeeApp.js`(`qrBoardingOn` state · `visibleTabsFor(inq, home, scanOn=true)` · `onScanTab={qrBoardingOn ? … : null}` · 홈 QR 버튼 2곳 가드 · 노선도 위 안내 문구 분기) · `AdminApp.js`(`pQrBoarding` · 포탈 설정 토글 · 목록 `QR 탑승 숨김` 배지 · 저장 payload).

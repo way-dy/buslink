@@ -14,6 +14,12 @@ import { compareRoutes, seatUsage } from "../lib/routeOrder";
 import {
   PRUNE_LOOKAHEAD_DAYS, todayKST, upcomingDates, selectPrunableDispatches, selectUpdatableDispatches,
 } from "../lib/dispatchSchedule";
+// 거래처 통합 운행일 설정(2026-09-04) — 여러 일정의 excludeDates 를 한 번에 계산(쓰기는 호출부)
+import {
+  BULK_MODES, BULK_MODE_LABELS, BULK_MAX_DAYS,
+  expandDateRange, selectBulkTargets, planBulkOperatingDays, summarizeChange, collectByScheduleDay,
+} from "../lib/bulkOperatingDays";
+import { availableRouteKinds } from "../lib/routeKind";
 import { sendGPS } from "../lib/gps";
 import { toLatLngPath } from "../lib/routeProgress";
 // 운행 이력 GPS 궤적 분해(2026-08-18) — 연속 구간/신호 공백/표본 간격 실측
@@ -1942,6 +1948,11 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
   const [form, setForm] = useState(blankScheduleForm());
   const [loading, setLoading] = useState(false);
   const [partnerCode, setPartnerCode] = useState("전체"); // 협력사 필터
+  // 통합 운행일 설정(2026-09-04 개선요청 Fk7rY3Ey…) — 방학·재량휴업일을 일정마다 안 고치게.
+  // 🔴 기본은 «운행 중지» 다(실제 용례). 「운행」은 되돌리기.
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulk, setBulk] = useState({ partner: "", kinds: [], from: "", to: "", mode: BULK_MODES.OFF });
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   useEffect(() => {
     if (!companyId) return;
@@ -2115,6 +2126,104 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
       : `배차 ${done}/${prunable.length}건을 삭제했습니다. 남은 건은 배차 관리 탭에서 확인해주세요.`);
   };
 
+  // ── 통합 운행일 설정 — 여러 일정의 휴무일을 한 번에 (2026-09-04) ──────────────
+  // 🔴 일정 하나짜리 `pruneScheduleDispatches` 를 대상 수만큼 돌리지 않는다 —
+  //    확인창이 일정마다 떠서(17개면 34번) 운영자가 내용을 안 읽고 누르게 된다.
+  //    여기서는 **날짜별로 한 번씩만 읽어** 전부 모은 뒤 확인을 한 번만 받는다.
+  const bulkPruneDispatches = async (nextById) => {
+    const today = todayKST();
+    const days = upcomingDates(today, PRUNE_LOOKAHEAD_DAYS);
+    const ids = Object.keys(nextById);
+    const entries = [];
+    for (const day of days) {
+      const snap = await getDocs(collection(db, "companies", companyId, "dispatches", day, "list"));
+      entries.push({ day, docs: snap.docs.map(d => ({ id: d.id, ...d.data() })) });
+    }
+    const byScheduleDay = collectByScheduleDay(entries, ids);
+    let prunable = [], keptWithTrace = [];
+    for (const id of ids) {
+      const r = selectPrunableDispatches({
+        scheduleId: id, schedule: nextById[id], dispatchesByDay: byScheduleDay[id] || {}, today,
+      });
+      prunable = prunable.concat(r.prunable);
+      keptWithTrace = keptWithTrace.concat(r.keptWithTrace);
+    }
+    if (prunable.length === 0) {
+      return keptWithTrace.length > 0
+        ? `\n\n※ 이미 만들어진 배차 ${keptWithTrace.length}건은 운행 기록이 남아 있어 그대로 두었습니다.`
+        : "";
+    }
+    const preview = prunable.slice(0, 8).map(p => `· ${p.day} ${p.departTime} ${p.routeName}`).join("\n");
+    const more = prunable.length > 8 ? `\n… 외 ${prunable.length - 8}건` : "";
+    const traceNote = keptWithTrace.length > 0
+      ? `\n\n※ 운행 기록이 남은 ${keptWithTrace.length}건은 삭제하지 않습니다.` : "";
+    if (!window.confirm(
+      `쉬는 날로 바꾼 기간에 **이미 만들어진 배차** ${prunable.length}건이 남아 있습니다.\n함께 삭제할까요?\n\n${preview}${more}${traceNote}\n\n` +
+      `삭제하지 않으면 그날 관제 화면과 승객앱에 계속 운행중으로 표시됩니다.`
+    )) return `\n\n※ 이미 만들어진 배차 ${prunable.length}건은 그대로 두었습니다(그날은 계속 운행중으로 보입니다).`;
+    let done = 0;
+    for (const p of prunable) {
+      try { await deleteDoc(doc(db, "companies", companyId, "dispatches", p.day, "list", p.id)); done++; }
+      catch (e) { /* 개별 실패는 아래 합계로 알린다 */ }
+    }
+    return `\n\n이미 만들어진 배차 ${done}/${prunable.length}건을 삭제했습니다.`;
+  };
+
+  const handleBulkApply = async () => {
+    if (!bulk.partner) return alert("거래처를 선택해주세요.\n\n거래처를 고르지 않으면 회사 전체 노선이 대상이 되어 위험합니다.");
+    if (!bulk.from || !bulk.to) return alert("적용 기간을 입력해주세요");
+    const days = expandDateRange(bulk.from, bulk.to);
+    if (days.length === 0) {
+      return alert(`적용 기간을 다시 확인해주세요.\n\n· 시작일이 종료일보다 늦지 않아야 합니다\n· 한 번에 최대 ${BULK_MAX_DAYS}일까지 설정할 수 있습니다`);
+    }
+    // 🔴 권한 밖 일정은 애초에 대상에 넣지 않는다 — 목록에서 안 보이는 일정을 바꾸면 안 된다.
+    const { targets, skippedInactive } = selectBulkTargets({
+      schedules: schedules.filter(canSeeSchedule), routes, partnerCode: bulk.partner, kinds: bulk.kinds,
+    });
+    if (targets.length === 0) return alert("조건에 맞는 배차 일정이 없습니다.\n\n거래처와 적용 대상을 다시 확인해주세요.");
+    const { changes, unchanged, blocked } = planBulkOperatingDays({ targets, days, mode: bulk.mode });
+    const isOff = bulk.mode === BULK_MODES.OFF;
+    if (changes.length === 0) {
+      return alert(isOff
+        ? "이미 그 기간은 모두 쉬는 것으로 되어 있습니다."
+        : "그 기간에 막아 둔 날이 없습니다.\n\n공휴일이나 운행 요일이 아닌 날은 이 기능으로 운행하게 만들 수 없습니다.");
+    }
+    const preview = changes.slice(0, 10).map(c => `· ${summarizeChange(c)}`).join("\n");
+    const more = changes.length > 10 ? `\n… 외 ${changes.length - 10}개 일정` : "";
+    const notes = [
+      unchanged.length > 0 ? `이미 그렇게 되어 있는 일정 ${unchanged.length}개는 그대로 둡니다.` : "",
+      skippedInactive.length > 0 ? `사용 안 함 상태인 일정 ${skippedInactive.length}개는 제외했습니다.` : "",
+      // 🔴 못 되돌리는 날을 말하지 않으면 「켰는데 안 나온다」가 그대로 다음 문의가 된다.
+      (!isOff && blocked.length > 0) ? `공휴일·운행 요일이 아닌 ${new Set(blocked.map(b => b.day)).size}일은 그대로 쉽니다.` : "",
+    ].filter(Boolean).map(t => `※ ${t}`).join("\n");
+    if (!window.confirm(
+      `${bulk.from} ~ ${bulk.to} (${days.length}일)\n배차 일정 ${changes.length}개를 ${isOff ? "쉬는 것으로" : "운행하는 것으로"} 바꿉니다.\n\n${preview}${more}` +
+      (notes ? `\n\n${notes}` : "") + `\n\n계속할까요?`
+    )) return;
+
+    setBulkBusy(true);
+    let done = 0;
+    const nextById = {};
+    for (const c of changes) {
+      try {
+        await updateDoc(doc(db, "companies", companyId, "dispatchSchedules", c.scheduleId), { excludeDates: c.nextExcludeDates });
+        const base = targets.find(t => t.id === c.scheduleId);
+        nextById[c.scheduleId] = { ...base, excludeDates: c.nextExcludeDates };
+        done++;
+      } catch (e) { /* 개별 실패는 아래 합계로 알린다 */ }
+    }
+    // 이미 펼쳐진 배차는 일정만 고쳐서는 안 사라진다(CF 는 만들기만 한다) — 쉬는 쪽일 때만 정리한다.
+    let tail = "";
+    if (isOff && done > 0) { try { tail = await bulkPruneDispatches(nextById); } catch (e) { tail = ""; } }
+    // 다시 운행하게 바꾼 날은 새벽 자동 펼침(또는 「지금 펼치기」)이 배차를 만든다.
+    if (!isOff && done > 0) tail = `\n\n다시 운행하는 날의 배차는 오늘 밤 자동으로 만들어집니다. 바로 만들려면 「지금 펼치기」를 눌러주세요.`;
+    setBulkBusy(false);
+    alert((done === changes.length
+      ? `배차 일정 ${done}개를 바꿨습니다.`
+      : `배차 일정 ${done}/${changes.length}개를 바꿨습니다. 남은 건은 목록에서 확인해주세요.`) + tail);
+    if (done === changes.length) setBulkOpen(false);
+  };
+
   const handleSave = async () => {
     if (!form.name?.trim()) return alert("일정 이름을 입력해주세요");
     if (!form.routeId && !form.routeName?.trim()) return alert("노선을 선택해주세요");
@@ -2242,6 +2351,11 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
           <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} allowedCodes={allowed} />
           <span style={{ fontSize:11, color:"var(--color-label-alt)" }}>매일 새벽 00:30 자동 펼침 · 향후 7일치</span>
           <button style={{...S.editBtn, fontSize:12, padding:"6px 10px"}} onClick={handleExpandNow} disabled={loading}>지금 펼치기</button>
+          {/* 방학·재량휴업일처럼 여러 노선이 같이 쉬는 기간 — 일정마다 고치지 않게(2026-09-04) */}
+          <button style={{...S.editBtn, fontSize:12, padding:"6px 10px"}}
+            onClick={() => { setBulk(b => ({ ...b, partner: partnerCode !== "전체" ? partnerCode : "" })); setBulkOpen(true); }}>
+            📅 통합 운행일 설정
+          </button>
           <button style={S.addBtn} onClick={openAdd}>+ 일정 등록</button>
         </div>
       </div>
@@ -2406,6 +2520,126 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
           )}
         </div></div>
       )}
+
+      {/* ── 통합 운행일 설정 (2026-09-04 배시현 개선요청 Fk7rY3Ey…) ──────────────
+          🔴 새 저장소를 만들지 않는다 — 일정별 `excludeDates` 를 여러 개 한 번에 계산해 쓸 뿐이다.
+             별도 «휴무 기간» 컬렉션을 두면 서버 펼침(expandDispatchSchedules)까지 고쳐야 하고
+             그때부터 클라·서버가 같은 질문에 다른 답을 하기 시작한다. */}
+      {bulkOpen && (() => {
+        // 🔴 `new window.Map()` — 이 파일은 카카오 SDK 의 `Map` 을 import 해 내장 Map 이 가려진다.
+        //    `new Map()` 으로 쓰면 민파이 후 "_e is not a constructor" 로 콘솔이 통째로 죽는다(2026-08-10).
+        const partnerOptions = Array.from(
+          new window.Map(visibleRoutes.filter(r => r.partnerCode)
+            .map(r => [r.partnerCode, r.partnerName || r.partnerCode])).entries()
+        ).sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+        const partnerRoutes = routes.filter(r => r.partnerCode === bulk.partner);
+        // 🔴 그 거래처에 실제로 있는 구분만 — 없는 칩은 "고장난 필터"로 읽힌다(routeKind 규칙).
+        const kinds = availableRouteKinds(partnerRoutes);
+        const days = expandDateRange(bulk.from, bulk.to);
+        const { targets, skippedInactive } = selectBulkTargets({
+          schedules: schedules.filter(canSeeSchedule), routes, partnerCode: bulk.partner, kinds: bulk.kinds,
+        });
+        const plan = days.length > 0
+          ? planBulkOperatingDays({ targets, days, mode: bulk.mode })
+          : { changes: [], unchanged: [], blocked: [] };
+        const isOff = bulk.mode === BULK_MODES.OFF;
+        const rangeBad = !!(bulk.from && bulk.to) && days.length === 0;
+        const toggleKind = (k) => setBulk(b => ({
+          ...b, kinds: b.kinds.includes(k) ? b.kinds.filter(x => x !== k) : [...b.kinds, k],
+        }));
+        return (
+        <div style={S.overlay}><div style={{ ...S.modal, maxHeight:"88vh", overflowY:"auto" }}>
+          <div style={S.modalTitle}>📅 거래처 통합 운행일 설정</div>
+          <div style={{ fontSize:12, color:"var(--color-label-mute)", marginTop:-6, marginBottom:10, lineHeight:1.6 }}>
+            학교 방학·재량휴업일처럼 여러 노선이 같이 쉬는 기간을 거래처 단위로 한 번에 설정합니다.
+          </div>
+
+          <label style={S.label}>거래처 *</label>
+          <select style={S.input} value={bulk.partner}
+            onChange={e => setBulk(b => ({ ...b, partner: e.target.value, kinds: [] }))}>
+            <option value="">거래처를 선택하세요</option>
+            {partnerOptions.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
+          </select>
+
+          <label style={{ ...S.label, marginTop:12 }}>적용 대상</label>
+          {kinds.length === 0 ? (
+            <div style={{ fontSize:12, color:"var(--color-label-mute)" }}>
+              {bulk.partner ? "이 거래처의 모든 노선에 적용됩니다." : "거래처를 먼저 선택하세요."}
+            </div>
+          ) : (
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+              <button type="button" onClick={() => setBulk(b => ({ ...b, kinds: [] }))}
+                style={{ ...S.editBtn, padding:"6px 12px", fontSize:12, fontWeight:700,
+                  background: bulk.kinds.length === 0 ? "var(--color-primary)" : "var(--color-bg-soft)",
+                  color: bulk.kinds.length === 0 ? "#fff" : "var(--color-label-mute)",
+                  borderColor: bulk.kinds.length === 0 ? "var(--color-primary)" : "var(--color-line)" }}>
+                전체 노선
+              </button>
+              {kinds.map(k => (
+                <button key={k} type="button" onClick={() => toggleKind(k)}
+                  style={{ ...S.editBtn, padding:"6px 12px", fontSize:12, fontWeight:700,
+                    background: bulk.kinds.includes(k) ? "var(--color-primary)" : "var(--color-bg-soft)",
+                    color: bulk.kinds.includes(k) ? "#fff" : "var(--color-label-mute)",
+                    borderColor: bulk.kinds.includes(k) ? "var(--color-primary)" : "var(--color-line)" }}>
+                  {k}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <label style={{ ...S.label, marginTop:12 }}>적용 기간 *</label>
+          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+            <input type="date" style={{ ...S.input, flex:1 }} value={bulk.from}
+              onChange={e => setBulk(b => ({ ...b, from: e.target.value }))} />
+            <span style={{ color:"var(--color-label-alt)" }}>~</span>
+            <input type="date" style={{ ...S.input, flex:1 }} value={bulk.to}
+              onChange={e => setBulk(b => ({ ...b, to: e.target.value }))} />
+          </div>
+          {rangeBad && (
+            <div style={{ marginTop:6, fontSize:11, color:"#A81818" }}>
+              시작일이 종료일보다 늦거나, 한 번에 설정할 수 있는 {BULK_MAX_DAYS}일을 넘었습니다.
+            </div>
+          )}
+
+          <label style={{ ...S.label, marginTop:12 }}>운행 설정</label>
+          <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+            {[BULK_MODES.OFF, BULK_MODES.ON].map(m => (
+              <label key={m} style={{ display:"flex", alignItems:"flex-start", gap:8, fontSize:13, color:"var(--color-label)", cursor:"pointer" }}>
+                <input type="radio" name="bulkMode" checked={bulk.mode === m}
+                  onChange={() => setBulk(b => ({ ...b, mode: m }))} style={{ marginTop:2 }} />
+                <span>{BULK_MODE_LABELS[m]}</span>
+              </label>
+            ))}
+          </div>
+
+          <div style={{ marginTop:12, background:"#E8F1FF", border:"1px solid #C2DCFF", borderRadius:8, padding:"10px 12px", fontSize:12, color:"#003A99", lineHeight:1.7 }}>
+            <div style={{ fontWeight:800 }}>
+              적용 대상 배차 일정 {targets.length}개 · 실제로 바뀔 일정 {plan.changes.length}개
+            </div>
+            {days.length > 0 && <div>선택 기간 {days.length}일 ({bulk.from} ~ {bulk.to})</div>}
+            {plan.unchanged.length > 0 && <div>이미 그렇게 되어 있는 일정 {plan.unchanged.length}개는 그대로 둡니다.</div>}
+            {skippedInactive.length > 0 && <div>사용 안 함 상태인 일정 {skippedInactive.length}개는 제외합니다.</div>}
+            {/* 🔴 못 되돌리는 날을 말하지 않으면 「켰는데 안 나온다」가 그대로 다음 문의가 된다. */}
+            {!isOff && plan.blocked.length > 0 && (
+              <div style={{ color:"#7A4B00" }}>
+                공휴일·운행 요일이 아닌 {new Set(plan.blocked.map(b => b.day)).size}일은 이 기능으로 운행하게 만들 수 없습니다.
+              </div>
+            )}
+          </div>
+          <div style={{ marginTop:6, fontSize:11, color:"var(--color-label-alt)", lineHeight:1.6 }}>
+            ※ 지난 날짜의 배차와 그날만 따로 고쳐 두신 배차, 이미 운행 기록이 남은 배차는 손대지 않습니다.
+          </div>
+
+          <div style={{ display:"flex", gap:8, marginTop:16 }}>
+            <button style={{ ...S.editBtn, flex:1 }} onClick={() => setBulkOpen(false)} disabled={bulkBusy}>취소</button>
+            <button style={{ ...S.addBtn, flex:1, opacity: bulkBusy || plan.changes.length === 0 ? 0.6 : 1 }}
+              onClick={handleBulkApply} disabled={bulkBusy || plan.changes.length === 0}>
+              {bulkBusy ? "적용 중..." : "일괄 적용"}
+            </button>
+          </div>
+        </div></div>
+        );
+      })()}
     </div>
   );
 }
