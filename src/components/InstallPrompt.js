@@ -305,8 +305,14 @@ export function InstallGuide({ platform = "auto", onInstall, inline = false, bra
         <StepRow n={1}>
           Chrome 우측 상단의 <b style={{ color: "var(--color-label, #171719)" }}>⋮</b> 메뉴를 탭하세요.
         </StepRow>
+        {/* 🔴 크롬 버전마다 이 항목의 **이름이 다르다**(2026-09-04 way 실기기 스크린샷 실측 —
+            최신 안드 크롬은 「설치 및 바로가기 만들기」 하나로 합쳐 놨다). 예전 두 이름만 적어
+            두면 어르신이 메뉴에서 그 글자를 못 찾고 «없는데요» 로 멈춘다. 셋 다 적는다. */}
         <StepRow n={2} glyph={<AddToHomeGlyph size={18} />}>
-          <b>'홈 화면에 추가'</b> 또는 <b>'앱 설치'</b>를 선택하세요.
+          <b>'설치 및 바로가기 만들기'</b>를 누르세요.
+          <span style={{ color: "var(--color-label-mute, rgba(46,47,51,0.62))" }}>
+            {" "}(폰에 따라 <b>'앱 설치'</b> 또는 <b>'홈 화면에 추가'</b> 로 보입니다)
+          </span>
         </StepRow>
         <StepRow n={3}>
           <b>'설치'</b>를 누르면 홈 화면에 {brandName} 아이콘이 생깁니다.
