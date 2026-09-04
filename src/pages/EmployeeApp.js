@@ -38,6 +38,7 @@ import { withEulReul } from "../lib/josa";
 // 문의 게시판(2026-08-06 미팅) — dycs CS 위젯 연동. 거래처별 opt-in.
 import { resolveInquiryConfig, buildInquiryUrl } from "../lib/inquiry";
 import { resolveHomepageConfig, homepageDisplayHost } from "../lib/homepage";
+import { resolveQrBoardingConfig } from "../lib/qrBoarding";
 import { resolveTagSoundConfig, applyTagSoundPolicy, clearTagSoundPolicy, unlockTagSound, playTagBeep, isTagSoundOn, setTagSoundOn, isTagSoundForced } from "../lib/tagSound";
 import { useExitConfirm } from "../lib/useExitConfirm";
 
@@ -275,12 +276,15 @@ const INQUIRY_TAB = { id: "inquiry", icon: "chat", label: "문의" };
 // ⚠ 대체되는 순간 그 거래처의 dycs 문의 위젯 유입은 끊긴다(켜기 전 확인 필요).
 const HOMEPAGE_TAB = { id: "homepage", icon: "globe", label: "홈페이지" };
 
-function visibleTabsFor(inquiryOn, homepageOn) {
+// 🔴 `scanOn` 의 기본값은 **true**(=현행) — QR 탑승은 신규 기능이 아니라 이미 모든 거래처에
+//    보이던 탭이다. 인자를 안 넘긴 호출부가 탭을 잃으면 안 된다(`resolveQrBoardingConfig` 와 같은 폴러리티).
+function visibleTabsFor(inquiryOn, homepageOn, scanOn = true) {
+  const base = scanOn ? TABS : TABS.filter(t => t.id !== "scan");
   const extra = homepageOn ? HOMEPAGE_TAB : (inquiryOn ? INQUIRY_TAB : null);
-  if (!extra) return TABS;
-  const at = TABS.findIndex(t => t.id === "settings");
-  const i = at < 0 ? TABS.length : at;
-  return [...TABS.slice(0, i), extra, ...TABS.slice(i)];
+  if (!extra) return base;
+  const at = base.findIndex(t => t.id === "settings");
+  const i = at < 0 ? base.length : at;
+  return [...base.slice(0, i), extra, ...base.slice(i)];
 }
 
 // ════════════════════════════════════════════════════════
@@ -486,6 +490,10 @@ export default function EmployeeApp() {
   const brand = useMemo(() => brandOf(theme), [theme]);
   const [inquiry, setInquiry] = useState(null); // {enabled,tenantId,token} | null(=미조회/거래처 없음)
   const [homepage, setHomepage] = useState(null); // {enabled,url} | null (2026-08-25)
+  // QR 탑승 노출(2026-09-04). 🔴 초기값이 **true** 인 것이 중요하다 — 문의·홈페이지 탭과 달리
+  //   이건 원래 있던 탭이라, 거래처 문서를 받기 전 잠깐이라도 숨기면 **전 거래처가 깜빡인다**.
+  //   끄는 거래처에서만 조회 직후 사라진다(문의·홈페이지 탭이 조회 후 나타나는 것과 같은 결).
+  const [qrBoardingOn, setQrBoardingOn] = useState(true);
   useEffect(() => {
     let cancelled = false;
     // 🔴 로그인 **전에도** 거래처를 알 수 있으면 첫 화면부터 그 톤으로 연다(2026-08-27).
@@ -496,6 +504,7 @@ export default function EmployeeApp() {
     if (!pc) {
       clearPartnerBranding(); clearTagSoundPolicy();
       setBranding(null); setTheme(null); setInquiry(null); setHomepage(null);
+      setQrBoardingOn(true); // 거래처를 모르면 현행(노출) — 숨김은 거래처가 명시적으로 켠 것만
       return;
     }
     fetchPartnerCodeData(pc).then(d => {
@@ -507,6 +516,7 @@ export default function EmployeeApp() {
       setTheme(applyPartnerTheme(d));
       setInquiry(resolveInquiryConfig(d)); // 부재·모르는 값 = 꺼짐(회귀 0)
       setHomepage(resolveHomepageConfig(d));
+      setQrBoardingOn(resolveQrBoardingConfig(d).visible); // 부재·모르는 값 = 노출(회귀 0)
       // 태깅 소리 강제 여부(2026-08-25). 프롭으로 여러 겹 내려보내지 않는 이유 =
       // 거래처 문서를 읽는 곳이 여기 한 군데뿐이고, 브랜딩(applyPartnerBranding)이 이미 같은 패턴.
       applyTagSoundPolicy(resolveTagSoundConfig(d));
@@ -555,7 +565,7 @@ export default function EmployeeApp() {
   // — 안 그러면 빈 탭에 갇힌다(탭 목록에서는 이미 사라진 뒤라 돌아올 버튼이 없다).
   const inquiryOn = !!(inquiry && inquiry.enabled);
   const homepageOn = !!(homepage && homepage.enabled);
-  const visibleTabs = useMemo(() => visibleTabsFor(inquiryOn, homepageOn), [inquiryOn, homepageOn]);
+  const visibleTabs = useMemo(() => visibleTabsFor(inquiryOn, homepageOn, qrBoardingOn), [inquiryOn, homepageOn, qrBoardingOn]);
   useEffect(() => {
     // 홈페이지가 켜지면 문의 탭은 사라진다 — 문의 탭에 있던 사람도 홈으로 되돌린다.
     if (tab === "inquiry" && (!inquiryOn || homepageOn)) setTab("home");
@@ -647,8 +657,10 @@ export default function EmployeeApp() {
         {/* PermissionGate 는 HomeTab **안**(브랜드 밴드 아래)에서 렌더한다 — 2026-08-10.
             예전엔 여기 밴드보다 위에 있어서 앱을 처음 여는 사람이 브랜드가 아니라
             회색 카드부터 봤다. 🔴 위치만 바꿨고 **노출 조건은 그대로**다(권한 메시지 누락 금지). */}
+        {/* 🔴 `onScanTab` 이 null 이면 홈 카드의 QR 버튼도 함께 사라진다 — 탭과 버튼을
+            **한 값으로 묶어** 둔다. 따로 두면 한쪽만 고쳐 반쪽 상태가 된다. */}
         {tab === "home"     && (
-          <HomeTab companyId={companyId} session={session} branding={branding} theme={theme} onScanTab={() => setTab("scan")} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />
+          <HomeTab companyId={companyId} session={session} branding={branding} theme={theme} onScanTab={qrBoardingOn ? () => setTab("scan") : null} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />
         )}
         {tab === "routes"   && <RoutesTab companyId={companyId} session={session} onSessionUpdate={(s) => { saveSession({...session,...s}); setSession(p=>({...p,...s})); }} />}
         {tab === "notices"  && <NoticesTab notices={notices} unreadCount={unreadCount} />}
@@ -1769,9 +1781,13 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
             ) : (
               <>
                 {/* 안내 문구(2026-08-11 최우석 요청) — "QR 태깅 화면을 못 찾겠다"에 대한 답.
-                    정류장을 고르는 행동과 QR 탑승이 이어져 있다는 걸 노선도 바로 위에서 말해 준다. */}
+                    정류장을 고르는 행동과 QR 탑승이 이어져 있다는 걸 노선도 바로 위에서 말해 준다.
+                    🔴 QR 탑승을 끈 거래처에서는 **문구를 지우지 않고 바꾼다**(2026-09-04) — 없는 버튼을
+                       가리키면 안 되지만, 내 정류장 지정은 도착 안내·임박 알림의 전제라 유도는 남겨야 한다. */}
                 <div style={{ padding: '0 16px 8px', fontSize: 12.5, fontWeight: 700, color: 'var(--color-primary-deep)', wordBreak: 'keep-all', lineHeight: 1.4 }}>
-                  탑승하실 정류장을 선택하시면 QR탑승 하실 수 있습니다.
+                  {onScanTab
+                    ? '탑승하실 정류장을 선택하시면 QR탑승 하실 수 있습니다.'
+                    : '탑승하실 정류장을 선택하시면 도착 시간을 안내해 드립니다.'}
                 </div>
                 {/* 가로 스크롤 — 정류장이 많으면 넘치므로 스크롤(스크롤바는 숨김·모바일 친화) */}
                 <div data-route-strip ref={stripRef} style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: 4 }}>
@@ -2025,10 +2041,13 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
               )}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flexShrink: 0 }}>
+              {/* QR 탑승을 끈 거래처는 이 버튼이 없다(2026-09-04) — `정류장 변경` 은 남는다. */}
+              {onScanTab && (
               <button onClick={onScanTab}
                 style={{ background: 'var(--color-primary)', border: 'none', borderRadius: 'var(--radius-12)', padding: '10px 16px', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', boxShadow: 'var(--shadow-strong)' }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}><Icon name="qr" size={14} stroke={2} /> QR 탑승</span>
               </button>
+              )}
               {/* 🔴 `setMyStopIdx(null)` 만 하면 안 된다 — fcmTokens 의 영속값이 남아
                   다음 진입에 그 정류장이 되살아나고 도착 임박 푸시도 계속 간다(2026-09-01). */}
               <button onClick={() => selectMyStop(null)}
@@ -2042,10 +2061,12 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
             <div style={{ flex: 1, fontSize: 12, color: 'var(--color-label-mute)' }}>
               {buses.length === 0 ? '현재 운행중인 버스가 없습니다' : '노선도에서 내 탑승 정류장을 클릭하세요'}
             </div>
+            {onScanTab && (
             <button onClick={onScanTab}
               style={{ background: 'var(--color-primary)', border: 'none', borderRadius: 'var(--radius-12)', padding: '10px 16px', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0, boxShadow: 'var(--shadow-strong)' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}><Icon name="qr" size={14} stroke={2} /> QR 탑승</span>
             </button>
+            )}
           </div>
         )}
       </div>{/* /하단 ETA+QR 패널 — fixed 오버레이(모달/카드)는 이 아래 형제로 유지 */}

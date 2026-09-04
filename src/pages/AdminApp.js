@@ -57,6 +57,7 @@ import { isValidHomepageUrl, resolveHomepageConfig } from "../lib/homepage";
 import { partnerIssuePassword } from "../lib/partnerAuth";
 import { PARTNER_PASSWORD_ISSUE_NOTICE, isPartnerAuthRequired } from "../lib/partnerAuthPolicy";
 import { resolveTagSoundConfig } from "../lib/tagSound";
+import { resolveQrBoardingConfig } from "../lib/qrBoarding";
 import { normalizeWindowOpts, WINDOW_PRE_MIN_DEFAULT, WINDOW_POST_MIN_DEFAULT } from "../lib/routeWindow";
 // 탭 단위 에러 경계 — 자식 throw 시 흰 화면 방지 + 에러 메시지 가시화
 import { ErrorBoundary } from "../components/ErrorBoundary";
@@ -5111,6 +5112,9 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
   const [pHomeOn, setPHomeOn] = useState(false);
   const [pHomeUrl, setPHomeUrl] = useState("");
   const [pSoundForced, setPSoundForced] = useState(false);
+  // 승객앱 QR 탑승 노출(2026-09-04 배시현 개선요청). 🔴 기본이 **켜짐** — 원래 있던 기능이라
+  //   폼 초기값을 false 로 두면 저장만 눌러도 그 거래처의 QR 탑승이 사라진다.
+  const [pQrBoarding, setPQrBoarding] = useState(true);
   // 2026-08-27 거래처 테마 — "" = 프리셋 미사용(아래 메인 컬러 경로가 그대로 돈다)
   const [pTheme, setPTheme] = useState("");
   const [pColor, setPColor] = useState("");        // "" = 기본 테마
@@ -5256,6 +5260,7 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
     setPHomeOn(hp.enabled === true);
     setPHomeUrl(typeof hp.url === "string" ? hp.url : "");
     setPSoundForced(resolveTagSoundConfig(code).forced);
+    setPQrBoarding(resolveQrBoardingConfig(code).visible); // 부재 = 노출(현행)
   };
 
   // 로고 파일 — 투명 PNG 보존 위해 재압축 없이 data URI 로 그대로 저장(200KB 제한·Firestore 1MB doc 여유).
@@ -5312,6 +5317,10 @@ ${chk.missing.slice(0,8).join(", ")}
         },
         tagSound: {
           forced: pSoundForced,
+        },
+        // 🔴 `visible` 은 **없으면 노출**이다 — 끄는 거래처에만 false 가 실린다(2026-09-04).
+        qrBoarding: {
+          visible: pQrBoarding,
         },
         // 🔴 프리셋을 끄는 것은 필드 삭제가 아니라 **빈 객체**다 — `resolveTheme` 이 null 을
         //    돌려주면 앱은 아래 `branding.primaryColor` 경로로 내려간다(그 색이 그대로 살아난다).
@@ -5444,6 +5453,13 @@ ${chk.missing.slice(0,8).join(", ")}
                       {resolveHomepageConfig(c).enabled && (
                         <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#FFF3DC", color: "#8A5200", border: "1px solid #FFDFA8", fontWeight: 700 }}>
                           🌐 홈페이지
+                        </span>
+                      )}
+                      {/* QR 탑승 배지 — 다른 배지와 반대로 **끈 거래처만** 띄운다(켜짐이 기본이라
+                          켠 곳에 배지를 달면 전 거래처가 도배된다). 2026-09-04 */}
+                      {!resolveQrBoardingConfig(c).visible && (
+                        <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#F1F1F4", color: "#5B5B66", border: "1px solid #DDDDE3", fontWeight: 700 }}>
+                          QR 탑승 숨김
                         </span>
                       )}
                     </div>
@@ -5748,6 +5764,18 @@ ${chk.missing.slice(0,8).join(", ")}
             ⓘ 켜면 '문의' 탭 <b>대신</b> '홈페이지' 탭이 생기고, 눌러서 여는 버튼이 나옵니다(새 창).<br />
             🔴 홈페이지는 <b>앱 안에 끼워 넣을 수 없습니다</b> — 대부분의 사이트(구글 사이트 포함)가 외부 임베드를 막습니다.<br />
             🔴 켜는 순간 이 거래처의 <b>앱 내 문의 접수가 사라집니다</b>. 문의·전화는 홈페이지에서 받으세요.
+          </div>
+
+          {/* ── 승객앱 QR 탑승 노출 (2026-09-04 배시현 개선요청) ──
+              🔴 체크 = 보임(현행). 끄는 거래처만 체크를 푼다 — 반대로 만들면 저장 한 번에 사라진다. */}
+          <label style={{ ...S.label, marginTop: 12 }}>승객앱 QR 탑승</label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-label)", cursor: "pointer" }}>
+            <input type="checkbox" checked={pQrBoarding} onChange={e => setPQrBoarding(e.target.checked)} />
+            승객앱에 'QR 탑승' 보이기
+          </label>
+          <div style={{ marginTop: 6, background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#003A99", lineHeight: 1.6 }}>
+            ⓘ 끄면 승객앱 홈의 <b>QR 탑승</b> 버튼과 아래 <b>탑승</b> 탭이 함께 사라집니다(노선·공지·설정은 그대로).<br />
+            ⚠ 기사님이 들고 계신 <b>인쇄 QR</b>로 찍는 방식은 이 설정과 무관하게 계속 동작합니다.
           </div>
 
           {/* ── QR 태깅 소리 (2026-08-25 미팅) ── */}

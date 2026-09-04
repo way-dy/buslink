@@ -2,6 +2,17 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
+> **2026-09-04 — 게시판 `ELDcdSFD…`(배시현) 승객앱 QR 탑승 노출 스위치 · ✅ prod 배포 완료 · `main.579ffd9f.js` · `--only hosting` · done**: 요청 = 「승객어플 홈 화면 중 QR탑승을 노출 안 시킬 수 있게 관리자가 설정」(첨부 = 채드윅 홈 우하단 `QR 탑승` 버튼에 빨간 밑줄).
+> **신설** = `src/lib/qrBoarding.js`(순수 · `resolveQrBoardingConfig`) · `partnerCodes/{code}.qrBoarding.visible` · 격리 `scripts/test_qr_boarding_visibility.cjs`.
+> **수정** = `EmployeeApp.js`(`qrBoardingOn` state · `visibleTabsFor(inq, home, scanOn=true)` · `onScanTab={qrBoardingOn ? … : null}` · 홈 QR 버튼 2곳 가드 · 노선도 위 안내 문구 분기) · `AdminApp.js`(`pQrBoarding` · 포탈 설정 토글 · 목록 `QR 탑승 숨김` 배지 · 저장 payload).
+> 🔴 **폴러리티가 다른 옵션과 반대다 — 부재 = 노출(현행)**. `homepage`·`tagSound` 처럼 `enabled===true` 로 베끼면 **배포 순간 전 거래처에서 QR 탑승이 사라진다**. 관리자 폼 기본값도 켜짐(false 면 저장만 눌러도 꺼진다).
+> **범위 판단** = 요청문은 「홈 화면」이지만 **하단 탭바 `탑승` 탭도 함께 숨긴다**(버튼만 감추면 승객이 그대로 스캔 화면에 들어가 「노출 안 함」이 성립하지 않는다). 고정 QR 경로(`/board?c=&v=`)는 **막지 않는다**(별건).
+> **검증** = 격리 **25단언**(대조군 7건 실패 확인) · 게이트 46→**47/47** · 빌드 신규 경고 0(21↔21) · **실화면 회귀 0**(`headless_check_home_qr_fold` 로컬 빌드 ↔ prod 대조 — QR 704~741/733~770px 픽셀까지 동일). ⚠ 그 하네스의 실패 2건(390x844 정류장 클릭 미적용)은 **prod 대조군도 똑같이 실패** = 선재 문제.
+> 🔴 **「끈 거래처」 실화면도 쟀다 — 신규 `scripts/headless_check_qr_boarding_hidden.cjs`**(local·prod 각 **11/11**): 끄면 탭바가 `홈·노선·공지·설정` 4개로 줄고 QR 버튼 0개·안내 문구가 도착 안내로 바뀌고 정류장 변경은 남는다 → **다시 켜면 전부 돌아온다**(양성 대조 — 이게 없으면 앱이 통째로 깨져도 초록이다). 🔴 이 하네스는 **거래처 문서를 잠깐 고치므로** ⓐ 코드에 `샘플` 이 든 거래처에서만 돌고 ⓑ `finally` 에서 원래 값으로 되돌린다(원복 확인까지 단언). **실제 고객 거래처로 돌리지 말 것.**
+> **배포 실측(2026-09-04)** = 앵커 `58bf34` 확인 → 게이트 47/47 → `--only hosting` → `Deploy complete`. 🔴 **curl 이 분류기에 막혀** 해시 대조 대신 **prod 를 하네스로 태워** 확인했다(옛 번들이면 `qrBoarding` 을 몰라 「끔」에도 탑승 탭이 남아 실패한다 = 더 강한 증거). 회귀도 prod 재측정 — `headless_check_home_qr_fold` 픽셀이 배포 **전 대조군과 완전히 동일**(QR 704~741·733~770·529~566·500~537).
+> ⚠ **여전히 미검증** = 관리자 「⚙️ 포탈 설정」 모달의 새 토글·목록 배지(이 저장소에 admin 로그인 하네스가 없다). **눈으로 볼 것**: 협력사 관리 → ⚙️ 포탈 설정에 「승객앱 QR 탑승」 체크가 뜨고 **기본이 켜짐**인지 · 풀고 저장 후 다시 열었을 때 유지되는지 · 목록에 `QR 탑승 숨김` 회색 배지가 뜨는지.
+> ⚠ `headless_check_home_qr_fold` 의 실패 2건(390x844 에서 정류장 클릭이 안 먹어 「검사 성립」이 빨간불)은 **이 변경 이전부터 있던 것** — prod 대조군이 픽셀까지 똑같이 실패했다. 별건으로 고칠 것.
+
 > **2026-09-04 — 승객/포털 인증 P3-b 1단계(발급 화면부터 · 전 거래처 «꺼짐») · ✅ prod 배포 완료 · `main.567e088a.js`**: 협력사 포털에 진짜 인증을 신설했다. 이번 범위는 설계의 **①«발급 화면부터 배포(끄고)»만** — P3-c(명부 CRUD 서버 이관)·P4(rules 잠금)는 안 넣었다.
 > **신설** = `functions/partnerAuth.js`(판정 순수 모듈) · `src/lib/partnerAuthPolicy.js`(클라 거울 · 상수 대조로 잠금) · `src/lib/partnerAuth.js`(CF 호출부) · CF 5종(`partnerLogin`/`partnerResume`/`partnerLogout`/`partnerSetPassword`/`partnerIssuePassword`) · Firestore 2종(`companies/{cid}/partnerSecrets/{code}`·`partnerSessions/{tokenHash}` — 둘 다 rules `if false`) · `partnerCodes.{code}.authRequired`(**기본 꺼짐**)·`passwordIssuedAt`.
 > **수정** = `assertPartnerCaller`(켠 거래처는 토큰 필수 · 토큰이 정본) · `PartnerApp`(비밀번호 칸·변경 강제·승계) · `AdminApp` 협력사 관리(🔐 포털 로그인 모달 + 평문 1회 표시 + 켜기 토글) · `partnerSession.js`(resumeToken 선택 저장).
