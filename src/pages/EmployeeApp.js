@@ -586,7 +586,18 @@ export default function EmployeeApp() {
     </div>
   );
 
-  if (!session) return <LoginScreen companyId={companyId} onLogin={handleLogin} brand={brand} />;
+  // 🔴 로그인 **전에** 인앱 브라우저 탈출 안내를 띄운다(2026-09-04). 카톡으로 안내 링크를 받은
+  //    승객은 카톡 인앱 브라우저에서 열게 되는데 거기선 설치가 원천 불가능하다. 로그인을 마친
+  //    뒤에 옮기라고 하면 **옮겨간 브라우저에서 또 로그인**해야 하므로, 로그인 화면에서 먼저
+  //    보낸다(주소의 `?emp=` 프리필이 그대로 따라가 사번은 다시 안 친다).
+  //    `escapeOnly` — 이 화면에서 설치 안내까지 띄우지는 않는다(로그인도 안 한 사람에게
+  //    설치부터 권하는 꼴이 된다). 인앱이 아니면 아무것도 렌더하지 않는다 = 회귀 0.
+  if (!session) return (
+    <>
+      <InstallPrompt escapeOnly brandName={brand.custom ? brand.appName : null} iconHref={brand.favicon || null} />
+      <LoginScreen companyId={companyId} onLogin={handleLogin} brand={brand} />
+    </>
+  );
 
   // ── 첫 로그인 비밀번호 설정 강제(2026-07-27) ──────────────
   // 관리자가 발급한 초기 비밀번호를 그대로 쓰면 안내문을 본 사람 누구나 그 계정에
@@ -594,13 +605,18 @@ export default function EmployeeApp() {
   // 바꾸지 않았다(실측: 대상 전원 미변경). 공용 계정(pinLocked)은 여러 명이 함께 쓰므로 제외.
   if (session.pinInitial && !session.pinLocked) {
     return (
-      <FirstPinSetup
-        companyId={companyId}
-        session={session}
-        brand={brand}
-        onDone={(s) => { saveSession({ ...session, ...s }); setSession(p => ({ ...p, ...s })); }}
-        onLogout={handleLogout}
-      />
+      <>
+        {/* 첫 PIN 설정도 로그인 화면과 같은 취급 — 여기서 브라우저를 옮기면 설정한 PIN 은
+            남으므로(서버에 기록) 옮겨가서 그 PIN 으로 로그인하면 된다. */}
+        <InstallPrompt escapeOnly brandName={brand.custom ? brand.appName : null} iconHref={brand.favicon || null} />
+        <FirstPinSetup
+          companyId={companyId}
+          session={session}
+          brand={brand}
+          onDone={(s) => { saveSession({ ...session, ...s }); setSession(p => ({ ...p, ...s })); }}
+          onLogout={handleLogout}
+        />
+      </>
     );
   }
 

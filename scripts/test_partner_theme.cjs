@@ -288,8 +288,10 @@ function loadModule(doc) {
     setSrc.includes("assertAppNamePair") && setSrc.includes("short_name"));
   const promptSrc = fs.readFileSync(path.join(ROOT, "src/components/InstallPrompt.js"), "utf8");
   ok("🔴 설치 팝업 문구가 조사 헬퍼를 쓴다(하드코딩 « 를 » 복원 금지)", promptSrc.includes("withEulReul(name)"));
+  // 지키는 계약은 «두 기본값이 null» 이다 — 인자가 늘어나는 것 자체는 계약 위반이 아니므로
+  // 뒤를 `,` 또는 `}` 둘 다 허용한다(2026-09-04 `escapeOnly` 추가 때 이 단언이 잡았다).
   ok("🔴 brandName 기본값이 null 이다(«준 경우에만» 계약)",
-    /InstallPrompt\(\{ brandName = null, iconHref = null \}\)/.test(promptSrc));
+    /InstallPrompt\(\{ brandName = null, iconHref = null\s*[,}]/.test(promptSrc));
   ok("?install=1 로 스누즈를 건너뛸 수 있다",
     promptSrc.includes("isForcedByUrl") && promptSrc.includes("!forced && isSnoozed()"));
   ok("🔴 standalone 은 강제 노출로도 안 뚫는다", /if \(isStandalone\(\)\) return;/.test(promptSrc));

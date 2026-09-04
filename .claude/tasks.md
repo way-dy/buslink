@@ -2,6 +2,16 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
+> **2026-09-04 — 승객앱 설치율: 인앱 브라우저 탈출 + «설치할 때까지 팝업»(way) · ⚠ 구현·검증 완료 · 🔴 미배포**: 발단은 way 의 「안드로이드만 설치버전(APK)으로 배포할까」였다. **APK 사이드로딩은 안 만들었다** — 거래처가 든 이유가 「어르신들이 설치를 어려워한다」인데, 사이드로딩은 «출처 불명 앱 허용» + «Play Protect 경고 무시» 를 요구해 홈 화면 추가보다 **더 어렵다**(방향이 정확히 반대). 대신 진짜 원인을 먼저 팠다.
+> **실측한 원인** = 승객앱엔 이미 원탭 설치가 있었다(`InstallPrompt.js` BIP 배너). 막힌 건 **카카오톡 인앱 브라우저** — 거기선 `beforeinstallprompt` 가 발생하지 않고 `isAndroidPwaCapable()` 이 카톡을 UA 로 제외해 **설치 안내가 아예 안 뜬다**. 🔴 **prod 실측으로 확인**: 카톡 UA 로 `p.buslink.co.kr/p` 를 열면 팝업이 `{"present":false}` 다. 「어렵다」의 정체는 「없다」였다.
+> **신설** = `src/lib/inAppBrowser.js`(순수 · `detectBrowserEnv`·`withExternalBrowserParam`·`buildEscapeUrl`·`buildEscapeGuide`) · `scripts/test_in_app_browser.cjs` · `scripts/headless_check_inapp_escape.cjs`.
+> **수정** = `InstallPrompt.js`(`inapp` 모드 · `escapeOnly` prop · 3일 스누즈 → **방문마다 재노출**(`sessionStorage`) · «이미 설치했어요» 30일) · `EmployeeApp.js`(로그인 화면·첫 PIN 화면에 `escapeOnly` 마운트) · `accountCards.js buildPassengerLoginUrl`(모든 링크에 `openExternalBrowser=1` **항상**) · `test_account_cards.cjs`·`test_partner_theme.cjs` 단언 갱신.
+> 🔴 **두 고침은 한 벌이다** — 카톡에선 설치가 원천 불가능하므로 «설치할 때까지 팝업»만 넣으면 「닫아도 계속 뜨는데 눌러도 설치가 안 되는」 광고가 된다. 한쪽만 되돌리지 말 것(되돌리기 스위치 = `NAG_UNTIL_INSTALL`).
+> 🔴 **탈출 안내는 로그인 «전»에 띄운다** — 로그인 뒤에 옮기라고 하면 브라우저가 바뀌며 저장소도 갈려 **옮겨간 곳에서 또 로그인**해야 한다. 안내문 링크의 `?emp=` 프리필은 따라간다(하네스가 확인).
+> **검증** = 격리 **46단언** + **뮤테이션 6종 전부 빨간불** · 게이트 48→**49/49** · 빌드 신규 경고 0(21↔21)·번들 +1.2kB · 실화면 **18단언** 로컬 전부 통과 · **prod 옛 번들 10건 실패 = 양성 대조군 성립**.
+> ⚠ **미검증(배포 전 반드시)** = ⓐ **실기기 카카오톡 0건** — 헤드리스엔 카톡이 없어 `openExternalBrowser=1` 을 해석할 주체가 없다(하네스는 «그 주소로 이동한다» 까지만 잰다). 실제 폰 카톡으로 링크를 한 번 열어 볼 것 ⓑ 안드 기타 인앱의 `intent://` 실기기 ⓒ iOS 카톡에서 파라미터가 먹는지 ⓓ 로그인 «후» 설치 팝업의 새 「이미 설치했어요」 버튼(하네스는 로그인을 안 한다).
+> **다음 갈림길(way 판단 대기)** = 이걸 배포하고 한 주 반응을 본 뒤, 그래도 어렵다고 하면 **Play Store TWA**(`p.buslink.co.kr` 껍데기 · 코드 변경 0 · 법인 계정이면 테스터 12명 요건 면제 · `assetlinks.json` 필요). 카톡에서 Play 링크는 인앱 브라우저를 안 거쳐 스토어 앱이 바로 열리므로 이 문제 자체가 구조적으로 사라진다.
+
 > **2026-09-04 — 게시판 `Fk7rY3Ey…`(배시현) 배차일정 «거래처 통합 운행일 설정» · ✅ prod 배포 완료 · `--only hosting`**: 요청 = 방학·재량휴업일·공휴일처럼 여러 노선이 같이 쉬는 기간을 **일정마다 건별로 고치지 않고 한 번에**. 첨부는 **AI 로 만든 모형**(정본 아님).
 > **실측으로 확인한 것 — 새 데이터 모델이 필요 없다**: 일정별 휴무일은 이미 `dispatchSchedules/{id}.excludeDates: string[]` 이고 판정 정본은 `src/lib/dispatchSchedule.js shouldExpandOn`, 이미 펼쳐진 배차 정리는 `AdminApp.js:2073 pruneScheduleDispatches` 다. 즉 이번 건은 **그 둘을 여러 일정에 한 번에 거는 화면**이다.
 > **설계** = 신규 순수 모듈 `src/lib/bulkOperatingDays.js`(기간 전개·대상 선별·일정별 excludeDates 계획) + `DispatchScheduleTab` 에 「📅 통합 운행일 설정」 모달. 거래처·구분(`routeKind`)·기간·운행/운행중지 → 대상 일정 수를 **적용 전에 보여주고** 확인받는다.

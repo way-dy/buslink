@@ -69,6 +69,14 @@ export function isValidInitialPin(v) {
  * 승객앱 로그인 URL — 사번 프리필(`?emp=`) 포함.
  * 협력사 포털은 `partner.*` 에서 열리므로 승객앱 서브도메인(`p.*`)으로 치환한다.
  * 매핑이 없는 origin(web.app·localhost)은 그대로 두고 경로만 `/p` 를 붙인다.
+ *
+ * 🔴 `openExternalBrowser=1` 은 **항상** 붙인다(2026-09-04). 담당자가 이 링크를 카카오톡으로
+ *    전달하면 승객 폰에서 **카톡 인앱 브라우저**로 열리는데, 거기서는 `beforeinstallprompt` 가
+ *    발생하지 않아 **설치 안내가 아예 안 뜬다**(거래처 «어르신들이 설치를 못 한다» 의 실제 원인).
+ *    이 값이 있으면 카카오가 기기 기본 브라우저로 넘겨 준다. 다른 앱·카메라 QR 스캔은 이 값을
+ *    그냥 무시하므로 붙여도 무해하다. 판정·탈출 로직 정본은 `src/lib/inAppBrowser.js` 다 —
+ *    ⚠ 여기서 import 하지 않는 이유는 이 파일이 **bare vm 격리 테스트**로 단독 로드되기
+ *    때문이다(같은 이유로 `URLSearchParams` 도 안 쓴다). 상수 이름이 양쪽에 중복돼 있다.
  */
 export function buildPassengerLoginUrl({ origin, empNo, partnerCode } = {}) {
   const base = String(origin || "").replace(/\/+$/, "");
@@ -82,7 +90,10 @@ export function buildPassengerLoginUrl({ origin, empNo, partnerCode } = {}) {
   //    공개해도 되는 값이다 — `partnerCodes` read 규칙이 이미 공개고, 협력사 포털 진입에
   //    쓰는 업체코드와 같은 값이라 이 링크로 새로 열리는 권한은 없다.
   if (partnerCode) parts.push(`pc=${encodeURIComponent(String(partnerCode))}`);
-  return `${passengerBase}/p${parts.length ? "?" + parts.join("&") : ""}`;
+  // 카톡 인앱 브라우저 탈출(위 주석 참조). 값이 없어도 단독으로 붙는다 — 링크에 사번·거래처가
+  // 없는 «공용 안내 링크» 야말로 카톡으로 돌려지는 형태라 여기가 제일 중요하다.
+  parts.push("openExternalBrowser=1");
+  return `${passengerBase}/p?${parts.join("&")}`;
 }
 
 // HTML 이스케이프 — 이름·부서에 `<`, `&` 가 들어와도 인쇄물이 깨지지 않게.

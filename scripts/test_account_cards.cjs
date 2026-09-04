@@ -53,33 +53,59 @@ console.log("\n[2] isValidInitialPin");
 
 console.log("\n[3] buildPassengerLoginUrl");
 {
+  // 🔴 2026-09-04 계약 변경 — 모든 링크에 `openExternalBrowser=1` 이 **항상** 붙는다.
+  //    담당자가 이 링크를 카카오톡으로 보내면 승객 폰에서 카톡 인앱 브라우저로 열리는데,
+  //    거기서는 beforeinstallprompt 가 발생하지 않아 설치 안내가 아예 안 뜬다(거래처
+  //    «어르신들이 설치를 못 한다» 의 실제 원인). 이 파라미터가 카카오를 기본 브라우저로 보낸다.
+  //    ⚠ 옛 단언은 이게 **없는** 형태였다. 되돌리려면 accountCards.buildPassengerLoginUrl 의
+  //    parts.push 한 줄만 지우면 되지만, 지우기 전에 위 이유를 먼저 읽을 것.
+  const EB = "openExternalBrowser=1";
   ok("partner 서브도메인 → p 서브도메인",
-    A.buildPassengerLoginUrl({ origin: "https://partner.buslink.co.kr", empNo: "10001" }) === "https://p.buslink.co.kr/p?emp=10001",
+    A.buildPassengerLoginUrl({ origin: "https://partner.buslink.co.kr", empNo: "10001" }) === "https://p.buslink.co.kr/p?emp=10001&" + EB,
     A.buildPassengerLoginUrl({ origin: "https://partner.buslink.co.kr", empNo: "10001" }));
   ok("web.app 은 그대로 + /p",
-    A.buildPassengerLoginUrl({ origin: "https://buslink-prod.web.app", empNo: "10001" }) === "https://buslink-prod.web.app/p?emp=10001");
+    A.buildPassengerLoginUrl({ origin: "https://buslink-prod.web.app", empNo: "10001" }) === "https://buslink-prod.web.app/p?emp=10001&" + EB);
   ok("localhost 유지",
-    A.buildPassengerLoginUrl({ origin: "http://localhost:3000", empNo: "A-1" }) === "http://localhost:3000/p?emp=A-1");
+    A.buildPassengerLoginUrl({ origin: "http://localhost:3000", empNo: "A-1" }) === "http://localhost:3000/p?emp=A-1&" + EB);
   ok("끝 슬래시 제거",
-    A.buildPassengerLoginUrl({ origin: "https://partner.buslink.co.kr/", empNo: "1" }) === "https://p.buslink.co.kr/p?emp=1");
+    A.buildPassengerLoginUrl({ origin: "https://partner.buslink.co.kr/", empNo: "1" }) === "https://p.buslink.co.kr/p?emp=1&" + EB);
   ok("사번 URL 인코딩",
-    A.buildPassengerLoginUrl({ origin: "https://p.buslink.co.kr", empNo: "가 나&1" }) === "https://p.buslink.co.kr/p?emp=" + encodeURIComponent("가 나&1"));
+    A.buildPassengerLoginUrl({ origin: "https://p.buslink.co.kr", empNo: "가 나&1" }) === "https://p.buslink.co.kr/p?emp=" + encodeURIComponent("가 나&1") + "&" + EB);
   // 🔴 `pc`(거래처 코드) — 이게 있어야 안내문 QR 로 들어온 **첫 화면부터** 그 거래처 톤으로
   //    열린다. 없으면 로그인 전까지 기본 테마다(2026-08-27).
   ok("거래처 코드가 pc 로 실린다",
     A.buildPassengerLoginUrl({ origin: "https://p.buslink.co.kr", empNo: "10001", partnerCode: "DY001-삼성전자샘플-2026-SMPL" })
-      === "https://p.buslink.co.kr/p?emp=10001&pc=" + encodeURIComponent("DY001-삼성전자샘플-2026-SMPL"),
+      === "https://p.buslink.co.kr/p?emp=10001&pc=" + encodeURIComponent("DY001-삼성전자샘플-2026-SMPL") + "&" + EB,
     A.buildPassengerLoginUrl({ origin: "https://p.buslink.co.kr", empNo: "10001", partnerCode: "DY001-삼성전자샘플-2026-SMPL" }));
   ok("거래처 코드도 URL 인코딩(한글·하이픈 포함)",
     !/[가-힣]/.test(A.buildPassengerLoginUrl({ origin: "https://p.buslink.co.kr", empNo: "1", partnerCode: "DY001-채드윅-2026-XX" })));
   ok("거래처 코드만 있어도 붙는다",
-    A.buildPassengerLoginUrl({ origin: "https://p.buslink.co.kr", partnerCode: "C1" }) === "https://p.buslink.co.kr/p?pc=C1");
-  ok("🔴 거래처 코드가 없으면 예전과 글자 그대로 같다(회귀 0)",
-    A.buildPassengerLoginUrl({ origin: "https://partner.buslink.co.kr", empNo: "10001" }) === "https://p.buslink.co.kr/p?emp=10001");
-  ok("사번 없으면 쿼리 없음",
-    A.buildPassengerLoginUrl({ origin: "https://p.buslink.co.kr" }) === "https://p.buslink.co.kr/p");
+    A.buildPassengerLoginUrl({ origin: "https://p.buslink.co.kr", partnerCode: "C1" }) === "https://p.buslink.co.kr/p?pc=C1&" + EB);
+  ok("사번·거래처가 없어도 탈출 파라미터만으로 쿼리가 생긴다(공용 안내 링크)",
+    A.buildPassengerLoginUrl({ origin: "https://p.buslink.co.kr" }) === "https://p.buslink.co.kr/p?" + EB,
+    A.buildPassengerLoginUrl({ origin: "https://p.buslink.co.kr" }));
   ok("경로 안 partner 문자열은 안 건드림",
-    A.buildPassengerLoginUrl({ origin: "https://x.co.kr/partner", empNo: "1" }) === "https://x.co.kr/partner/p?emp=1");
+    A.buildPassengerLoginUrl({ origin: "https://x.co.kr/partner", empNo: "1" }) === "https://x.co.kr/partner/p?emp=1&" + EB);
+  // 아래 3건은 «어떤 인자 조합이든 빠지지 않는가» 를 형태로 잡는다 — 위 등식들이 한 줄씩
+  // 고쳐질 때 이 단언이 최후 방어선이다.
+  {
+    const combos = [
+      { origin: "https://p.buslink.co.kr" },
+      { origin: "https://p.buslink.co.kr", empNo: "1" },
+      { origin: "https://p.buslink.co.kr", partnerCode: "C1" },
+      { origin: "https://partner.buslink.co.kr", empNo: "1", partnerCode: "C1" },
+      { origin: "http://localhost:3000/", empNo: "가", partnerCode: "한글" },
+    ];
+    ok("🔴 모든 인자 조합에 탈출 파라미터가 실린다",
+      combos.every(c => A.buildPassengerLoginUrl(c).indexOf(EB) !== -1));
+    ok("탈출 파라미터는 한 번만 실린다",
+      combos.every(c => (A.buildPassengerLoginUrl(c).match(/openExternalBrowser=/g) || []).length === 1));
+    ok("쿼리 구분자가 깨지지 않는다(? 하나 · && 없음)",
+      combos.every(c => {
+        const u = A.buildPassengerLoginUrl(c);
+        return (u.match(/\?/g) || []).length === 1 && u.indexOf("&&") === -1 && u.indexOf("?&") === -1;
+      }));
+  }
 }
 
 console.log("\n[4] buildAccountCardsHtml");
