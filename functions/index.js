@@ -1473,7 +1473,7 @@ exports.resolveStaticBoarding = onCall(async (request) => {
 //   유일한 관문이 되므로 그때 시도 제한을 함께 넣어야 한다**(tasks.md 기재).
 // ════════════════════════════════════════════════════════
 const crypto = require("crypto");
-const { planRosterWrites, planReissue } = require("./passengerRoster");
+const { planRosterWrites, planReissue, planDirectPin } = require("./passengerRoster");
 // 협력사 포털 인증(2026-09-04 P3-b) — 판정은 전부 이 순수 모듈이 한다.
 const {
   hashPartnerPassword, generateInitialPartnerPassword, checkNewPartnerPassword,
@@ -4162,6 +4162,19 @@ function isValidInitialPinAdmin(v) {
   return /^\d{6}$/.test(t);
 }
 
+/**
+ * 관리자가 **직접 지정한** 승객 비밀번호의 형식 검사 (2026-09-10).
+ * 🔴 여기는 4~6자리다 — 승객앱 로그인 입력이 「PIN (4~6자리)」이고 제출 가드도 4자리 이상이라
+ *    (`EmployeeApp.js`), 6자리만 받으면 관리자가 정해 준 5자리 번호를 승객이 못 쓰게 된다.
+ * ⚠ 위 `isValidInitialPinAdmin`(엑셀 초기PIN·6자리 고정)과 **다른 경로**다. 하나로 합치려면
+ *    엑셀 양식 안내·클라 파서까지 같이 봐야 하므로 여기서는 섞지 않는다.
+ * 🔴 클라 정본은 `src/lib/accountCards.js isValidInitialPin` — 둘이 갈리면
+ *    `scripts/test_initial_pin_parity.cjs` 가 빨간불이 된다(한쪽만 고치지 말 것).
+ */
+function isValidDirectPinAdmin(v) {
+  return /^\d{4,6}$/.test(String(v == null ? "" : v).trim());
+}
+
 // partnerImportPassengers({ companyId, partnerCode, partnerName, employees })
 //   명부 일괄 등록·갱신. 클라는 조각(권장 500명)으로 나눠 여러 번 부른다 — 진행률을 보여주고
 //   한 번의 페이로드·실행시간을 제한 안에 둔다.
@@ -4264,6 +4277,52 @@ exports.partnerReissuePins = onCall({ timeoutSeconds: 300, memory: "512MiB" }, a
 
   console.log("[명부] " + code + " PIN 재발급 " + credentials.length + "명 · 오류 " + errors.length);
   return { credentials, errors };
+});
+
+// partnerSetPassengerPin({ companyId, partnerCode, empNo, pin })
+//   협력사 포털 「승객 정보 수정」에서 관리자가 그 승객의 비밀번호를 **원하는 값으로 지정**한다
+//   (2026-09-10 배시현 요청). 재발급(`partnerReissuePins`)은 고정 초기값 + 강제 변경 화면이라
+//   「이 번호로 해 주세요」를 들어줄 수 없었다.
+// 🔴 평문 pin 은 로그·Firestore 어디에도 남기지 않는다(해시만 secrets 로).
+// ⚠ `invoker: "public"` — 포털은 익명 인증으로 부른다. 이걸 빼면 Cloud Run IAM 이 HTTP 401 로
+//   먼저 막고 SDK 가 그걸 `unauthenticated` 로 매핑해 **우리 거부와 구별이 안 된다**(2026-08-25 선례).
+//   권한은 아래 `assertPartnerCaller` 가 강제한다.
+exports.partnerSetPassengerPin = onCall({ invoker: "public" }, async (request) => {
+  const db = admin.firestore();
+  const { companyId, partnerCode, empNo, pin } = request.data || {};
+  const { code } = await assertPartnerCaller(db, request, companyId, partnerCode);
+
+  const id = String(empNo == null ? "" : empNo).trim();
+  if (!id) throw new HttpsError("invalid-argument", "사번이 필요합니다");
+
+  // 🔴 문서 ID 로 **직접** 짚는다 — 협력사로 좁혀 조회하면 소속 판정을 서버가 못 한다.
+  const ref = db.collection("companies").doc(companyId).collection("passengers").doc(id);
+  const snap = await ref.get();
+  const owned = new Map();
+  if (snap.exists) owned.set(id, snap.data() || {});
+
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  const { op, errors } = planDirectPin({
+    empNo: id, pin, owned, code, companyId, now,
+    hashPin: hashPinAdmin, validPin: isValidDirectPinAdmin,
+  });
+  if (!op) {
+    const msg = errors[0] || "비밀번호를 변경하지 못했습니다";
+    // 소속 아님·명부 없음은 «있는데 값이 틀렸다»가 아니라 권한 문제다.
+    const denied = msg.indexOf("소속") >= 0 || msg.indexOf("명부에 없습니다") >= 0;
+    throw new HttpsError(denied ? "permission-denied" : "invalid-argument", msg);
+  }
+
+  await passengerSecretRef(db, companyId, op.empNo).set(op.secret, { merge: true });
+  await ref.update({
+    pinInitial: op.patch.pinInitial,
+    pinHash: admin.firestore.FieldValue.delete(),
+    updatedAt: op.patch.updatedAt,
+  });
+
+  // 🔴 사번까지만 남긴다 — 평문을 찍으면 로그를 볼 수 있는 사람이 그 계정으로 로그인한다.
+  console.log("[명부] " + code + " 비밀번호 직접 지정 " + op.empNo);
+  return { ok: true };
 });
 
 // ════════════════════════════════════════════════════════

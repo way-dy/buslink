@@ -1,12 +1,12 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   validatePartnerCode, parseEmployeeExcel,
-  importEmployees, downloadSampleExcel, reissuePins
+  importEmployees, downloadSampleExcel, reissuePins, setPassengerPin
 } from "../lib/partner";
 import { partnerRouteOptions, partnerOpsRoutes } from "../lib/partnerAccess";
 import { seatUsage, sortRoutes } from "../lib/routeOrder";
 import QRCode from "qrcode";
-import { buildAccountCardsHtml, buildPassengerLoginUrl, openPrintWindow } from "../lib/accountCards";
+import { buildAccountCardsHtml, buildPassengerLoginUrl, openPrintWindow, isValidInitialPin } from "../lib/accountCards";
 import { normalizeNfcUid, isValidNfcUid, formatNfcUid, isWebNfcSupported, createTagCooldown } from "../lib/nfc";
 import { registerNfcCard } from "../lib/boarding";
 import { db, auth } from "../firebase";
@@ -1291,6 +1291,9 @@ function EmployeeManageMode({ codeData, code, routes, wide = false }) {
   const [editEmp, setEditEmp] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
+  // 비밀번호 직접 지정(2026-09-10) — 저장 버튼과 **다른 경로**다. handleSave 에 섞지 말 것.
+  const [directPin, setDirectPin] = useState("");
+  const [pinSetBusy, setPinSetBusy] = useState(false);
   // 승객 삭제(2026-07-30) — 확인 단계를 거치는 인라인 방식. delTarget = 확인 중인 사번.
   const [delTarget, setDelTarget] = useState(null);
   const [delBusy, setDelBusy] = useState(false);
@@ -1335,7 +1338,31 @@ function EmployeeManageMode({ codeData, code, routes, wide = false }) {
   const openEdit = (emp) => {
     setEditEmp(emp);
     setEditForm({ name: emp.name||"", dept: emp.dept||"", routeCode: emp.routeCode||"", active: emp.active, pinLocked: !!emp.pinLocked, nfcUid: emp.nfcUid||"" });
+    setDirectPin("");
     setMsg(null);
+  };
+
+  // ── 비밀번호 직접 지정(2026-09-10 배시현 요청) ─────────────
+  // 🔴 저장(handleSave)과 **섞지 않는다** — 이름·노선을 고치다가 비밀번호까지 바뀌면
+  //    담당자가 의도하지 않은 계정 잠금이 난다. 별도 버튼·별도 경로·모달은 닫지 않는다.
+  // 🔴 pinLocked(공용 계정)여도 막지 않는다 — 그 계정은 승객이 스스로 못 바꿔
+  //    관리자가 유일한 변경 통로다.
+  const handleSetPin = async () => {
+    const pin = (directPin || "").trim();
+    // 형식 검사는 accountCards 정본 재사용(서버 isValidDirectPinAdmin 과 같은 판정).
+    if (!isValidInitialPin(pin)) {
+      setMsg({ type: "error", text: "비밀번호는 숫자 4~6자리로 정해주세요" });
+      return;
+    }
+    setPinSetBusy(true); setMsg(null);
+    try {
+      await setPassengerPin({ companyId: codeData.companyId, partnerCode: code, empNo: editEmp.id, pin });
+      setDirectPin("");
+      setMsg({ type: "success", text: "비밀번호가 변경되었습니다" });
+    } catch (e) {
+      setMsg({ type: "error", text: "변경 실패: " + e.message });
+    }
+    setPinSetBusy(false);
   };
 
   const handleSave = async () => {
@@ -1695,8 +1722,23 @@ function EmployeeManageMode({ codeData, code, routes, wide = false }) {
               사원증 카드의 16진수 번호. 등록 시 기사앱에서 카드 태깅만으로 탑승 처리됩니다.
             </div>
 
+            {/* 비밀번호 직접 지정(2026-09-10) — 저장 버튼과 별도 경로·별도 버튼이다. */}
+            <label style={S.label}>비밀번호 직접 지정</label>
+            <div style={{ display:"flex", gap:8 }}>
+              <input style={{ ...S.input, flex:1, minWidth:0 }} type="password" inputMode="numeric" maxLength={6}
+                placeholder="숫자 4~6자리" autoComplete="new-password"
+                value={directPin} onChange={e=>setDirectPin(e.target.value)} />
+              <button style={{ ...S.btnSecondary, flex:"0 0 116px", opacity:pinSetBusy?0.6:1 }}
+                onClick={handleSetPin} disabled={pinSetBusy}>
+                {pinSetBusy?"변경 중...":"비밀번호 변경"}
+              </button>
+            </div>
             <div style={{ fontSize:11, color:"var(--color-label-alt)", lineHeight:1.5 }}>
-              잠그면 승객앱 설정에서 PIN 변경 항목이 보이지 않습니다. PIN 재설정이 필요하면 목록의 “PIN초기화”를 사용하세요.
+              숫자 4~6자리로 정하면 승객이 그 번호로 바로 로그인합니다.
+            </div>
+
+            <div style={{ fontSize:11, color:"var(--color-label-alt)", lineHeight:1.5 }}>
+              잠그면 승객앱 설정에서 PIN 변경 항목이 보이지 않습니다. 초기 번호로 되돌리려면 목록의 “비밀번호 재발급”을 사용하세요.
             </div>
 
             {msg && (

@@ -130,4 +130,50 @@ function planReissue({ rows, owned, code, companyId, now, makePin, hashPin }) {
   return { ops, credentials, errors };
 }
 
-module.exports = { normEmpNo, dedupeRows, planRosterWrites, planReissue };
+/**
+ * 관리자가 승객 비밀번호를 **원하는 값으로 직접 지정**하는 계획 (2026-09-10 배시현 요청).
+ *
+ * 🔴 재발급(`planReissue`)과의 차이는 딱 하나 — `pinInitial: false` 다.
+ *    재발급 = 고정 초기값("000000") + `pinInitial:true` → 승객은 그 값으로 들어와
+ *             **강제 PIN 설정 화면**을 만나고 스스로 번호를 정한다.
+ *    직접 지정 = 관리자가 정한 그 값 + `pinInitial:false` → 승객은 **그 번호를 그대로 쓴다**
+ *             (강제 변경 화면이 뜨지 않는다). 담당자가 「이 번호로 해 주세요」를 받는 운영 흐름.
+ *    이 한 줄을 `true` 로 되돌리면 관리자가 지정한 번호가 첫 로그인에서 곧바로 버려진다.
+ *
+ * 🔴 소속 확인(`cur.partnerCode !== code`)이 이 함수의 존재 이유다 — 없으면 업체코드 하나로
+ *    남의 거래처 사람 비밀번호를 갈아치울 수 있다(그 사람은 그 순간 로그인 불가가 된다).
+ *
+ * @param {object} a
+ * @param {string} a.empNo    대상 사번(문서 ID)
+ * @param {string} a.pin      관리자가 지정한 평문 비밀번호
+ * @param {Map}    a.owned    empNo → 기존 문서 데이터(**문서 ID 로 직접 조회한 것**)
+ * @param {string} a.code     업체코드(서버가 검증한 값)
+ * @param {func}   a.hashPin  (pin) => hash
+ * @param {func}   a.validPin (v) => boolean  숫자 4~6자리
+ * @returns {{op: object|null, errors: string[]}}
+ */
+function planDirectPin({ empNo, pin, owned, code, companyId, now, hashPin, validPin }) {
+  const n = normEmpNo(empNo);
+  if (!n) return { op: null, errors: ["사번이 필요합니다"] };
+
+  const cur = owned && typeof owned.get === "function" ? owned.get(n) : null;
+  if (!cur) return { op: null, errors: ["명부에 없습니다"] };
+  if ((cur.partnerCode || null) !== code) return { op: null, errors: ["이 거래처 소속이 아닙니다"] };
+
+  const p = String(pin == null ? "" : pin).trim();
+  if (!validPin(p)) return { op: null, errors: ["비밀번호는 숫자 4~6자리로 정해주세요"] };
+
+  return {
+    op: {
+      empNo: n,
+      // 해시는 명부가 아니라 secrets 로(P3-a 계약).
+      secret: { companyId, empNo: n, pinHash: hashPin(p), updatedAt: now },
+      // 🔴 pinInitial:false — 지정한 그 값으로 바로 쓰게 하고 강제 변경 화면을 띄우지 않는다.
+      //    옛 명부 해시가 남아 있으면 이 기회에 걷는다(폴백 경로로 계속 먹히지 않게).
+      patch: { pinInitial: false, deletePinHash: true, updatedAt: now },
+    },
+    errors: [],
+  };
+}
+
+module.exports = { normEmpNo, dedupeRows, planRosterWrites, planReissue, planDirectPin };

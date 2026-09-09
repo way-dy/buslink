@@ -63,5 +63,29 @@ ok("클라 FirstPinSetup 이 거부한다", new RegExp(`newPin === "${serverPin}
 ok("서버 passengerSetPin 도 거부한다",
   new RegExp(`String\\(newPin\\) === "${serverPin}"`).test(serverSrc));
 
+
+console.log("\n[5] 🔴 «직접 지정» 비밀번호 판정이 클라·서버에서 같다 (2026-09-10)");
+// 협력사 포털 「승객 정보 수정」의 비밀번호 직접 지정 경로. 클라는 accountCards 의
+// `isValidInitialPin`, 서버는 `isValidDirectPinAdmin` 을 쓴다 — **둘이 갈리면**
+// 담당자가 화면에서는 통과한 값이 서버에서 거부되거나(먹통), 반대로 화면이 막는 값이
+// 서버로 새어 들어간다. 위 [1]~[2] 와 같은 계열의 «세 곳이 같은 값» 불변식이다.
+const dirBody = (serverSrc.match(/function isValidDirectPinAdmin\(v\)\s*\{([\s\S]*?)\n\}/) || [])[1];
+ok("서버 직접지정 검사 함수를 찾았다(신호 유무)", !!dirBody, dirBody);
+vm.runInContext(`function isValidDirectPinAdmin(v){${dirBody}\n}`, sctx);
+ok("클라 검사 함수가 있다(신호 유무)", typeof ctx.isValidInitialPin === "function");
+
+const CASES = [
+  ["123", false], ["1234", true], ["12345", true], ["123456", true], ["1234567", false],
+  ["000000", true], [" 4321 ", true], ["12a4", false], ["12 34", false],
+  ["", false], ["   ", false], [null, false], [undefined, false],
+];
+for (const [v, want] of CASES) {
+  const c = ctx.isValidInitialPin(v) === true;
+  const s2 = sctx.isValidDirectPinAdmin(v) === true;
+  ok(`같은 판정: ${JSON.stringify(v)} → ${want}`, c === want && s2 === want, { client: c, server: s2, want });
+}
+// 로그인 화면이 실제로 받는 폭(4~6자리)과 같은지 — 여기가 6자리 고정이면 관리자가 정해 준
+// 5자리 번호를 승객이 못 쓴다(그래서 엑셀 초기PIN 경로와 일부러 분리했다).
+ok("승객앱 로그인 입력이 4~6자리를 받는다", /PIN \(4~6자리\)/.test(emp) || /4~6자리/.test(emp));
 console.log(`\n${fail === 0 ? "✅ 전부 통과" : "❌ 실패 있음"} — ${pass} pass / ${fail} fail`);
 process.exit(fail === 0 ? 0 : 1);

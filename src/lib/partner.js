@@ -311,6 +311,24 @@ export async function reissuePins({ companyId, partnerCode, passengers }) {
   return { credentials, errors };
 }
 
+// ─── 비밀번호 직접 지정 (2026-09-10 배시현 요청) ─────────
+/**
+ * 관리자가 그 승객의 비밀번호를 **원하는 값으로** 지정한다.
+ *
+ * 🔴 `reissuePins` 와 다른 경로다 — 재발급은 고정 초기값("000000")을 주고 `pinInitial:true` 라
+ *    승객이 첫 로그인에서 **강제로 자기 번호를 정한다**. 이 함수는 관리자가 정한 그 번호를
+ *    승객이 **그대로 쓴다**(`pinInitial:false`). 담당자가 「이 번호로 해 주세요」를 받는 흐름.
+ *
+ * 판정·쓰기는 전부 서버(CF `partnerSetPassengerPin`)가 한다 — 해시가 `passengerSecrets`
+ * (rules read/write false)에 있어 클라가 못 쓰고, **대상이 그 거래처 소속인지**도 서버만
+ * 판정할 수 있다. 실패는 그대로 throw 하고 호출부가 메시지를 보여준다.
+ */
+export async function setPassengerPin({ companyId, partnerCode, empNo, pin }) {
+  const call = httpsCallable(functions, "partnerSetPassengerPin");
+  const { data } = await call({ companyId, partnerCode, empNo, pin });
+  return data;
+}
+
 // ─── PIN 해시는 서버에만 있다(2026-08-28 P3-a) ───────────────────────
 // 옛 `hashPin`(WebCrypto)은 클라가 해시를 만들어 명부에 쓰던 시절의 것이다.
 // 지금은 CF `hashPinAdmin` 이 정본이고 결과는 `passengerSecrets` 에만 들어간다.

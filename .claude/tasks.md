@@ -2,6 +2,19 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
+> **2026-09-10 — 협력사 포털 「승객 정보 수정」에 비밀번호 직접 지정(게시판 `pIdebVS4GpVouCmg2Dki` 배시현·채드윅송도국제학교 · 🚧 미배포·미커밋)**: 요청 = 「관리자가 승객 비밀번호를 원하는 값으로 직접 지정」. 지금까지 유일한 경로는 **재발급**(`partnerReissuePins`)뿐인데 그건 고정 초기값 `000000` + `pinInitial:true` 라 승객이 첫 로그인에서 **강제로 자기 번호를 정한다** — 「이 번호로 해 주세요」를 들어줄 수 없었다.
+> **신설** = 순수 모듈 `functions/passengerRoster.js:155 planDirectPin`(Firestore 접근 0) · CF `functions/index.js:4290 partnerSetPassengerPin` · 서버 형식검사 `functions/index.js:4174 isValidDirectPinAdmin` · 클라 `src/lib/partner.js:326 setPassengerPin` · 격리 테스트 `scripts/test_partner_set_pin.cjs`.
+> **수정** = `src/pages/PartnerApp.js` — 수정 모달에 「비밀번호 직접 지정」 입력+버튼(:1726), 핸들러 `handleSetPin`(:1350), `openEdit` 가 입력칸을 비운다(:1341), 낡은 문구 `“PIN초기화”` → 실제 버튼 이름 `“비밀번호 재발급”`(:1741) · `scripts/test_initial_pin_parity.cjs` [5]절 확장.
+> 🔴 **재발급과의 차이는 `pinInitial: false` 한 줄이다** — 관리자가 정한 그 번호를 승객이 **그대로 쓰고** 강제 변경 화면을 만나지 않는다. `true` 로 되돌리면 지정한 번호가 첫 로그인에서 곧바로 버려진다.
+> 🔴 **소속 가드(`cur.partnerCode !== code`)가 `planDirectPin` 의 존재 이유**다 — 없으면 업체코드 하나로 남의 거래처 사람 비밀번호를 갈아치운다. **뮤테이션 대조군 실측**: 그 한 줄을 지우면 `test_partner_set_pin.cjs` 가 **3단언 실패·exit 1**(남의 거래처 사번으로 op 가 생기는 것을 그대로 잡는다).
+> 🔴 **평문은 어디에도 남기지 않는다** — 해시만 `passengerSecrets` 로, 로그는 사번까지만. 테스트가 「직렬화한 op 에 평문 없음」을 단언한다(⚠ 해시 스텁이 평문을 되비추면 이 단언이 무의미해진다 — sha256 스텁을 쓴다).
+> 🔴 **저장(handleSave)에 비밀번호를 섞지 않았다** — 이름·노선을 고치다 비밀번호까지 바뀌면 의도치 않은 계정 잠금이 난다. 별도 버튼·별도 경로·성공해도 **모달을 닫지 않는다**. `pinLocked`(공용 계정)여도 막지 않는다(그 계정은 승객이 스스로 못 바꿔 관리자가 유일한 통로다).
+> ⚠ **길이 판정이 갈려 있던 것을 이 경로에서만 맞췄다** — 승객앱 로그인은 4~6자리인데 서버 `isValidInitialPinAdmin` 은 6자리 고정이다(2026-09-01 부터 알려진 항목). 신설 `isValidDirectPinAdmin` 은 **4~6자리**이고 클라는 `accountCards.isValidInitialPin` 을 재사용한다(정규식을 새로 만들지 않았다). **엑셀 초기PIN 경로(6자리 고정)는 손대지 않았다** — 그건 엑셀 양식 안내·파서까지 함께 봐야 한다.
+> **검증** = 격리 `test_partner_set_pin.cjs` **35단언** · `test_initial_pin_parity.cjs` 12 → **28단언**(신규 [5] = 클라 `isValidInitialPin` ↔ 서버 `isValidDirectPinAdmin` 13케이스 대조. **대조군 실측**: 서버를 6자리 고정으로 되돌리면 4건 빨간불) · 게이트 **50 → 51/51** · `npm run build` 경고 **21↔21(신규 0)** · `node --check functions/index.js` 통과.
+> ⚠ **미검증(실화면·실호출 0건)** = ⓐ **CF `partnerSetPassengerPin` 실호출 0건**(미배포 — 🔴 신규 onCall 이라 `invoker: "public"` 을 명시했으나 Cloud Run IAM 전파는 배포 후에만 잰다. 배포 직후 1건을 반드시 실측할 것) ⓑ 협력사 포털 수정 모달 **실화면 0건**(입력칸·버튼 배치·성공 문구·모달이 안 닫히는지) ⓒ 지정한 번호로 **승객이 실제 로그인해 강제 변경 화면을 안 만나는지**(= `pinInitial:false` 의 효과) ⓓ `authRequired` 를 켠 거래처에서의 동작(켠 거래처 0곳).
+> **배포 순서** = `functions:partnerSetPassengerPin` → `hosting`(반대로 하면 새 번들이 없는 CF 를 부른다). rules·indexes 변경 0.
+> ⚠ **저장소 메모 정정** — `.claude/issues.md` 의 「`src/pages/PartnerApp.js` 만 CRLF · 3047줄」은 **줄 수만 낡았다**(실측 3313줄, CRLF 는 그대로 맞다). Git Bash 의 `grep -c $'\r'`·`cat -A` 는 이 파일을 **LF 로 보여준다** — 판정은 node 로 `\r\n` 을 세는 것만 믿을 것(이번에 그 함정을 그대로 밟았다).
+
 > **2026-09-04 — 카톡 탈출 실기기 라운드 2건(`main.2f4134bf.js` → `main.9283835a.js`, 둘 다 prod 배포)**
 > ① 🔴 **`openExternalBrowser=1` 은 실기기에서 안 먹었다 → 안드로이드는 `intent://` 가 정답**(way 폰 실측으로 **동작 확인**). 카카오톡은 그 파라미터를 «링크를 처음 열 때» 만 가로채고 **이미 열린 웹뷰 안의 `location.href` 이동에는 적용하지 않는다**. 지금 구조 = 안드는 intent 1단 → 1.2초 뒤 파라미터 2단(판정은 `document.hidden`) → 손안내 상시. iOS 는 intent 가 없어 카카오만 파라미터·2단 없음.
 > ② **손안내·설치안내 문구는 실기기 스크린샷 기준으로만 적는다**: 카톡 안드 메뉴는 **하단바 오른쪽 ⋮**(«오른쪽 위» 아님) · 최신 안드 크롬 메뉴 항목은 **「설치 및 바로가기 만들기」** 하나로 합쳐졌다(옛 「앱 설치」·「홈 화면에 추가」만 적어두면 어르신이 그 글자를 못 찾는다) → 셋 다 적었다.
