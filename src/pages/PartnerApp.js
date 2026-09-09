@@ -39,6 +39,8 @@ import { useBackNav } from "../lib/useBackNav";
 // 포털 인증(2026-09-04 P3-b) — 🔴 `authRequired` 를 켠 거래처만 비밀번호를 묻는다.
 //    부재·falsy 면 아래 경로가 **지금과 글자 그대로 같다**(업체코드만으로 진입).
 import { partnerLogin, partnerResume, partnerLogout, partnerSetPassword } from "../lib/partnerAuth";
+// 관리자 바로가기(2026-09-09 way) — 협력사 관리 표의 업체명 링크가 `?code=` 를 싣고 온다.
+import { readPartnerCodeFromUrl, stripPartnerCodeFromUrl } from "../lib/partnerLink";
 import { isPartnerAuthRequired, checkNewPartnerPassword } from "../lib/partnerAuthPolicy";
 
 // 버스 마커 "신호 지연" 임계 — 관리자 실시간 관제 MARKER_STALE_MS 와 같은 값(5분).
@@ -227,9 +229,15 @@ export default function PartnerApp() {
 
   // PC 는 관리자 콘솔과 같은 형태(고정 사이드바 + 가로 채움), 그 아래 폭은 기존 카드 그대로.
   const wide = useIsWide();
+  // 링크로 받은 업체코드(2026-09-09) — 관리자 협력사 관리에서 업체명을 눌러 새 탭으로 온 경우.
+  // 🔴 **저장된 코드보다 우선**한다. 관리자는 거래처를 갈아 가며 열어 보므로, 이 기기에 남은
+  //    직전 거래처가 링크를 이기면 «다른 협력사 포털이 열린다».
+  const [urlCode] = useState(() => (
+    typeof window === "undefined" ? null : readPartnerCodeFromUrl(window.location.search)
+  ));
   // 저장된 업체코드가 있으면 **첫 화면부터** 복원 중임을 알린다(빈 코드 입력칸을 먼저 보여주면
-  // 담당자가 코드를 다시 치기 시작한다).
-  const [restoring, setRestoring] = useState(() => !!loadPartnerSession());
+  // 담당자가 코드를 다시 치기 시작한다). 링크 진입도 같은 대기 화면을 쓴다.
+  const [restoring, setRestoring] = useState(() => !!(urlCode || loadPartnerSession()));
   const [exitAsk, setExitAsk] = useState(false);      // 나가기 확인 모달
   const [logoutAsk, setLogoutAsk] = useState(false);  // 인증 해제 확인 모달
   // 코드는 아직 이 기기에 있는데 못 들어간 상태(통신 실패 등) — 다시 시도 통로를 준다.
@@ -289,6 +297,7 @@ export default function PartnerApp() {
   // 🔴 저장해 둔 권한을 그대로 믿지 않고 `validatePartnerCode` 로 **서버에 다시 묻는다** —
   //    관리자가 코드를 비활성화·만료시키면 다음 진입에서 바로 막혀야 한다.
   useEffect(() => {
+    if (urlCode) return undefined;   // 링크로 들어왔다 → 아래 링크 진입 경로가 맡는다
     const saved = loadPartnerSession();
     if (!saved) return undefined;
     let alive = true;
@@ -335,7 +344,37 @@ export default function PartnerApp() {
       }
     })();
     return () => { alive = false; };
-  }, []);
+  }, [urlCode]);
+
+  // ── 링크 진입(2026-09-09 way "관리자는 협력사 클릭하면 바로 협력사 페이지로") ──
+  // 관리자 협력사 관리 표의 업체명 → `/partner?code=…` 새 탭. 코드를 대신 쳐 줄 뿐이고,
+  // 🔴 인증은 그대로다 — `authRequired` 를 켠 거래처는 여기서도 비밀번호 화면에서 멈춘다.
+  // 🔴 승계표(resumeToken)를 링크로 받지 않는다(URL 에 실으면 안 되는 값). 그래서 세 번째 인자는 null.
+  useEffect(() => {
+    if (!urlCode) return undefined;
+    // 주소창에서 업체코드는 즉시 지운다 — 남겨 두면 화면공유·즐겨찾기·기록에 그대로 따라간다.
+    // (지운 뒤 새로고침해도 아래에서 저장한 세션으로 복원되므로 손실 없다.)
+    stripPartnerCodeFromUrl(window);
+    // 🔴 입력칸을 **검증 전에** 채운다 — 코드가 죽었을 때 빈 칸 + 에러만 남으면 관리자는
+    //    무엇이 거부됐는지도 모른 채 20자짜리 코드를 다시 찾아 와야 한다.
+    setCode(urlCode);
+    let alive = true;
+    (async () => {
+      try {
+        const data = await validatePartnerCode(urlCode);
+        if (!alive) return;
+        if (isPartnerAuthRequired(data)) { setAuthPending({ code: urlCode, data }); return; }
+        await enterPortal(urlCode, data, null);
+      } catch (e) {
+        // 🔴 저장된 세션은 건드리지 않는다 — 링크의 코드가 죽었다고 이 기기에 남은 다른
+        //    거래처 코드까지 지우면, 담당자 기기에서 재타이핑이 되살아난다.
+        if (alive) setError(`링크로 받은 업체코드로 들어가지 못했습니다\n${e.message}`);
+      } finally {
+        if (alive) setRestoring(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [urlCode]);
 
   // SheetJS 로드
   useEffect(() => {
@@ -534,7 +573,9 @@ export default function PartnerApp() {
       <div style={S.wrap}>
         <div style={{ ...S.card, maxWidth:360, alignItems:"center", textAlign:"center" }}>
           <BusLinkLogo size={26} sub="협력사 포털" />
-          <div style={{ fontSize:13, color:"var(--color-label-mute)", marginTop:6 }}>저장된 업체코드로 들어가는 중...</div>
+          <div style={{ fontSize:13, color:"var(--color-label-mute)", marginTop:6 }}>
+            {urlCode ? "업체코드를 확인하는 중..." : "저장된 업체코드로 들어가는 중..."}
+          </div>
         </div>
       </div>
     );

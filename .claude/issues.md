@@ -5,6 +5,9 @@
 
 ## 미해결 / 함정
 
+- `[패턴]` 🔴 **`partnerCodes` 문서는 `code` 필드가 비어 있을 수 있다 — 화면·링크는 `c.code || c.id` 로 읽어라(2026-09-09 실측)**: 문서 id 가 곧 업체코드인데 시연용 `삼성전자 (샘플)`(`seed_sample_partner.cjs` 생성분)은 `code` 필드가 없다. 협력사 관리 목록의 **권한 판정(`visibleCodes`)은 원래 폴백을 쓰고 있었으나** 업체코드 칸·`복사` 버튼은 `c.code` 만 읽어, 그 줄은 **칸이 비어 보이고 클립보드에 `undefined`** 가 들어갔다(오래된 결함 — 아무도 신고 안 했다). 이번에 딥링크를 붙이며 **12행 중 11행만 링크**로 드러났다. `partnerCodes` 를 읽는 새 코드는 전부 이 폴백을 쓸 것. ⚠ `validatePartnerCode(code)` 는 **문서 id 로 조회**하므로 폴백 값으로 정상 진입한다.
+- `[패턴]` **협력사 포털 딥링크(`/partner?code=…`)의 계약**(2026-09-09): 정본 `src/lib/partnerLink.js`. ① 링크는 **타이핑만 대신한다** — `authRequired` 를 켠 거래처는 링크로 와도 비밀번호 화면에서 멈춘다 ② **승계표(resumeToken)는 URL 에 싣지 않는다** ③ 읽자마자 `stripPartnerCodeFromUrl` 로 주소창에서 지우되 **`history.state` 는 되쓴다**(backNav `__blNav` 가 거기 있다 — 덮으면 새로고침 뒤 '나가기'가 먹통) ④ **링크가 저장된 세션(`buslink_partner`)보다 우선** — 관리자는 거래처를 갈아 가며 연다 ⑤ 링크의 코드가 죽어도 **저장분은 지우지 않는다**. 실화면 가드 = `scripts/headless_check_partner_link.cjs`(@requires-credentials · 쓰기 0 · `BASE=http://localhost:3010` 로도 실행 가능), 소스 가드 = `scripts/test_partner_portal_link.cjs`.
+
 - `[패턴]` **«설치가 어렵다» 는 설치 절차 문제가 아니라 «설치 화면이 안 뜬다» 였다 — 인앱 브라우저(2026-09-04 way, 거래처 전달 · ⚠ 미배포)**: 거래처가 「어르신들이 홈 화면 설치를 못 한다 · 차라리 스토어가 쉽다」고 알려 왔다. 승객앱엔 **이미 원탭 설치가 있었다**(`InstallPrompt.js` — `beforeinstallprompt` 가로채 배너 → [설치] 한 번). 그런데 승객은 안내 링크를 **카카오톡으로 받아 카톡 인앱 브라우저에서 연다**. 거기서는 ⓐ `beforeinstallprompt` 가 **아예 발생하지 않고** ⓑ `isAndroidPwaCapable()` 이 카톡을 UA 로 제외해 수동 안내조차 안 뜬다 → **설치 안내를 본 적 없는 승객이 대다수**였다.
   🔴 **이건 추론이 아니라 실측이다** — `headless_check_inapp_escape.cjs` 를 **prod 에 카톡 UA 로** 태우면 팝업이 `{"present":false}`, 즉 운영 화면에 아무것도 안 뜬다. 「어렵다」로 접수된 증상의 실제 정체는 「없다」였다.
   **고침 2종(한 벌 — 한쪽만 되돌리지 말 것)**: ① 신규 순수 모듈 `src/lib/inAppBrowser.js` — 인앱 판정 + 탈출 URL ② `InstallPrompt` 에 `inapp` 모드 + way 요청 «설치할 때까지 팝업»(3일 스누즈 → **방문마다 재노출**, 세션당 1회).

@@ -64,6 +64,8 @@ import { partnerIssuePassword } from "../lib/partnerAuth";
 import { PARTNER_PASSWORD_ISSUE_NOTICE, isPartnerAuthRequired } from "../lib/partnerAuthPolicy";
 import { resolveTagSoundConfig } from "../lib/tagSound";
 import { resolveQrBoardingConfig } from "../lib/qrBoarding";
+// 협력사 포털 바로가기(2026-09-09 way) — 협력사 관리 표의 업체명 → 그 거래처 포털 새 탭.
+import { buildPartnerPortalUrl } from "../lib/partnerLink";
 import { normalizeWindowOpts, WINDOW_PRE_MIN_DEFAULT, WINDOW_POST_MIN_DEFAULT } from "../lib/routeWindow";
 // 탭 단위 에러 경계 — 자식 throw 시 흰 화면 방지 + 에러 메시지 가시화
 import { ErrorBoundary } from "../components/ErrorBoundary";
@@ -5328,6 +5330,7 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
   const [form, setForm] = useState({ partnerName: "", memo: "", boardingMode: "driver-qr" });
   const [loading, setLoading] = useState(false);
   const [copiedCode, setCopiedCode] = useState(null);
+  const [copiedLink, setCopiedLink] = useState(null);   // 🔗 링크(주소+업체코드) 복사 표시. 2026-09-09
   const [passengers, setPassengers] = useState([]);
   const [selectedCode, setSelectedCode] = useState(null);
   // 모드 편집 모달 — 기존 협력사의 boardingMode 변경 (2026-05-27)
@@ -5615,6 +5618,15 @@ ${chk.missing.slice(0,8).join(", ")}
     setTimeout(() => setCopiedCode(null), 2000);
   };
 
+  // 🔗 링크 복사(2026-09-09 way) — 주소 + 업체코드를 **한 줄**로. 종전에는 위 '포털 URL 복사'로
+  //   주소를 복사해 보낸 뒤 업체코드를 **또 복사**해 보내야 했다(전달이 두 번이라 한쪽이 자주 빠졌다).
+  //   🔴 업체명 링크와 같은 `buildPartnerPortalUrl` 을 쓴다 — 두 벌로 두면 주소 형식이 갈린다.
+  const copyPortalLink = (code) => {
+    navigator.clipboard.writeText(buildPartnerPortalUrl({ origin: window.location.origin, code }));
+    setCopiedLink(code);
+    setTimeout(() => setCopiedLink(null), 2000);
+  };
+
   const copyUrl = () => {
     const url = `${window.location.origin}/partner`;
     navigator.clipboard.writeText(url);
@@ -5664,7 +5676,27 @@ ${chk.missing.slice(0,8).join(", ")}
                   onClick={() => setSelectedCode(selectedCode === c.id ? null : c.id)}>
                   <td style={{ ...S.td, fontWeight: 600 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      <span>{c.partnerName}</span>
+                      {/* 업체명 = 그 거래처 포털 바로가기(2026-09-09 way "관리자는 협력사 클릭하면
+                          바로 협력사 페이지로 이동"). 종전엔 포털 URL 복사 → 새 탭 → 업체코드
+                          복사·붙여넣기 3단계였다.
+                          🔴 행 클릭(= 승객 목록 펼치기)은 그대로 둔다 — 링크를 다느라 기존 동작을
+                             없애지 않는다. 그래서 <a> 에서 전파만 끊는다.
+                          🔴 새 탭(target=_blank): 같은 탭이면 관리자가 보던 관제 화면을 잃는다.
+                             `/partner` 경로는 inMemoryPersistence 라 관리자 로그인은 무접촉. */}
+                      {/* 🔴 `c.code || c.id` — 이 목록의 다른 곳(visibleCodes 권한 판정)과 **같은 폴백**이다.
+                          `code` 필드가 비어 있는 문서가 실제로 있다(시연용 `삼성전자 (샘플)` — 이 화면의
+                          업체코드 칸도 그래서 비어 보인다). 문서 id 가 곧 업체코드라 포털은 그걸로 들어간다.
+                          `c.code` 만 쓰면 그 거래처만 조용히 «코드 없는 포털 주소»로 열린다(실측으로 잡혔다). */}
+                      <a href={buildPartnerPortalUrl({ origin: window.location.origin, code: c.code || c.id })}
+                        target="_blank" rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        title={isPartnerAuthRequired(c)
+                          ? `${c.partnerName} 협력사 포털 열기 (새 탭) — 포털 로그인이 켜진 거래처라 비밀번호를 묻습니다`
+                          : `${c.partnerName} 협력사 포털 열기 (새 탭)`}
+                        style={{ color: "var(--color-primary)", textDecoration: "none", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 3 }}>
+                        {c.partnerName}
+                        <span style={{ fontSize: 11, opacity: 0.65 }} aria-hidden="true">↗</span>
+                      </a>
                       {/* boardingMode 배지 — passenger-qr 만 표시(driver-qr=기본·노이즈 회피). 2026-05-27 */}
                       {c.boardingMode === "passenger-qr" && (
                         <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#FFF1E0", color: "#B95300", border: "1px solid #FFE0C2", fontWeight: 700 }}>
@@ -5699,13 +5731,24 @@ ${chk.missing.slice(0,8).join(", ")}
                     </div>
                   </td>
                   <td style={{ ...S.td }}>
+                    {/* 🔴 `c.code || c.id` — 업체명 링크와 **같은 폴백**. `code` 필드가 빈 문서가 있어
+                        (시연용 샘플 거래처) 종전에는 이 칸이 비어 보이고 `복사` 가 `undefined` 를
+                        클립보드에 넣었다(2026-09-09 실측). 문서 id 가 곧 업체코드다. */}
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <code style={{ fontSize: 11, color: "var(--color-primary)", background: "var(--color-bg-alt)", padding: "2px 8px", borderRadius: 4 }}>
-                        {c.code}
+                        {c.code || c.id}
                       </code>
-                      <button onClick={(e) => { e.stopPropagation(); copyCode(c.code); }}
+                      <button onClick={(e) => { e.stopPropagation(); copyCode(c.code || c.id); }}
                         style={{ ...S.editBtn, padding: "2px 8px", fontSize: 11 }}>
-                        {copiedCode === c.code ? "✓" : "복사"}
+                        {copiedCode === (c.code || c.id) ? "✓" : "복사"}
+                      </button>
+                      {/* 🔗 링크 복사(2026-09-09 way "복사하고 다시 업체코드 복사해야 하는 이슈") —
+                          주소 + 업체코드가 합쳐진 **한 줄**. 담당자에게 이것만 보내면 코드를 칠 일이 없다.
+                          🔴 위 '포털 URL 복사'(코드 없는 공용 주소)는 그대로 둔다 — 안내문·게시용이다. */}
+                      <button onClick={(e) => { e.stopPropagation(); copyPortalLink(c.code || c.id); }}
+                        title="주소+업체코드가 합쳐진 접속 링크를 복사합니다 (담당자에게 이것만 보내면 됩니다)"
+                        style={{ ...S.editBtn, padding: "2px 8px", fontSize: 11 }}>
+                        {copiedLink === (c.code || c.id) ? "✓" : "🔗 링크"}
                       </button>
                     </div>
                   </td>
