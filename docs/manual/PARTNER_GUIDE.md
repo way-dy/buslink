@@ -7,6 +7,7 @@
 <div style="display:flex;gap:6mm;justify-content:center;align-items:flex-start"><img src="assets/partner/code-login.png" style="max-width:40%;margin:2mm 0" alt="업체코드 로그인"><img src="assets/partner/register.png" style="max-width:34%;margin:2mm 0" alt="승객 등록 탭"></div>
 
 - **업체코드** 입력 → **`인증하기`** (코드가 없으면 운영사 담당자에게 문의)
+  - 운영사에서 **접속 링크**를 받으셨다면 그 링크로 들어가면 **업체코드 입력이 생략**됩니다(비밀번호를 쓰는 협력사는 비밀번호만 입력하시면 됩니다)
   - 한 번 인증하면 **그 기기에 30일간 유지**됩니다 — 창을 닫았다 열거나 새로고침해도 업체코드를 다시 입력하지 않습니다. 여러 사람이 쓰는 공용 PC 라면 일을 마친 뒤 **`인증 해제`**(PC 는 왼쪽 아래, 휴대폰은 오른쪽 위)를 눌러 주세요
   - 뒤로가기를 누르면 **보시던 이전 화면**으로 돌아가고, 더 돌아갈 화면이 없을 때만 *포털을 나가시겠습니까?* 를 한 번 여쭙습니다
 - **PC 로 보시면 화면이 가로로 넓게** 펼쳐집니다(왼쪽 메뉴 + 넓은 작업 영역). 휴대폰·태블릿은 지금까지와 같은 화면입니다

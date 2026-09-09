@@ -10,7 +10,7 @@
 > ⚠ **남은 미검증** = ⓐ **iOS 카카오톡**(파라미터 방식 · 실행 0건 — 아이폰 승객이 있으면 한 번 볼 것) ⓑ 안드 «기타 인앱»(네이버·인스타)의 intent ⓒ 「이미 설치했어요」 30일 침묵이 실제로 도는지(시간 경과 필요).
 > ⚠ 헤드리스로는 BIP 를 못 잰다 — 실측: 헤드리스 크롬은 **매니페스트를 아예 가져가지 않는다**(설치 평가를 안 한다). prod 의 매니페스트·아이콘은 정상(200·`application/json`·`image/png` 1024x1024).
 
-> **2026-09-04 — 승객앱 설치율: 인앱 브라우저 탈출 + «설치할 때까지 팝업»(way) · ⚠ 구현·검증 완료 · 🔴 미배포**: 발단은 way 의 「안드로이드만 설치버전(APK)으로 배포할까」였다. **APK 사이드로딩은 안 만들었다** — 거래처가 든 이유가 「어르신들이 설치를 어려워한다」인데, 사이드로딩은 «출처 불명 앱 허용» + «Play Protect 경고 무시» 를 요구해 홈 화면 추가보다 **더 어렵다**(방향이 정확히 반대). 대신 진짜 원인을 먼저 팠다.
+> **2026-09-04 — 승객앱 설치율: 인앱 브라우저 탈출 + «설치할 때까지 팝업»(way) · ✅ prod 배포 완료(2026-09-09 · `main.1f012077.js` — 협력사 포털 링크와 **같은 번들로 함께** 나갔다)**: 발단은 way 의 「안드로이드만 설치버전(APK)으로 배포할까」였다. **APK 사이드로딩은 안 만들었다** — 거래처가 든 이유가 「어르신들이 설치를 어려워한다」인데, 사이드로딩은 «출처 불명 앱 허용» + «Play Protect 경고 무시» 를 요구해 홈 화면 추가보다 **더 어렵다**(방향이 정확히 반대). 대신 진짜 원인을 먼저 팠다.
 > **실측한 원인** = 승객앱엔 이미 원탭 설치가 있었다(`InstallPrompt.js` BIP 배너). 막힌 건 **카카오톡 인앱 브라우저** — 거기선 `beforeinstallprompt` 가 발생하지 않고 `isAndroidPwaCapable()` 이 카톡을 UA 로 제외해 **설치 안내가 아예 안 뜬다**. 🔴 **prod 실측으로 확인**: 카톡 UA 로 `p.buslink.co.kr/p` 를 열면 팝업이 `{"present":false}` 다. 「어렵다」의 정체는 「없다」였다.
 > **신설** = `src/lib/inAppBrowser.js`(순수 · `detectBrowserEnv`·`withExternalBrowserParam`·`buildEscapeUrl`·`buildEscapeGuide`) · `scripts/test_in_app_browser.cjs` · `scripts/headless_check_inapp_escape.cjs`.
 > **수정** = `InstallPrompt.js`(`inapp` 모드 · `escapeOnly` prop · 3일 스누즈 → **방문마다 재노출**(`sessionStorage`) · «이미 설치했어요» 30일) · `EmployeeApp.js`(로그인 화면·첫 PIN 화면에 `escapeOnly` 마운트) · `accountCards.js buildPassengerLoginUrl`(모든 링크에 `openExternalBrowser=1` **항상**) · `test_account_cards.cjs`·`test_partner_theme.cjs` 단언 갱신.
