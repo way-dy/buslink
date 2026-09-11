@@ -2,6 +2,19 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
+> **2026-09-11 — 🔴 같은 차량 출·퇴근 중 한 번만 기록되던 것(way 신고 · 🚧 미배포·미커밋)**: 탑승 멱등 키 `${empNo}__${vehicleId}` 에 **노선이 없어** 아침에 탄 사람이 저녁에 태깅하면 「이미 탑승 처리됨」으로 막혔다. **prod 실측**: 차량 44대 중 **22대가 하루 2배차**(전부 routeId 갈림·같은 routeId 2회차는 0대) · **241명이 그날 저녁에 막힐 상태** · 퇴근 노선 기록이 통째로 비어 있었다(06:30 김포 22명 ↔ 18:00 김포 1명).
+> **신설** = `functions/boardingKey.js`(순수) · 격리 `scripts/test_boarding_dupe_key.cjs` **33단언** · 진단 `scripts/inspect_boarding_dupe_key.cjs`(읽기 전용) · 인덱스 프로브 `scripts/probe_boarding_count_index.cjs`.
+> **수정** = `functions/index.js` — `boardStatic`(:1846 부근)·`boardNfc`(:1999 부근) 가 `${empNo}__${vehicleId}__${routeId}` 로 잡고, 전환 유예 동안 옛 문서를 **같은 노선일 때만** 막는다 · `boardNfc` 의 `todayCount` 를 차량+노선으로 좁힘 · 화면 문구 「이 차량」→「이 노선」(`EmployeeApp.js:3408`·`BoardingApp.js:302`·`DriverApp.js` 라벨).
+> 🔴 **배차 해석은 원래 정상이었다** — `resolveStaticDispatchAdmin` 이 `departTime` 최근접 회차를 고른다(12:44 에 `18:00 김포` 를 제대로 골랐다). 노선 매칭부터 파면 헛짚는다.
+> **검증** = 게이트 51→**52/52** · **뮤테이션 4종 전부 빨간불** · 빌드 신규 경고 0(21↔21)·+8B(`main.8f4dcc37.js`) · `node --check` 통과.
+> **✅ prod 배포 완료(2026-09-11 14:0x · way 「배포해줘」)** = ① `--only functions:boardStatic,functions:boardNfc` → **둘 다 Successful update**(v2 callable·us-central1) ② `--only hosting` → 게이트 **52/52** → `release complete`. rules·indexes 변경 0. 배포 전 카카오 운영키 `58bf34` 확인 · 번들보다 새로운 소스 0건.
+> **올라간 증거** = 5개 도메인(p·d·admin·partner·web.app) 전부 **`main.8f4dcc37.js`** 서빙 · `functions:list` 에 두 CF 확인 · **라이브 번들 디코드 대조 8/8**(신규 문구 3종 있음 · 옛 문구 3종 **사라짐** · 🔴 대조군 2종(기존 「승객 정보 수정」·「탑승 완료!」)이 있음으로 나와 검사가 공허하지 않음).
+> ⚠ **번들 검증 함정** — 한글은 `\uXXXX` 이스케이프라 raw grep 은 언제나 0. 게다가 **`node -e` 로 디코드하면 셸이 정규식 백슬래시를 먹어 옛 문구까지 「없음」이 나온다**(전부 없음 = 검사가 죽은 것이지 통과가 아니다). 스크립트 파일로 돌릴 것 — 그래서 **대조군을 같이 재야** 이 함정에 안 속는다.
+> **배포 직후 기준선(오늘 저녁이 첫 실전)** = 배차 66 · 탑승 **463건** · 하루 2배차 차량 **22대** · 오전 기록 보유 **241명**. 저녁 태깅이 정상이면 이 463 이 눈에 띄게 늘고 **퇴근 노선에 사람이 찍힌다**(그게 가장 강한 증거). 재실측 = `node scripts/inspect_boarding_dupe_key.cjs`.
+> 🔴 **`BOARDING_KEY_LEGACY_UNTIL = "2026-09-12"`** — 배포일(09-11)이 창 안이라 정상. 이 상수는 **9/13 이후 지워도 된다**(boardings 가 날짜별 컬렉션이라 그때부턴 옛 문서 자체가 없다).
+> ⚠ **배포 후 눈으로 볼 것** = ⓐ 오전에 찍은 사람이 저녁에 같은 차량 QR 로 **탑승이 기록되는지** ⓑ 같은 노선 재태깅은 여전히 「이미 탑승 처리됨」인지 ⓒ 기사앱 NFC 화면의 「오늘 이 노선 탑승」 숫자가 그 회차만 세는지 ⓓ 다음 날 탑승 통계에서 **퇴근 노선에 사람이 찍히는지**(이게 가장 큰 증거다).
+> 상세·회귀 가드는 `.claude/issues.md` 맨 위.
+
 > **2026-09-10 — 협력사 포털 「승객 정보 수정」에 비밀번호 직접 지정(게시판 `pIdebVS4GpVouCmg2Dki` 배시현·채드윅송도국제학교 · ✅ prod 배포 완료 · `main.2defffb7.js` · 커밋 `2dbd775` · 게시판 done)**: 요청 = 「관리자가 승객 비밀번호를 원하는 값으로 직접 지정」. 지금까지 유일한 경로는 **재발급**(`partnerReissuePins`)뿐인데 그건 고정 초기값 `000000` + `pinInitial:true` 라 승객이 첫 로그인에서 **강제로 자기 번호를 정한다** — 「이 번호로 해 주세요」를 들어줄 수 없었다.
 > **신설** = 순수 모듈 `functions/passengerRoster.js:155 planDirectPin`(Firestore 접근 0) · CF `functions/index.js:4290 partnerSetPassengerPin` · 서버 형식검사 `functions/index.js:4174 isValidDirectPinAdmin` · 클라 `src/lib/partner.js:326 setPassengerPin` · 격리 테스트 `scripts/test_partner_set_pin.cjs`.
 > **수정** = `src/pages/PartnerApp.js` — 수정 모달에 「비밀번호 직접 지정」 입력+버튼(:1726), 핸들러 `handleSetPin`(:1350), `openEdit` 가 입력칸을 비운다(:1341), 낡은 문구 `“PIN초기화”` → 실제 버튼 이름 `“비밀번호 재발급”`(:1741) · `scripts/test_initial_pin_parity.cjs` [5]절 확장.

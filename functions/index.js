@@ -1474,6 +1474,10 @@ exports.resolveStaticBoarding = onCall(async (request) => {
 // ════════════════════════════════════════════════════════
 const crypto = require("crypto");
 const { planRosterWrites, planReissue, planDirectPin } = require("./passengerRoster");
+// 탑승 멱등 키(노선 포함) — 근거·실측은 boardingKey.js 주석. boardStatic·boardNfc 공용.
+const {
+  buildBoardingDocId, buildLegacyBoardingDocId, legacyBlocks, withinBoardingKeyLegacyWindow,
+} = require("./boardingKey");
 // 협력사 포털 인증(2026-09-04 P3-b) — 판정은 전부 이 순수 모듈이 한다.
 const {
   hashPartnerPassword, generateInitialPartnerPassword, checkNewPartnerPassword,
@@ -1755,7 +1759,8 @@ exports.passengerSetPin = onCall({ invoker: "public" }, async (request) => {
 });
 
 // boardStatic({ companyId, vehicleId, empNo, name }) — 배차 재해석 + 멱등 boarding 생성.
-// 서버가 배차를 다시 해석(클라 값 불신). 멱등 doc id = `${empNo}__${vehicleId}`.
+// 서버가 배차를 다시 해석(클라 값 불신). 멱등 doc id = `${empNo}__${vehicleId}__${routeId}`
+// (2026-09-11: 같은 차량이 출근·퇴근을 둘 다 뛰어 노선 없는 키가 저녁 태깅을 막았다 — boardingKey.js).
 // 반환: { ok:true, alreadyBoarded, routeName, vehicleNo, dispatchDate }.
 exports.boardStatic = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다");
@@ -1834,14 +1839,22 @@ exports.boardStatic = onCall(async (request) => {
     }
   } catch (_) { /* GPS 미수신/권한 → null 처리, 탑승 자체는 진행 */ }
 
-  // 멱등 boarding — 결정적 doc id(직원 1인 × 차량 × 당일 1건). 이미 있으면 첫 스캔 보존.
-  const boardingRef = db
+  // 멱등 boarding — 결정적 doc id(직원 1인 × 차량 × **노선** × 당일 1건). 이미 있으면 첫 스캔 보존.
+  // 🔴 노선이 키에 들어간 이유 = 같은 차량이 출근·퇴근을 둘 다 뛴다(boardingKey.js 주석·실측).
+  const listCol = db
     .collection("companies").doc(companyId)
-    .collection("boardings").doc(today)
-    .collection("list").doc(`${trimmedEmpNo}__${vehicleId}`);
+    .collection("boardings").doc(today).collection("list");
+  const boardingRef = listCol.doc(buildBoardingDocId({ empNo: trimmedEmpNo, vehicleId, routeId }));
   const existing = await boardingRef.get();
   if (existing.exists) {
     return { ok: true, alreadyBoarded: true, routeName, vehicleNo, dispatchDate: today };
+  }
+  // 전환 유예 — 키가 바뀌기 전 오늘 오전에 적재된 문서는 **같은 노선일 때만** 막는다.
+  if (withinBoardingKeyLegacyWindow(today)) {
+    const legacySnap = await listCol.doc(buildLegacyBoardingDocId({ empNo: trimmedEmpNo, vehicleId })).get();
+    if (legacyBlocks({ legacyExists: legacySnap.exists, legacyRouteId: (legacySnap.data() || {}).routeId, routeId })) {
+      return { ok: true, alreadyBoarded: true, routeName, vehicleNo, dispatchDate: today };
+    }
   }
 
   await boardingRef.set({
@@ -1931,9 +1944,15 @@ exports.boardNfc = onCall(async (request) => {
 
   // 오늘 이 차량 탑승 인원 — 기사 화면 카운터. swstagsys 는 메모리 카운트라
   // 새로고침 시 0 이 되는 약점이 있었다(그쪽 issues.md 🟡) → 서버 집계로 해소.
+  // 🔴 «이 노선» 으로 좁힌다 — 차량만으로 세면 아침 출근분이 저녁 기사 화면에 얹힌다
+  //    (2026-09-11 실측: 임시2875053 은 차량 23 = 06:30 김포 22 + 18:00 김포 1).
+  //    2중 동등 필터는 복합 인덱스 없이 돈다(`scripts/probe_boarding_count_index.cjs` 실측).
+  //    routeId 가 없으면(배차 미설정) 옛 차량 단위 집계로 떨어진다.
   const countToday = async () => {
     try {
-      const agg = await boardingsCol.where("vehicleId", "==", vehicleId).count().get();
+      let q = boardingsCol.where("vehicleId", "==", vehicleId);
+      if (routeId) q = q.where("routeId", "==", routeId);
+      const agg = await q.count().get();
       return agg.data().count;
     } catch (_) { return null; } // 집계 실패는 화면 카운터만 생략(탑승은 이미 기록됨)
   };
@@ -1978,15 +1997,25 @@ exports.boardNfc = onCall(async (request) => {
     }
   } catch (_) { /* GPS 미수신 → null, 탑승 자체는 진행 */ }
 
-  // 멱등 boarding — 정적 QR 과 **동일한 결정적 doc id**(직원 1인 × 차량 × 당일 1건).
+  // 멱등 boarding — 정적 QR 과 **동일한 결정적 doc id**(직원 1인 × 차량 × 노선 × 당일 1건).
   // 같은 사람이 QR 로 이미 탔으면 NFC 태깅이 중복 적재하지 않는다(모드 간 멱등도 확보).
-  const boardingRef = boardingsCol.doc(`${empNo}__${vehicleId}`);
+  const boardingRef = boardingsCol.doc(buildBoardingDocId({ empNo, vehicleId, routeId }));
   const existing = await boardingRef.get();
   if (existing.exists) {
     return {
       ok: true, registered: true, empNo, name, alreadyBoarded: true,
       routeName, vehicleNo, dispatchDate: today, todayCount: await countToday(),
     };
+  }
+  // 전환 유예 — boardStatic 과 동일(같은 노선일 때만 옛 문서가 막는다).
+  if (withinBoardingKeyLegacyWindow(today)) {
+    const legacySnap = await boardingsCol.doc(buildLegacyBoardingDocId({ empNo, vehicleId })).get();
+    if (legacyBlocks({ legacyExists: legacySnap.exists, legacyRouteId: (legacySnap.data() || {}).routeId, routeId })) {
+      return {
+        ok: true, registered: true, empNo, name, alreadyBoarded: true,
+        routeName, vehicleNo, dispatchDate: today, todayCount: await countToday(),
+      };
+    }
   }
 
   await boardingRef.set({

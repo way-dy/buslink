@@ -263,7 +263,8 @@ export async function resolveStaticDispatch({ companyId, vehicleId, selectedRout
 }
 
 // ─── 정적 QR 검증 + 탑승 기록 ────────────────────────────
-// 만료/소각 없음(재사용 가능). 중복 방지 = 멱등(직원 1인 × 차량 × 당일 1건).
+// 만료/소각 없음(재사용 가능). 중복 방지 = 멱등(직원 1인 × 차량 × **노선** × 당일 1건).
+// 🔴 노선이 빠지면 같은 차량의 출근·퇴근 중 한 번만 기록된다(2026-09-11 실측 · functions/boardingKey.js).
 // boardings 스키마는 validateAndBoard 와 100% 동일(통계 화면 무영향) + via:"static" 만 추가.
 // 본인 확인(2026-08-25 P2): 서버가 **로그인 토큰의 사번**으로 적재한다 — 여기서 보내는
 //   `empNo` 는 토큰이 있으면 무시된다(위조 방지). 그래서 이 함수를 부르기 전에 반드시

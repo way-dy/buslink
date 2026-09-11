@@ -3406,7 +3406,8 @@ function ScanTabDriverQR({ companyId, session }) {
             <div style={{ width:80, height:80, borderRadius:"50%", background:"#E6F7EB", border:"2px solid var(--color-positive)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:36, color:"#007A29" }}>✓</div>
             <div style={{ fontSize:22, fontWeight:800, color:"#007A29" }}>{alreadyBoarded ? "이미 탑승 처리됨" : "탑승 완료!"}</div>
             {alreadyBoarded
-              ? <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center", lineHeight:1.6 }}>오늘 이 차량 탑승은 이미 기록되어 있습니다<br/>중복 기록되지 않습니다</div>
+              // 🔴 「이 차량」이 아니라 「이 노선」 — 출근·퇴근은 같은 차량이어도 따로 기록된다(2026-09-11).
+              ? <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center", lineHeight:1.6 }}>오늘 이 노선 탑승은 이미 기록되어 있습니다<br/>중복 기록되지 않습니다</div>
               : <div style={{ fontSize:12, color:"var(--color-label-mute)" }}>{new Date().toLocaleTimeString("ko-KR")}</div>}
             <div style={{ width:"100%", maxWidth:320 }}>
               <div style={{ background:"var(--color-bg)", borderRadius:"var(--radius-16)", padding:20, border:"1px solid rgba(0,191,64,.3)", boxShadow:"var(--shadow-emphasize)" }}>

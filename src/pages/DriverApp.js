@@ -2878,7 +2878,9 @@ function DriverNfcTag({ companyId, driver, dispatch }) {
         <div style={S.qrRouteVal}>{dispatch?.routeName || "-"}</div>
       </div>
       <div style={{ textAlign: "center" }}>
-        <div style={{ fontSize: 12, color: "var(--color-label-mute)", marginBottom: 2 }}>오늘 이 차량 탑승</div>
+        {/* 🔴 집계가 «차량» 이 아니라 «이 노선» 으로 좁혀졌다(2026-09-11 boardNfc countToday) —
+            차량 단위로 두면 아침 출근분이 저녁 기사 화면에 얹힌다. 라벨을 집계와 맞춘다. */}
+        <div style={{ fontSize: 12, color: "var(--color-label-mute)", marginBottom: 2 }}>오늘 이 노선 탑승</div>
         <div style={{ fontSize: 44, fontWeight: 900, lineHeight: 1.1, color: "var(--color-primary-deep)" }}>
           {count == null ? "–" : count}
         </div>

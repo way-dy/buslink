@@ -299,7 +299,7 @@ export default function BoardingApp() {
             </div>
             {result.alreadyBoarded && (
               <div style={{ fontSize: 13, color: "var(--color-cautionary)", marginBottom: 8, textAlign: "center" }}>
-                이미 탑승 처리된 QR입니다.
+                이 노선 탑승은 이미 기록되어 있습니다.
               </div>
             )}
             <div style={{ fontSize: 15, color: "var(--color-label)", fontWeight: 700, marginBottom: 4, textAlign: "center", wordBreak: "keep-all" }}>

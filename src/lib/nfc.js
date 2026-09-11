@@ -36,7 +36,7 @@ export function isWebNfcSupported() {
 // 같은 카드 연속 태깅 방지 쿨다운 팩토리.
 // NFC 리더는 카드를 대고 있는 동안 onreading 을 여러 번 발화시킨다 → 쿨다운이 없으면
 // 한 번 태깅에 탑승이 여러 건 적재된다(swstagsys TAG_COOLDOWN_MS=2000 선례).
-// 서버측 멱등(`${empNo}__${vehicleId}`)이 최종 방어선이지만, 클라 쿨다운이 있어야
+// 서버측 멱등(`${empNo}__${vehicleId}__${routeId}`)이 최종 방어선이지만, 클라 쿨다운이 있어야
 // 불필요한 CF 호출과 "이미 탑승" 깜빡임을 막는다.
 export function createTagCooldown(ms = 2000) {
   const last = new Map();
