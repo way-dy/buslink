@@ -5,6 +5,7 @@ import { unlockTagSound, playTagBeep } from "../lib/tagSound";
 import { auth } from "../firebase";
 import { signInAnonymously } from "firebase/auth";
 import { BusLinkLogo, Icon } from "../components/ui";
+import BoardedSeal from "../components/BoardedSeal";
 import { fetchPartnerCodeData, applyPartnerTheme, brandOf } from "../lib/partnerBranding";
 import { applyAppManifest } from "../lib/pwaManifest";
 
@@ -293,15 +294,14 @@ export default function BoardingApp() {
         {/* ─ 성공 ─ */}
         {step === STEPS.SUCCESS && result && (
           <div style={S.centerBox}>
-            <div style={S.successIcon}>✓</div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: "var(--color-positive)", marginBottom: 8 }}>
-              {result.alreadyBoarded ? "이미 탑승 처리됨" : "탑승 완료!"}
-            </div>
-            {result.alreadyBoarded && (
-              <div style={{ fontSize: 13, color: "var(--color-cautionary)", marginBottom: 8, textAlign: "center" }}>
-                이 노선 탑승은 이미 기록되어 있습니다.
-              </div>
-            )}
+            {/* 🔴 캡처 화면 부정승차 대응(2026-09-14) — 도는 고리·흐르는 시계 */}
+            <BoardedSeal title={result.alreadyBoarded ? "이미 탑승 처리됨" : "탑승 완료!"}>
+              {result.alreadyBoarded && (
+                <div style={{ fontSize: 13, color: "var(--color-cautionary)", textAlign: "center" }}>
+                  이 노선 탑승은 이미 기록되어 있습니다.
+                </div>
+              )}
+            </BoardedSeal>
             <div style={{ fontSize: 15, color: "var(--color-label)", fontWeight: 700, marginBottom: 4, textAlign: "center", wordBreak: "keep-all" }}>
               {result.routeName}
             </div>
@@ -403,12 +403,6 @@ const S = {
   },
   notice: { fontSize: 11, color: "var(--color-label-alt)", textAlign: "center", lineHeight: 1.6 },
   centerBox: { display: "flex", flexDirection: "column", alignItems: "center", padding: "20px 0", gap: 8 },
-  successIcon: {
-    width: 72, height: 72, borderRadius: "50%",
-    background: "var(--color-atomic-green-90)", border: "2px solid var(--color-positive)",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    fontSize: 32, color: "var(--color-positive)", fontWeight: 700, marginBottom: 12,
-  },
   errorIcon: {
     width: 72, height: 72, borderRadius: "50%",
     background: "var(--color-atomic-red-90)", border: "2px solid var(--color-destructive)",

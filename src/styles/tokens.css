@@ -179,6 +179,22 @@ html, body { font-family: var(--font-base); color: var(--color-label); -webkit-f
   100% { transform: scale(1.5);  opacity: 0;    }
 }
 
+/* 탑승 완료 «살아있는 화면» 표시(components/BoardedSeal.js · 2026-09-14 신촌세브란스 요청).
+   완료 화면을 캡처해 기사에게 보여주는 부정승차 대응 — 캡처는 멈춰 있으므로
+   ① 체크 둘레 고리가 계속 돌고 ② 빛 띠가 가로질러 흐르고 ③ 시계가 초 단위로 흐른다.
+   🔴 세 키프레임 모두 transform 을 쓰므로 인라인 transform 이 있는 요소에 걸지 말 것
+      (고리·띠는 전용 요소다 — 2026-08-04 진척바 결함과 같은 클래스).
+   🔴 prefers-reduced-motion 으로 끄지 말 것 — 멈추면 캡처와 구별이 안 되는 것이 이 기능의 전부다. */
+@keyframes blsealspin { to { transform: rotate(360deg); } }
+@keyframes blsealsweep {
+  0%   { transform: translateX(-120%) skewX(-18deg); }
+  100% { transform: translateX(320%)  skewX(-18deg); }
+}
+@keyframes blsealbeat {
+  0%, 100% { transform: scale(1);    }
+  50%      { transform: scale(1.08); }
+}
+
 /* Type utility */
 .t-display-1 { font: var(--type-display-1-weight) var(--type-display-1-size)/var(--type-display-1-line) var(--font-base); letter-spacing: var(--type-display-1-track); }
 .t-display-2 { font: var(--type-display-2-weight) var(--type-display-2-size)/var(--type-display-2-line) var(--font-base); letter-spacing: var(--type-display-2-track); }

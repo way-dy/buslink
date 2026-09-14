@@ -2,6 +2,11 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
+> **2026-09-14 — 게시판 `JZxawmQFoExMZcsMxmuo`(최우석 · 신촌세브란스) 탑승완료 화면 애니메이션 · 🚧 미배포·미커밋 · 게시판 미처리 유지**: 완료 화면을 캡처해 기사에게 보여주는 부정승차 대응. 신설 `src/components/BoardedSeal.js`(도는 고리·가로지르는 빛 띠·체크 박동 + **초 단위로 흐르는 현재 시각** + `○시 탑승 · N초 경과`) · 키프레임 3종 `tokens.css`(blsealspin/sweep/beat). 적용 = `EmployeeApp` 완료 화면 2곳(기사 QR 스캔 `ScanTabDriverQR` · 승객 QR 발행) + `BoardingApp`(폰 카메라 고정 QR). 기사앱 NFC 완료 화면은 기사 폰이라 제외.
+> 🔴 회귀 가드 = 멈춘 시각(`new Date()` 렌더 1회) 재도입 금지 · 탑승 시각은 마운트 1회 · reduced-motion 으로 끄지 말 것 · 애니메이션 요소에 인라인 transform 금지.
+> 검증 = 신규 `scripts/test_boarded_seal.cjs` **23단언**(실렌더 0.6초 간격 두 장 픽셀 상이 + **애니메이션 끈 대조군은 동일**) · `test_quick_boarding` 단언 1개 갱신 · 게이트 **53/53** · 빌드 `main.99b4c396.js`(+444B) · 경고 21↔21.
+> ⚠ 미검증 = 실기기(저사양 폰에서 애니메이션 부드러운지) · 실제 앱 안에서 시계가 흐르는지는 컴포넌트 격리 렌더로만(SSR+CSS) — 틱은 소스 가드. **배포 후 게시판 done 코멘트.**
+
 > **2026-09-11 — 🔴 같은 차량 출·퇴근 중 한 번만 기록되던 것(way 신고 · 🚧 미배포·미커밋)**: 탑승 멱등 키 `${empNo}__${vehicleId}` 에 **노선이 없어** 아침에 탄 사람이 저녁에 태깅하면 「이미 탑승 처리됨」으로 막혔다. **prod 실측**: 차량 44대 중 **22대가 하루 2배차**(전부 routeId 갈림·같은 routeId 2회차는 0대) · **241명이 그날 저녁에 막힐 상태** · 퇴근 노선 기록이 통째로 비어 있었다(06:30 김포 22명 ↔ 18:00 김포 1명).
 > **신설** = `functions/boardingKey.js`(순수) · 격리 `scripts/test_boarding_dupe_key.cjs` **33단언** · 진단 `scripts/inspect_boarding_dupe_key.cjs`(읽기 전용) · 인덱스 프로브 `scripts/probe_boarding_count_index.cjs`.
 > **수정** = `functions/index.js` — `boardStatic`(:1846 부근)·`boardNfc`(:1999 부근) 가 `${empNo}__${vehicleId}__${routeId}` 로 잡고, 전환 유예 동안 옛 문서를 **같은 노선일 때만** 막는다 · `boardNfc` 의 `todayCount` 를 차량+노선으로 좁힘 · 화면 문구 「이 차량」→「이 노선」(`EmployeeApp.js:3408`·`BoardingApp.js:302`·`DriverApp.js` 라벨).

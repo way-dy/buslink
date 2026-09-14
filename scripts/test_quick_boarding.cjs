@@ -90,7 +90,8 @@ ok("탑승자(이름·사번)를 표시한다", /session\.name[\s\S]{0,40}sessio
 ok("부서를 표시한다", /session\.dept/.test(SUCCESS));
 ok("고정 QR 뱃지가 남아 있다", /고정 QR/.test(SUCCESS));
 ok("이미 탑승 처리됨 분기가 남아 있다", /alreadyBoarded \? "이미 탑승 처리됨"/.test(SUCCESS));
-ok("탑승 시각 표시가 남아 있다", /toLocaleTimeString\("ko-KR"\)/.test(SUCCESS));
+// 2026-09-14 — 멈춘 시각 한 줄이 흐르는 시계(BoardedSeal)로 바뀌었다(캡처 부정승차 대응).
+ok("탑승 시각 표시가 남아 있다(흐르는 시계)", /<BoardedSeal\b/.test(SUCCESS));
 
 console.log("\n[7] 태깅 피드백(진동·소리)은 그대로인가");
 ok("진동", /navigator\.vibrate\(\[100, 50, 100\]\)/.test(CODE));

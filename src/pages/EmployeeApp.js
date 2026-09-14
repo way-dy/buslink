@@ -31,6 +31,7 @@ import InstallPrompt, { InstallGuide } from "../components/InstallPrompt";
 import { applyAppManifest } from "../lib/pwaManifest";
 import PermissionGate from "../components/PermissionGate";
 import HelpSheet from "../components/HelpSheet";
+import BoardedSeal from "../components/BoardedSeal";
 import { resolveCompanyIdForAnon } from "../lib/companyResolver";
 // 거래처 브랜딩(2026-07-16 회의 #5) — 메인 컬러 CSS 변수 + 헤더 로고. 미설정=기본 테마.
 import { applyPartnerTheme, clearPartnerBranding, fetchPartnerCodeData, logoHeightOf, brandBand, readableOn, brandOf } from "../lib/partnerBranding";
@@ -3141,10 +3142,9 @@ function ScanTabPassengerQR({ companyId, session }) {
 
         {step === "success" && (
           <>
-            <div style={{ width:90, height:90, borderRadius:"50%", background:"#E6F7EB", border:"2px solid var(--color-positive)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:44, color:"#007A29" }}>✓</div>
-            <div style={{ fontSize:22, fontWeight:800, color:"#007A29" }}>탑승 완료!</div>
-            <div style={{ fontSize:14, color:"var(--color-label)", fontWeight:700 }}>{session.name} ({session.empNo})</div>
-            <div style={{ fontSize:12, color:"var(--color-label-mute)" }}>{new Date().toLocaleTimeString("ko-KR")}</div>
+            <BoardedSeal title="탑승 완료!" iconSize={90}>
+              <div style={{ fontSize:14, color:"var(--color-label)", fontWeight:700 }}>{session.name} ({session.empNo})</div>
+            </BoardedSeal>
             <div style={{ fontSize:11, color:"var(--color-label-alt)", marginTop:4 }}>
               잠시 후 새 QR이 발행됩니다 (환승 시 사용)
             </div>
@@ -3403,12 +3403,13 @@ function ScanTabDriverQR({ companyId, session }) {
             (예전 확인 화면과 같은 표). 이 표를 지우면 승객이 오탑승을 알아챌 곳이 사라진다. */}
         {step === "success" && (
           <>
-            <div style={{ width:80, height:80, borderRadius:"50%", background:"#E6F7EB", border:"2px solid var(--color-positive)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:36, color:"#007A29" }}>✓</div>
-            <div style={{ fontSize:22, fontWeight:800, color:"#007A29" }}>{alreadyBoarded ? "이미 탑승 처리됨" : "탑승 완료!"}</div>
-            {alreadyBoarded
-              // 🔴 「이 차량」이 아니라 「이 노선」 — 출근·퇴근은 같은 차량이어도 따로 기록된다(2026-09-11).
-              ? <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center", lineHeight:1.6 }}>오늘 이 노선 탑승은 이미 기록되어 있습니다<br/>중복 기록되지 않습니다</div>
-              : <div style={{ fontSize:12, color:"var(--color-label-mute)" }}>{new Date().toLocaleTimeString("ko-KR")}</div>}
+            {/* 🔴 캡처 화면 부정승차 대응(2026-09-14) — 도는 고리·흐르는 시계. 멈춘 시각으로 되돌리지 말 것 */}
+            <BoardedSeal title={alreadyBoarded ? "이미 탑승 처리됨" : "탑승 완료!"}>
+              {alreadyBoarded && (
+                // 🔴 「이 차량」이 아니라 「이 노선」 — 출근·퇴근은 같은 차량이어도 따로 기록된다(2026-09-11).
+                <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center", lineHeight:1.6 }}>오늘 이 노선 탑승은 이미 기록되어 있습니다<br/>중복 기록되지 않습니다</div>
+              )}
+            </BoardedSeal>
             <div style={{ width:"100%", maxWidth:320 }}>
               <div style={{ background:"var(--color-bg)", borderRadius:"var(--radius-16)", padding:20, border:"1px solid rgba(0,191,64,.3)", boxShadow:"var(--shadow-emphasize)" }}>
                 {result?.staticQr && (
