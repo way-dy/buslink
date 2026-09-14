@@ -2,7 +2,7 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
-> **2026-09-14 — 게시판 `JZxawmQFoExMZcsMxmuo`(최우석 · 신촌세브란스) 탑승완료 화면 애니메이션 · 🚧 미배포·미커밋 · 게시판 미처리 유지**: 완료 화면을 캡처해 기사에게 보여주는 부정승차 대응. 신설 `src/components/BoardedSeal.js`(도는 고리·가로지르는 빛 띠·체크 박동 + **초 단위로 흐르는 현재 시각** + `○시 탑승 · N초 경과`) · 키프레임 3종 `tokens.css`(blsealspin/sweep/beat). 적용 = `EmployeeApp` 완료 화면 2곳(기사 QR 스캔 `ScanTabDriverQR` · 승객 QR 발행) + `BoardingApp`(폰 카메라 고정 QR). 기사앱 NFC 완료 화면은 기사 폰이라 제외.
+> **2026-09-14 — 게시판 `JZxawmQFoExMZcsMxmuo`(최우석 · 신촌세브란스) 탑승완료 화면 애니메이션 · ✅ prod 배포 완료 `main.99b4c396.js`(5개 도메인 해시 일치·라이브 번들/CSS 에 신규 키프레임 확인) · 커밋 `01ae753` push · 게시판 done(가이드 코멘트)**: 완료 화면을 캡처해 기사에게 보여주는 부정승차 대응. 신설 `src/components/BoardedSeal.js`(도는 고리·가로지르는 빛 띠·체크 박동 + **초 단위로 흐르는 현재 시각** + `○시 탑승 · N초 경과`) · 키프레임 3종 `tokens.css`(blsealspin/sweep/beat). 적용 = `EmployeeApp` 완료 화면 2곳(기사 QR 스캔 `ScanTabDriverQR` · 승객 QR 발행) + `BoardingApp`(폰 카메라 고정 QR). 기사앱 NFC 완료 화면은 기사 폰이라 제외.
 > 🔴 회귀 가드 = 멈춘 시각(`new Date()` 렌더 1회) 재도입 금지 · 탑승 시각은 마운트 1회 · reduced-motion 으로 끄지 말 것 · 애니메이션 요소에 인라인 transform 금지.
 > 검증 = 신규 `scripts/test_boarded_seal.cjs` **23단언**(실렌더 0.6초 간격 두 장 픽셀 상이 + **애니메이션 끈 대조군은 동일**) · `test_quick_boarding` 단언 1개 갱신 · 게이트 **53/53** · 빌드 `main.99b4c396.js`(+444B) · 경고 21↔21.
 > ⚠ 미검증 = 실기기(저사양 폰에서 애니메이션 부드러운지) · 실제 앱 안에서 시계가 흐르는지는 컴포넌트 격리 렌더로만(SSR+CSS) — 틱은 소스 가드. **배포 후 게시판 done 코멘트.**
