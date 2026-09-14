@@ -40,6 +40,7 @@ import { withEulReul } from "../lib/josa";
 import { resolveInquiryConfig, buildInquiryUrl } from "../lib/inquiry";
 import { resolveHomepageConfig, homepageDisplayHost } from "../lib/homepage";
 import { resolveQrBoardingConfig } from "../lib/qrBoarding";
+import { resolveRoutePathDisplayConfig } from "../lib/routePathDisplay";
 import { resolveTagSoundConfig, applyTagSoundPolicy, clearTagSoundPolicy, unlockTagSound, playTagBeep, isTagSoundOn, setTagSoundOn, isTagSoundForced } from "../lib/tagSound";
 import { useExitConfirm } from "../lib/useExitConfirm";
 
@@ -495,6 +496,8 @@ export default function EmployeeApp() {
   //   이건 원래 있던 탭이라, 거래처 문서를 받기 전 잠깐이라도 숨기면 **전 거래처가 깜빡인다**.
   //   끄는 거래처에서만 조회 직후 사라진다(문의·홈페이지 탭이 조회 후 나타나는 것과 같은 결).
   const [qrBoardingOn, setQrBoardingOn] = useState(true);
+  // 노선 경로(파란 선) 노출(2026-09-15). 초기값 true — QR 탑승과 같은 이유(원래 보이던 것이라 깜빡임 방지).
+  const [routePathOn, setRoutePathOn] = useState(true);
   useEffect(() => {
     let cancelled = false;
     // 🔴 로그인 **전에도** 거래처를 알 수 있으면 첫 화면부터 그 톤으로 연다(2026-08-27).
@@ -506,6 +509,7 @@ export default function EmployeeApp() {
       clearPartnerBranding(); clearTagSoundPolicy();
       setBranding(null); setTheme(null); setInquiry(null); setHomepage(null);
       setQrBoardingOn(true); // 거래처를 모르면 현행(노출) — 숨김은 거래처가 명시적으로 켠 것만
+      setRoutePathOn(true);
       return;
     }
     fetchPartnerCodeData(pc).then(d => {
@@ -518,6 +522,7 @@ export default function EmployeeApp() {
       setInquiry(resolveInquiryConfig(d)); // 부재·모르는 값 = 꺼짐(회귀 0)
       setHomepage(resolveHomepageConfig(d));
       setQrBoardingOn(resolveQrBoardingConfig(d).visible); // 부재·모르는 값 = 노출(회귀 0)
+      setRoutePathOn(resolveRoutePathDisplayConfig(d).visible); // 부재·모르는 값 = 노출(회귀 0)
       // 태깅 소리 강제 여부(2026-08-25). 프롭으로 여러 겹 내려보내지 않는 이유 =
       // 거래처 문서를 읽는 곳이 여기 한 군데뿐이고, 브랜딩(applyPartnerBranding)이 이미 같은 패턴.
       applyTagSoundPolicy(resolveTagSoundConfig(d));
@@ -677,9 +682,9 @@ export default function EmployeeApp() {
         {/* 🔴 `onScanTab` 이 null 이면 홈 카드의 QR 버튼도 함께 사라진다 — 탭과 버튼을
             **한 값으로 묶어** 둔다. 따로 두면 한쪽만 고쳐 반쪽 상태가 된다. */}
         {tab === "home"     && (
-          <HomeTab companyId={companyId} session={session} branding={branding} theme={theme} onScanTab={qrBoardingOn ? () => setTab("scan") : null} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />
+          <HomeTab companyId={companyId} session={session} branding={branding} theme={theme} showRoutePath={routePathOn} onScanTab={qrBoardingOn ? () => setTab("scan") : null} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />
         )}
-        {tab === "routes"   && <RoutesTab companyId={companyId} session={session} onSessionUpdate={(s) => { saveSession({...session,...s}); setSession(p=>({...p,...s})); }} />}
+        {tab === "routes"   && <RoutesTab companyId={companyId} session={session} showRoutePath={routePathOn} onSessionUpdate={(s) => { saveSession({...session,...s}); setSession(p=>({...p,...s})); }} />}
         {tab === "notices"  && <NoticesTab notices={notices} unreadCount={unreadCount} />}
         {tab === "scan"     && <ScanTab companyId={companyId} session={session} />}
         {tab === "inquiry"  && <InquiryTab config={inquiry} partnerName={session?.partnerName || null} />}
@@ -966,7 +971,7 @@ function FirstPinSetup({ companyId, session, onDone, onLogout, brand = { name: "
 // ════════════════════════════════════════════════════════
 // 홈 탭 — 내 노선 버스 위치 + ETA
 // ════════════════════════════════════════════════════════
-function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpdate }) {
+function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpdate, showRoutePath = true }) {
   // 상단 브랜드 밴드 색 — 거래처 색에서 파생하고 글자색은 휘도로 정한다(순수 함수).
   // 🔴 테마가 오면 밴드색을 primary 에서 파생하지 않는다 — 카카오 톤은 밴드(곤색)와
   //    CTA(파랑)가 서로 다른 색이라 파생으로 만들 수 없다(`partnerBranding.brandBand`).
@@ -1627,7 +1632,8 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
 
           {/* 노선 폴리라인 */}
           {/* 노선 폴리라인 — routePath 진행 모드면 지나온(회색)/남은(파랑) 분할, 아니면 단일 파랑(폴백) */}
-          {routePath.length >= 2 && usePathProgress && busProgress !== null ? (
+          {/* 🔴 거래처가 경로 표시를 끄면(2026-09-15) 선을 **하나도** 그리지 않는다 — 계산은 그대로. */}
+          {!showRoutePath ? null : routePath.length >= 2 && usePathProgress && busProgress !== null ? (
             <>
               {(() => { const t = pathUpTo(routePath, routeCum, busProgress); return t.length >= 2 ? (
                 <Polyline path={t} strokeWeight={5} strokeColor={TRAVELED_COLOR} strokeOpacity={0.7} strokeStyle="solid" />
@@ -2252,7 +2258,7 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
   );
 }
 
-function RoutesTab({ companyId, session, onSessionUpdate }) {
+function RoutesTab({ companyId, session, onSessionUpdate, showRoutePath = true }) {
   const [routes, setRoutes] = useState([]);
   const [gpsData, setGpsData] = useState({});
   const [filter, setFilter] = useState("전체");
@@ -2702,7 +2708,7 @@ function RoutesTab({ companyId, session, onSessionUpdate }) {
                       이 화면만 routePath 를 안 보고 정류장을 곧장 이어 그려서 "실시간 지도에서
                       경로가 직선으로 나온다"는 신고가 나왔다(2026-07-27). 홈 탭·승객앱·협력사
                       포털은 이미 routePath 를 쓰고 있었다. ⚠ 직선 전용으로 되돌리지 말 것. */}
-                  {modalPath.length >= 2 && (
+                  {showRoutePath && modalPath.length >= 2 && (
                     <Polyline
                       path={modalPath}
                       strokeWeight={4} strokeColor="#0066FF" strokeOpacity={0.7} strokeStyle="solid"

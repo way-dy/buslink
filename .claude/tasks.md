@@ -2,6 +2,12 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
+> **2026-09-15 — 게시판 `l0hDzQv1kbHugPv2XxyC`(배시현) 승객앱 노선 경로(파란 선) 표시 스위치 · ✅ prod 배포 `main.fce6bdb5.js`(`--only hosting` · p·admin 해시 + 라이브 번들에 `routePathDisplay` 확인)**: 요청 = 노선이 날마다 바뀌는 거래처(온세미 3교대)는 그려 둔 경로가 혼선을 준다 → 관리자가 거래처별로 끄게.
+> **신설** `src/lib/routePathDisplay.js`(순수 · `partnerCodes/{code}.routePathDisplay.visible`) · 격리 `scripts/test_route_path_display.cjs` **24단언**(뮤턴트 2종 — 모달 게이트 제거·폴러리티 뒤집기 — 전부 빨간불). **수정** `EmployeeApp.js`(`routePathOn` state · `HomeTab`/`RoutesTab` 에 `showRoutePath` · 홈 지도 폴리라인 3개 + 노선 탭 모달 1개 전부 게이트) · `AdminApp.js`(⚙️ 포탈 설정 체크박스 · 저장 payload · 목록 `경로 숨김` 배지).
+> 🔴 **부재 = 노출**(QR 탑승과 같은 폴러리티 — 뒤집으면 전 거래처 지도에서 선이 사라진다) · 🔴 **표시만 끈다** — 진행거리·ETA 계산은 계속 routePath 를 쓴다 · 끄면 정류장 직선 폴백도 안 그린다(직선도 «이 길로 간다»로 읽힌다).
+> 검증 = 게이트 53→**54/54** · 빌드 경고 21↔21 · +276B. ⚠ **미검증** = 끈 거래처 실화면(헤드리스 0건) · 관리자 모달 토글 육안. 켠 거래처 0곳이라 배포 시점 화면 변화 0.
+> 📌 way 판단거리(게시판엔 안 씀): 노선이 매일 바뀌면 **ETA 계산도 틀린 routePath 로 투영**된다 — 계산까지 끌지는 요청 범위 밖이라 두었다.
+
 > **2026-09-14 — 게시판 `JZxawmQFoExMZcsMxmuo`(최우석 · 신촌세브란스) 탑승완료 화면 애니메이션 · ✅ prod 배포 완료 `main.99b4c396.js`(5개 도메인 해시 일치·라이브 번들/CSS 에 신규 키프레임 확인) · 커밋 `01ae753` push · 게시판 done(가이드 코멘트)**: 완료 화면을 캡처해 기사에게 보여주는 부정승차 대응. 신설 `src/components/BoardedSeal.js`(도는 고리·가로지르는 빛 띠·체크 박동 + **초 단위로 흐르는 현재 시각** + `○시 탑승 · N초 경과`) · 키프레임 3종 `tokens.css`(blsealspin/sweep/beat). 적용 = `EmployeeApp` 완료 화면 2곳(기사 QR 스캔 `ScanTabDriverQR` · 승객 QR 발행) + `BoardingApp`(폰 카메라 고정 QR). 기사앱 NFC 완료 화면은 기사 폰이라 제외.
 > 🔴 회귀 가드 = 멈춘 시각(`new Date()` 렌더 1회) 재도입 금지 · 탑승 시각은 마운트 1회 · reduced-motion 으로 끄지 말 것 · 애니메이션 요소에 인라인 transform 금지.
 > 검증 = 신규 `scripts/test_boarded_seal.cjs` **23단언**(실렌더 0.6초 간격 두 장 픽셀 상이 + **애니메이션 끈 대조군은 동일**) · `test_quick_boarding` 단언 1개 갱신 · 게이트 **53/53** · 빌드 `main.99b4c396.js`(+444B) · 경고 21↔21.

@@ -64,6 +64,7 @@ import { partnerIssuePassword } from "../lib/partnerAuth";
 import { PARTNER_PASSWORD_ISSUE_NOTICE, isPartnerAuthRequired } from "../lib/partnerAuthPolicy";
 import { resolveTagSoundConfig } from "../lib/tagSound";
 import { resolveQrBoardingConfig } from "../lib/qrBoarding";
+import { resolveRoutePathDisplayConfig } from "../lib/routePathDisplay";
 // 협력사 포털 바로가기(2026-09-09 way) — 협력사 관리 표의 업체명 → 그 거래처 포털 새 탭.
 import { buildPartnerPortalUrl } from "../lib/partnerLink";
 import { normalizeWindowOpts, WINDOW_PRE_MIN_DEFAULT, WINDOW_POST_MIN_DEFAULT } from "../lib/routeWindow";
@@ -5352,6 +5353,8 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
   // 승객앱 QR 탑승 노출(2026-09-04 배시현 개선요청). 🔴 기본이 **켜짐** — 원래 있던 기능이라
   //   폼 초기값을 false 로 두면 저장만 눌러도 그 거래처의 QR 탑승이 사라진다.
   const [pQrBoarding, setPQrBoarding] = useState(true);
+  // 승객앱 노선 경로(파란 선) 노출(2026-09-15). 🔴 기본 켜짐 — QR 탑승과 같은 이유.
+  const [pRoutePath, setPRoutePath] = useState(true);
   // 2026-08-27 거래처 테마 — "" = 프리셋 미사용(아래 메인 컬러 경로가 그대로 돈다)
   const [pTheme, setPTheme] = useState("");
   const [pColor, setPColor] = useState("");        // "" = 기본 테마
@@ -5498,6 +5501,7 @@ function PartnerTab({ companyId, allowed, currentUserUid }) {
     setPHomeUrl(typeof hp.url === "string" ? hp.url : "");
     setPSoundForced(resolveTagSoundConfig(code).forced);
     setPQrBoarding(resolveQrBoardingConfig(code).visible); // 부재 = 노출(현행)
+    setPRoutePath(resolveRoutePathDisplayConfig(code).visible); // 부재 = 노출(현행)
   };
 
   // 로고 파일 — 투명 PNG 보존 위해 재압축 없이 data URI 로 그대로 저장(200KB 제한·Firestore 1MB doc 여유).
@@ -5558,6 +5562,9 @@ ${chk.missing.slice(0,8).join(", ")}
         // 🔴 `visible` 은 **없으면 노출**이다 — 끄는 거래처에만 false 가 실린다(2026-09-04).
         qrBoarding: {
           visible: pQrBoarding,
+        },
+        routePathDisplay: {
+          visible: pRoutePath,
         },
         // 🔴 프리셋을 끄는 것은 필드 삭제가 아니라 **빈 객체**다 — `resolveTheme` 이 null 을
         //    돌려주면 앱은 아래 `branding.primaryColor` 경로로 내려간다(그 색이 그대로 살아난다).
@@ -5726,6 +5733,11 @@ ${chk.missing.slice(0,8).join(", ")}
                       {!resolveQrBoardingConfig(c).visible && (
                         <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#F1F1F4", color: "#5B5B66", border: "1px solid #DDDDE3", fontWeight: 700 }}>
                           QR 탑승 숨김
+                        </span>
+                      )}
+                      {!resolveRoutePathDisplayConfig(c).visible && (
+                        <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#F1F1F4", color: "#5B5B66", border: "1px solid #DDDDE3", fontWeight: 700 }}>
+                          경로 숨김
                         </span>
                       )}
                     </div>
@@ -6053,6 +6065,17 @@ ${chk.missing.slice(0,8).join(", ")}
           <div style={{ marginTop: 6, background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#003A99", lineHeight: 1.6 }}>
             ⓘ 끄면 승객앱 홈의 <b>QR 탑승</b> 버튼과 아래 <b>탑승</b> 탭이 함께 사라집니다(노선·공지·설정은 그대로).<br />
             ⚠ 기사님이 들고 계신 <b>인쇄 QR</b>로 찍는 방식은 이 설정과 무관하게 계속 동작합니다.
+          </div>
+
+          {/* ── 승객앱 노선 경로 노출 (2026-09-15 배시현 개선요청) — 체크 = 보임(현행) ── */}
+          <label style={{ ...S.label, marginTop: 12 }}>승객앱 노선 경로</label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-label)", cursor: "pointer" }}>
+            <input type="checkbox" checked={pRoutePath} onChange={e => setPRoutePath(e.target.checked)} />
+            승객앱 지도에 노선 경로(파란 선) 보이기
+          </label>
+          <div style={{ marginTop: 6, background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#003A99", lineHeight: 1.6 }}>
+            ⓘ 끄면 승객앱 홈 지도와 노선 탭 지도에서 경로 선이 사라집니다(정류장·버스 위치·도착 안내는 그대로).<br />
+            노선이 날마다 달라지는 거래처처럼 그려 둔 경로가 실제 운행과 다를 수 있을 때 끄세요.
           </div>
 
           {/* ── QR 태깅 소리 (2026-08-25 미팅) ── */}
