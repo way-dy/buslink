@@ -1476,7 +1476,7 @@ const crypto = require("crypto");
 const { planRosterWrites, planReissue, planDirectPin } = require("./passengerRoster");
 // 탑승 멱등 키(노선 포함) — 근거·실측은 boardingKey.js 주석. boardStatic·boardNfc 공용.
 const {
-  buildBoardingDocId, buildLegacyBoardingDocId, legacyBlocks, withinBoardingKeyLegacyWindow,
+  buildBoardingDocId,
 } = require("./boardingKey");
 // 협력사 포털 인증(2026-09-04 P3-b) — 판정은 전부 이 순수 모듈이 한다.
 const {
@@ -1849,13 +1849,6 @@ exports.boardStatic = onCall(async (request) => {
   if (existing.exists) {
     return { ok: true, alreadyBoarded: true, routeName, vehicleNo, dispatchDate: today };
   }
-  // 전환 유예 — 키가 바뀌기 전 오늘 오전에 적재된 문서는 **같은 노선일 때만** 막는다.
-  if (withinBoardingKeyLegacyWindow(today)) {
-    const legacySnap = await listCol.doc(buildLegacyBoardingDocId({ empNo: trimmedEmpNo, vehicleId })).get();
-    if (legacyBlocks({ legacyExists: legacySnap.exists, legacyRouteId: (legacySnap.data() || {}).routeId, routeId })) {
-      return { ok: true, alreadyBoarded: true, routeName, vehicleNo, dispatchDate: today };
-    }
-  }
 
   await boardingRef.set({
     empNo: trimmedEmpNo,
@@ -2006,16 +1999,6 @@ exports.boardNfc = onCall(async (request) => {
       ok: true, registered: true, empNo, name, alreadyBoarded: true,
       routeName, vehicleNo, dispatchDate: today, todayCount: await countToday(),
     };
-  }
-  // 전환 유예 — boardStatic 과 동일(같은 노선일 때만 옛 문서가 막는다).
-  if (withinBoardingKeyLegacyWindow(today)) {
-    const legacySnap = await boardingsCol.doc(buildLegacyBoardingDocId({ empNo, vehicleId })).get();
-    if (legacyBlocks({ legacyExists: legacySnap.exists, legacyRouteId: (legacySnap.data() || {}).routeId, routeId })) {
-      return {
-        ok: true, registered: true, empNo, name, alreadyBoarded: true,
-        routeName, vehicleNo, dispatchDate: today, todayCount: await countToday(),
-      };
-    }
   }
 
   await boardingRef.set({

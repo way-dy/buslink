@@ -24,35 +24,10 @@ function buildBoardingDocId({ empNo, vehicleId, routeId }) {
   return r ? `${e}__${v}__${r}` : `${e}__${v}`;
 }
 
-// 노선 차원이 없던 시절의 doc id. 배포 당일 «오전에 이미 적재된 기록» 을 찾을 때만 쓴다.
-function buildLegacyBoardingDocId({ empNo, vehicleId }) {
-  return buildBoardingDocId({ empNo, vehicleId, routeId: "" });
-}
-
-// 🔴 레거시 문서가 이번 태깅을 막아야 하는가 — **같은 노선일 때만** 막는다.
-//    이게 이 고침의 핵심이다: 그냥 「레거시가 있으면 막는다」로 두면 아침 기록이 저녁을
-//    계속 막아 아무것도 안 고친 것과 같고, 아예 안 보면 배포 당일 오전에 탄 사람이
-//    같은 노선을 다시 찍었을 때 중복 1건이 생긴다.
-//    boardings 는 날짜별 컬렉션이라 이 폴백은 **배포 당일만** 의미가 있다(다음 날부터
-//    레거시 문서 자체가 없다). BOARDING_KEY_LEGACY_UNTIL 이 지나면 지워도 된다.
-function legacyBlocks({ legacyExists, legacyRouteId, routeId }) {
-  if (!legacyExists) return false;
-  const r = String(routeId == null ? "" : routeId).trim();
-  if (!r) return true; // 노선 미상 = 옛 동작(차량 × 당일 1건) 유지
-  return String(legacyRouteId == null ? "" : legacyRouteId).trim() === r;
-}
-
-// 이 날짜(KST)까지만 레거시 문서를 조회한다. 지나면 추가 read 0.
-const BOARDING_KEY_LEGACY_UNTIL = "2026-09-12";
-
-function withinBoardingKeyLegacyWindow(todayKst) {
-  return String(todayKst || "") <= BOARDING_KEY_LEGACY_UNTIL;
-}
+// 🔴 전환 유예(옛 키 문서가 같은 노선 재태깅을 막던 폴백)는 2026-09-15 제거했다.
+//    boardings 가 날짜별 컬렉션이라 배포 다음 날(9/12)부터 옛 키 문서 자체가 없고,
+//    9/11·9/14 실측으로 퇴근 노선 기록이 정상 적재되는 것을 확인했다.
 
 module.exports = {
   buildBoardingDocId,
-  buildLegacyBoardingDocId,
-  legacyBlocks,
-  withinBoardingKeyLegacyWindow,
-  BOARDING_KEY_LEGACY_UNTIL,
 };

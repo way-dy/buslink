@@ -49,24 +49,9 @@ eq(K.buildBoardingDocId({ empNo: EMP, vehicleId: "", routeId: R_AM }), "", "차�
 console.log("[4] routeId 가 없으면 옛 동작(차량 × 당일 1건)을 유지한다");
 eq(K.buildBoardingDocId({ empNo: EMP, vehicleId: VEH, routeId: "" }), EMP + "__" + VEH, "노선 미상 → 레거시 키");
 eq(K.buildBoardingDocId({ empNo: EMP, vehicleId: VEH }), EMP + "__" + VEH, "routeId 미전달 → 레거시 키");
-eq(K.buildLegacyBoardingDocId({ empNo: EMP, vehicleId: VEH }), EMP + "__" + VEH, "레거시 키 빌더");
 
-console.log("[5] 전환 유예 — 옛 문서는 «같은 노선일 때만» 막는다");
-ok(K.legacyBlocks({ legacyExists: true, legacyRouteId: R_AM, routeId: R_AM }) === true,
-  "오전에 찍은 사람이 오전 노선을 또 찍으면 막는다(중복 방지 유지)");
-ok(K.legacyBlocks({ legacyExists: true, legacyRouteId: R_AM, routeId: R_PM }) === false,
-  "🔴 오전 레거시 기록이 퇴근 태깅을 막으면 안 된다 — 여기가 신고된 증상 그 자체다");
-ok(K.legacyBlocks({ legacyExists: false, legacyRouteId: undefined, routeId: R_PM }) === false,
-  "레거시 문서가 없으면 막지 않는다");
-ok(K.legacyBlocks({ legacyExists: true, legacyRouteId: R_AM, routeId: "" }) === true,
-  "노선 미상이면 옛 동작대로 막는다(갈라 줄 근거가 없다)");
-ok(K.legacyBlocks({ legacyExists: true, legacyRouteId: undefined, routeId: R_PM }) === false,
-  "레거시에 routeId 필드가 없으면 퇴근을 막지 않는다");
-
-console.log("[6] 전환 창은 날짜(KST 문자열)로 닫힌다");
-ok(K.withinBoardingKeyLegacyWindow("2026-09-11") === true, "배포 당일은 열려 있다");
-ok(K.withinBoardingKeyLegacyWindow(K.BOARDING_KEY_LEGACY_UNTIL) === true, "마지막 날 포함");
-ok(K.withinBoardingKeyLegacyWindow("2026-12-31") === false, "지나면 닫힌다(추가 read 0)");
+console.log("[5] 전환 유예 코드는 제거됐다 (2026-09-15)");
+ok(Object.keys(K).join() === "buildBoardingDocId", "boardingKey 는 노선 포함 키 빌더 하나만 내보낸다");
 
 console.log("[7] 소스 가드 — CF 가 실제로 이 키를 쓴다");
 const cf = fs.readFileSync(path.join(ROOT, "functions", "index.js"), "utf8");
@@ -80,7 +65,7 @@ const OLD_STATIC = ".doc(`" + "${trimmedEmpNo}__${vehicleId}" + "`)";
 const OLD_NFC = ".doc(`" + "${empNo}__${vehicleId}" + "`)";
 ok(cf.indexOf(OLD_STATIC) === -1, "boardStatic 에 옛 리터럴 키가 남아 있지 않다");
 ok(cf.indexOf(OLD_NFC) === -1, "boardNfc 에 옛 리터럴 키가 남아 있지 않다");
-ok(cf.indexOf("legacyBlocks({") !== -1, "전환 유예 폴백이 배선돼 있다");
+ok(cf.indexOf("legacyBlocks") === -1 && cf.indexOf("withinBoardingKeyLegacyWindow") === -1, "전환 유예 호출이 CF 에 남아 있지 않다");
 
 console.log("[8] 소스 가드 — 기사 화면 집계도 노선으로 좁혔다");
 // 차량만으로 세면 아침 출근분이 저녁 기사 화면에 얹힌다(실측: 차량 23 = 오전 22 + 저녁 1).
