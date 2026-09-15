@@ -6,24 +6,27 @@
 // 🔴 **일부러 성공 경로를 호출하지 않는다.** boardStatic 성공은 prod 에 탑승 기록을 만들고
 //    그날 탑승률·정원 통계를 오염시킨다. 그래서 이 하네스는 두 가지를 나눠서 잰다:
 //      [A] 서버 거부 — 익명 클라로 실제 호출. 거부는 아무것도 안 쓴다.
-//      [B] 통과 근거 — 명부의 pinHash 가 `hashPin(PIN)` 과 실제로 맞는지 Admin SDK 로 **읽어서만** 대조.
+//      [B] 통과 근거 — 저장된 PIN 해시가 서버 `hashPinAdmin(PIN)` 과 맞는지 Admin SDK 로 **읽어서만** 대조.
 //          (성공 경로가 쓰는 값이 바로 이 해시다 — 여기가 맞으면 진짜 승객은 안 막힌다.)
-// 🔴 해시식은 베끼지 않고 `src/lib/partner.js` 의 hashPin 소스를 그대로 vm 에 태운다(재구현 0).
+// 🔴 해시식은 베끼지 않고 `functions/index.js` 의 hashPinAdmin 소스를 그대로 vm 에 태운다(재구현 0).
+//    2026-08-28 P3-a 로 클라 `hashPin` 이 제거돼 옛 추출(src/lib/partner.js)이 시작 즉시 throw 했다
+//    — 2026-09-15 발견·서버 정본으로 옮김. 저장 해시도 passengerSecrets 를 먼저 읽는다(서버 readPinHash 순서).
 const path = require("path");
 const fs = require("fs");
 const vm = require("vm");
 const crypto = require("crypto");
 const ROOT = path.join(__dirname, "..");
 
-// ── src/lib/partner.js 의 hashPin 만 격리 실행(파이어베이스 import 는 잘라낸다) ──
+// ── functions/index.js 의 hashPinAdmin 만 격리 실행(salt 상수와 함께 잘라낸다) ──
 function loadHashPin() {
-  const src = fs.readFileSync(path.join(ROOT, "src/lib/partner.js"), "utf8");
-  const m = /export async function hashPin\(pin\) \{[\s\S]*?\n\}/.exec(src);
-  if (!m) throw new Error("hashPin 소스를 못 찾았다 — 함수명이 바뀌었는지 확인");
-  const ctx = { crypto: crypto.webcrypto, TextEncoder, console };
+  const src = fs.readFileSync(path.join(ROOT, "functions/index.js"), "utf8");
+  const salt = /const PASSENGER_PIN_SALT = "[^"]*";/.exec(src);
+  const fn = /function hashPinAdmin\(pin\) \{[\s\S]*?\n\}/.exec(src);
+  if (!salt || !fn) throw new Error("hashPinAdmin/PASSENGER_PIN_SALT 소스를 못 찾았다 — 이름이 바뀌었는지 확인");
+  const ctx = { crypto };
   vm.createContext(ctx);
-  vm.runInContext(m[0].replace(/^export /, "") + "\n;this.__h = hashPin;", ctx);
-  return ctx.__h;
+  vm.runInContext(salt[0] + "\n" + fn[0] + "\n;this.__h = hashPinAdmin;", ctx);
+  return async (pin) => ctx.__h(pin);
 }
 
 function loadAdmin() {
@@ -95,7 +98,15 @@ async function makeCaller() {
   // 실재 승객 1명(해시 대조용) — 읽기만.
   const ps = await db.collection("companies").doc(COMPANY).collection("passengers").limit(1).get();
   const realEmpNo = ps.empty ? null : ps.docs[0].id;
-  const realHash = ps.empty ? null : (ps.docs[0].data() || {}).pinHash;
+  // 해시 정본은 passengerSecrets(2026-08-28 P3-a) — 서버 readPinHash 와 같은 순서(secrets → 명부 폴백).
+  const readHash = async (empNo) => {
+    const co = db.collection("companies").doc(COMPANY);
+    const s = await co.collection("passengerSecrets").doc(empNo).get();
+    if (s.exists && (s.data() || {}).pinHash) return s.data().pinHash;
+    const r = await co.collection("passengers").doc(empNo).get();
+    return r.exists ? ((r.data() || {}).pinHash || null) : null;
+  };
+  const realHash = realEmpNo ? await readHash(realEmpNo) : null;
 
   const callBoardStatic = await makeCaller();
 
@@ -139,16 +150,16 @@ async function makeCaller() {
   //    "안전하다"가 아니다(2026-08-25 실측: 리전을 잘못 짚어 404 로 전부 빨갛게 나왔다).
   ok("계측 성립 — CF 에 실제로 닿았다", instrumentAlive);
 
-  console.log("\n[B] 통과 근거 — 명부 해시가 hashPin(PIN) 과 맞물리는지(읽기만)");
-  ok("승객 문서에 pinHash 가 있다", !!realHash, realEmpNo);
+  console.log("\n[B] 통과 근거 — 저장 해시가 hashPinAdmin(PIN) 과 맞물리는지(읽기만)");
+  ok("승객 PIN 해시가 저장돼 있다(secrets 또는 명부)", !!realHash, realEmpNo);
   const sample = await hashPin("112233");
   ok("hashPin 이 64자리 SHA-256 hex 를 만든다", /^[0-9a-f]{64}$/.test(sample), sample);
   ok("같은 PIN 은 항상 같은 해시(서버 대조가 성립)", sample === await hashPin("112233"));
   ok("다른 PIN 은 다른 해시", sample !== await hashPin("112234"));
   // 검토용 계정(PIN 112233)이 살아 있으면 저장 해시와 실제로 맞는지까지 대조.
-  const rev = await db.collection("companies").doc(COMPANY).collection("passengers").doc("REVIEW").get();
-  if (rev.exists) {
-    ok("검토용 계정 저장 해시 = hashPin('112233')", (rev.data() || {}).pinHash === sample, "불일치");
+  const revHash = await readHash("REVIEW");
+  if (revHash) {
+    ok("검토용 계정 저장 해시 = hashPinAdmin('112233')", revHash === sample, "불일치");
   } else {
     console.log("  ⏭ SKIP 검토용 계정(REVIEW) 없음 — 저장 해시 실대조는 건너뜀");
   }
