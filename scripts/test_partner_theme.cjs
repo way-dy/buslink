@@ -204,14 +204,14 @@ function loadModule(doc) {
     ok("파일이 실재한다: " + f, fs.existsSync(path.join(ROOT, f)));
   });
 
-  // 거래처 전용 진입 주소 — 카카오톡 링크 카드는 **이 파일의 정적 태그**에서만 나온다.
+  // /kakao — 2026-09-15 샘플 거래처 삭제로 중립 입구로 되돌렸다(이미 전달된 링크라 파일은 유지).
   const landing = fs.readFileSync(path.join(ROOT, "public/kakao.html"), "utf8");
-  ok("랜딩 카드 제목이 워드마크와 어긋나지 않는다",
-    landing.includes('property="og:title" content="카카오 T 통근셔틀"'));
-  ok("🔴 meta refresh 를 쓰지 않는다(스크레이퍼가 따라가면 카드가 승객앱 것으로 잡힌다)",
+  ok("🔴 meta refresh 를 쓰지 않는다(스크레이퍼가 따라가면 카드가 엉뚱하게 잡힌다)",
     !landing.toLowerCase().includes("http-equiv=\"refresh\""));
-  ok("랜딩이 거래처 코드를 실어 승객앱으로 보낸다",
-    landing.includes("/p?pc=") && landing.includes("DY001-삼성전자샘플-2026-SMPL"));
+  ok("🔴 지운 샘플 거래처 코드를 싣지 않는다(없는 코드로 보내면 테마 조회가 헛돈다)",
+    !landing.includes("SMPL") && landing.includes('location.replace("/p")'));
+  ok("중립 입구 카드 제목 = 공용 index.html 과 같은 문구",
+    landing.includes('property="og:title" content="통근셔틀 이용 안내"'));
   const fbase = fs.readFileSync(path.join(ROOT, "firebase.json"), "utf8");
   ok("🔴 호스팅 rewrite 가 캐치올보다 «먼저» /kakao 를 잡는다(순서가 뒤면 SPA 로 삼켜진다)",
     fbase.indexOf('"/kakao"') !== -1 && fbase.indexOf('"/kakao"') < fbase.indexOf('"**"'));

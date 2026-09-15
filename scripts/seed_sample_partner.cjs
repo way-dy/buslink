@@ -101,9 +101,16 @@ const routeRef = (id) => db.collection("companies").doc(CID).collection("routes"
     for (const id of ["sample-notice-1", "sample-notice-2"]) {
       await db.collection("companies").doc(CID).collection("notices").doc(id).delete();
     }
-    await db.collection("companies").doc(CID).collection("passengers").doc(EMP).delete();
+    const co = db.collection("companies").doc(CID);
+    await co.collection("passengers").doc(EMP).delete();
+    // 🔴 시드 이후에 생긴 것도 같이 — PIN 해시 분리(2026-08-28 P3-a 백필) · 푸시 토큰 · 로그인 승계표.
+    //    안 지우면 승객 문서는 없는데 승계표로 부팅이 계속 시도되고, 해시만 남는다.
+    await co.collection("passengerSecrets").doc(EMP).delete();
+    await co.collection("fcmTokens").doc(EMP).delete();
+    const sess = await co.collection("passengerSessions").where("empNo", "==", EMP).get();
+    for (const s of sess.docs) await s.ref.delete();
     await db.collection("partnerCodes").doc(CODE).delete();
-    console.log("  공지·승객·거래처 삭제\n완료");
+    console.log(`  공지·승객(해시·토큰·승계표 ${sess.size}건 포함)·거래처 삭제\n완료`);
     return;
   }
 
