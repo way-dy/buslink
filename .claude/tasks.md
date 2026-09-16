@@ -2,6 +2,11 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
+> **2026-09-17 — 운행 이력 ① 노선별 검색 ② 정류장 GPS 매칭 시각 표기(way 스크린샷 · ✅ prod 배포 완료 `main.fa7377fe.js` · `--only hosting` · web.app+d+p+partner 4개 도메인 해시 일치 · 라이브 번들 디코드 대조 5/5(신규 3·대조군 2))**: 요청 = 운행 이력 좌측 목록을 노선으로 좁히고, 각 정류장을 «언제 지나갔는지» 보이게.
+> **수정** = `src/pages/AdminApp.js` `HistoryTab` 만. ① 거래처 아래 **노선 select**(`routeFilter`) — 후보는 그 날짜·거래처 배차에 실제로 있는 노선만(이름순·건수). 날짜·거래처 바꾸면 전체로 복귀, 후보에 없는 값은 전체로 취급. ② 배차 선택 시 사이드바에 **🕒 정류장 통과 시각** 타임라인(정류장 순서 · 예정 `plannedAt` 없으면 `departTime+offsetMin` → 실제 `stopArrivals[stopId].actualAt` HH:MM · 지연 라벨 `formatDelayLabel` · `estimated` 는 ≈ 접두) + 지도 정류장 라벨에 통과 시각을 **이름 앞에**(뒤에 두면 말줄임에 잘린다).
+> 🔴 «통과 시각» 은 GPS 가 감지 반경에 **처음 들어온** 시각(첫 도착만 멱등 기록)이지 정차 시각이 아니다 — 화면 안내문에도 그렇게 적었다. `actualAt` 은 Timestamp·millis·ISO 세 형태 공존 → `arrivalMs` 로만 읽을 것.
+> 검증 = ESLint 신규 0 · 게이트 **54/54** · CRA 빌드 통과(해시는 배포 시 기록). ⚠ 미검증 = 실화면 육안(헤드리스 admin 하네스 없음) — 볼 것: ⓐ 노선 select 에 그 날 배차 노선만 뜨는지 ⓑ 배차 클릭 시 타임라인이 정류장 순서대로·통과분에 시각이 붙는지 ⓒ 지도 초록 라벨 앞에 시각.
+
 > **2026-09-15 — 게시판 `l0hDzQv1kbHugPv2XxyC`(배시현) 승객앱 노선 경로(파란 선) 표시 스위치 · ✅ prod 배포 `main.fce6bdb5.js`(`--only hosting` · p·admin 해시 + 라이브 번들에 `routePathDisplay` 확인)**: 요청 = 노선이 날마다 바뀌는 거래처(온세미 3교대)는 그려 둔 경로가 혼선을 준다 → 관리자가 거래처별로 끄게.
 > **신설** `src/lib/routePathDisplay.js`(순수 · `partnerCodes/{code}.routePathDisplay.visible`) · 격리 `scripts/test_route_path_display.cjs` **24단언**(뮤턴트 2종 — 모달 게이트 제거·폴러리티 뒤집기 — 전부 빨간불). **수정** `EmployeeApp.js`(`routePathOn` state · `HomeTab`/`RoutesTab` 에 `showRoutePath` · 홈 지도 폴리라인 3개 + 노선 탭 모달 1개 전부 게이트) · `AdminApp.js`(⚙️ 포탈 설정 체크박스 · 저장 payload · 목록 `경로 숨김` 배지).
 > 🔴 **부재 = 노출**(QR 탑승과 같은 폴러리티 — 뒤집으면 전 거래처 지도에서 선이 사라진다) · 🔴 **표시만 끈다** — 진행거리·ETA 계산은 계속 routePath 를 쓴다 · 끄면 정류장 직선 폴백도 안 그린다(직선도 «이 길로 간다»로 읽힌다).
@@ -378,7 +383,7 @@
 ## 백로그 / 검토 후보
 - [ ] 🧹 **`.claude/issues.md` 재분할 필요(2026-09-04 재실측 — **239줄** · `tasks.md` 는 **398줄**. 2026-08-27 에 167줄로 적어 둔 뒤 한 주 만에 43% 더 자랐다)**: 🔴 **`audit-config.sh` 는 이 파일들을 안 본다**(⑥ 래칫 대상이 `.claude/agents/refs/*.md` 뿐) — 그래서 wrapup 게이트에 안 걸리고 계속 미뤄진다. 다음에 이 파일을 크게 손대는 세션에서 **반드시** 토픽 분할할 것(본문은 그대로 이동만·요약 금지). 2026-07-09 에 `issues-patterns.md` 를 떼어 99줄까지 줄였는데 두 달 만에 도로 넘쳤다. `tasks.md` 도 193줄·99KB. 줄 수보다 **바이트가 문제**다(issues.md 는 한 줄이 평균 1.2KB). 다음에 이 파일을 크게 손댈 때 토픽 분할 + 완결분 `issues-log.md` 아카이브. 후보 = 2026-07 이전 `[해결]`(정적 QR CF 위임·인앱 스캐너 3분기·뒤로가기 팝업·배차 복사 실행상태) — 전부 닫혔고 후속 변경에 덮였다.
 - [x] ~~🧹 `.claude/issues.md`·`tasks.md` 150줄 초과 정리~~ — issues.md 는 `issues-patterns.md` 분리로 99줄, tasks.md 는 2026-07-21 wrapup 에서 2026-05~06 완료·superseded 검증 항목을 `tasks-log.md` 로 이관해 112줄. 둘 다 소프트캡 이내.
-- [ ] 🎯 운행 이력 정류장 반경 시각화 확장: ① 반경 동적 조정 슬라이더(50~300m) — 도착 감지 임계 튜닝 진단 ② routePath(노선 사전 경로) Polyline 보조 표시 — GPS 실 경로 ↔ routePath 일치도 검증 ③ 정류장 마커 클릭 시 stopArrivals 상세(actualAt/plannedAt/delaySec/estimated 백필 여부) 카드 ④ 통과 마커 클릭 시 가장 가까운 GPS 포인트 자동 강조(시각 차이 확인).
+- [ ] 🎯 운행 이력 정류장 반경 시각화 확장: ① 반경 동적 조정 슬라이더(50~300m) — 도착 감지 임계 튜닝 진단 ② routePath(노선 사전 경로) Polyline 보조 표시 — GPS 실 경로 ↔ routePath 일치도 검증 ③ ~~정류장 마커 클릭 시 stopArrivals 상세(actualAt/plannedAt/delaySec/estimated 백필 여부) 카드~~ → 2026-09-17 사이드바 타임라인 + 라벨 시각으로 대체 완료 ④ 통과 마커 클릭 시 가장 가까운 GPS 포인트 자동 강조(시각 차이 확인).
 - [ ] 📣 카카오 알림톡/SMS 병행 발송 — callcenter SENS 계정 재사용. 템플릿 심사 + Secret Manager 후 진행.
 - [ ] 🗓 한국 공휴일 정적 갱신 — `functions/holidays.js` + `src/lib/holidays.js` 2028년 말 전 2029~ 추가.
 - [ ] `src/firestore.rules` ↔ 루트 일원화(src 사본 삭제 검토).

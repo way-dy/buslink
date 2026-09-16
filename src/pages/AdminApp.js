@@ -4364,6 +4364,9 @@ function HistoryTab({ companyId, vehicles, allowed }) {
   const [center, setCenter] = useState({ lat:37.3894, lng:126.9522 });
   const [selected, setSelected] = useState(null);
   const [partnerCode, setPartnerCode] = useState("전체"); // 협력사 필터
+  // 노선 필터(2026-09-17 요청 "노선별 검색") — 그 날짜·거래처 배차에 실제로 있는 노선만 후보로 띄운다.
+  // "전체" 또는 routeId("_unassigned"=노선 미지정). 날짜·거래처 바꾸면 전체로 되돌린다.
+  const [routeFilter, setRouteFilter] = useState("전체");
   // 차량 → 협력사 매핑(routes + dispatchSchedules 의 vehicleId 기반)
   const [routes, setRoutes] = useState([]);
   const [schedules, setSchedules] = useState([]);
@@ -4462,12 +4465,28 @@ function HistoryTab({ companyId, vehicles, allowed }) {
     return isAllAccess(allowed) || partnerCodeAllowed(allowed, pc);
   });
 
-  // 협력사 필터 적용된 배차 → 노선별 그룹
-  const filteredDispatches = dispatches.filter(d => {
+  // 협력사 필터 적용된 배차 → (노선 필터) → 노선별 그룹
+  const partnerDispatches = dispatches.filter(d => {
     const pc = routes.find(r => r.id === d.routeId)?.partnerCode;
     if (partnerCode !== "전체") return pc === partnerCode;
     return isAllAccess(allowed) || partnerCodeAllowed(allowed, pc);
   });
+  // 노선 select 후보 — 거래처 필터까지 적용된 배차에서 distinct routeId(이름순). 건수 함께.
+  const routeOptions = (() => {
+    const map = new window.Map();
+    partnerDispatches.forEach(d => {
+      const key = d.routeId || "_unassigned";
+      if (!map.has(key)) {
+        const r = routes.find(x => x.id === d.routeId);
+        map.set(key, { routeId: key, routeName: d.routeName || r?.name || "노선 미지정", count: 0 });
+      }
+      map.get(key).count += 1;
+    });
+    return [...map.values()].sort((a, b) => a.routeName.localeCompare(b.routeName, "ko"));
+  })();
+  const filteredDispatches = routeFilter === "전체"
+    ? partnerDispatches
+    : partnerDispatches.filter(d => (d.routeId || "_unassigned") === routeFilter);
   // ⚠ 카카오 SDK `Map` import가 native Map 클래스를 shadow → `new Map()` 빌드 시 forwardRef 객체로 변환되어 비-생성자 TypeError.
   //   `window.Map` 으로 native 명시(memory: `Map` shadow 패턴, NoticeTab L3098과 동일 가드).
   const dispatchGroups = (() => {
@@ -4602,6 +4621,38 @@ function HistoryTab({ companyId, vehicles, allowed }) {
   );
   const formatTs = (ts) => { if (!ts) return "–"; const d=ts.toDate?ts.toDate():new Date(ts); return d.toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit"}); };
 
+  // 정류장 통과 시각(=GPS 가 정류장 반경에 처음 들어온 시각, stopArrivals[stopId].actualAt) 표기
+  // (2026-09-17 요청 "운행 이력에 GPS 매칭 시간"). actualAt 은 Timestamp·millis·ISO 세 형태가 공존한다.
+  const arrivalMs = (a) => {
+    const t = a?.actualAt;
+    if (!t) return null;
+    if (typeof t.toMillis === "function") return t.toMillis();
+    if (typeof t === "number") return t;
+    const ms = new Date(t).getTime();
+    return isFinite(ms) ? ms : null;
+  };
+  const fmtHM = (ms) => {
+    if (ms == null) return null;
+    const dt = new Date(ms);
+    return `${String(dt.getHours()).padStart(2,"0")}:${String(dt.getMinutes()).padStart(2,"0")}`;
+  };
+  // 선택 배차의 정류장별 [예정 → 실제] 타임라인. 예정 = 기록된 plannedAt 우선, 없으면 출발시각+offsetMin.
+  const stopTimeline = (d) => {
+    if (!d?.routeId) return [];
+    const stops = stopsByRoute[d.routeId] || [];
+    const sa = d.stopArrivals || {};
+    return stops.map(s => {
+      const a = sa[s.id];
+      const ms = arrivalMs(a);
+      return {
+        id: s.id, name: s.name || "정류장",
+        plannedAt: a?.plannedAt || planTimeForStop(d.departTime, s.offsetMin),
+        actualAt: fmtHM(ms), estimated: !!a?.estimated,
+        delay: formatDelayLabel(a?.delaySec),
+      };
+    });
+  };
+
   return (
     <div style={{display:"flex",flexDirection:isMobile?"column":"row",height:"100%",minHeight:0,minWidth:0}}>
       <div style={{...S.mapSidebar,...(isMobile?S.mapSidebarMobile:{})}}>
@@ -4610,9 +4661,18 @@ function HistoryTab({ companyId, vehicles, allowed }) {
           {points.length>0&&<span style={{fontSize:12,fontWeight:600,color:"var(--color-positive)"}}>{points.length}개 포인트</span>}
         </div>
         <div style={{padding:"14px 16px 10px",display:"flex",flexDirection:"column",gap:10,borderBottom:"1px solid var(--color-line-soft)"}}>
-          <div><label style={S.label}>날짜</label><input type="date" style={S.dateInput} value={date} onChange={e=>{ if(e.target.value) { setDate(e.target.value); setSelectedDispatchId(null); setPoints([]); }}}/></div>
+          <div><label style={S.label}>날짜</label><input type="date" style={S.dateInput} value={date} onChange={e=>{ if(e.target.value) { setDate(e.target.value); setSelectedDispatchId(null); setPoints([]); setRouteFilter("전체"); }}}/></div>
           <div><label style={S.label}>거래처</label>
-            <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} compact={false} allowedCodes={allowed} />
+            <PartnerFilter companyId={companyId} value={partnerCode} onChange={v=>{ setPartnerCode(v); setRouteFilter("전체"); }} compact={false} allowedCodes={allowed} />
+          </div>
+          {/* 노선 필터(2026-09-17) — 그 날짜·거래처에 배차가 있는 노선만 후보. 후보에 없는 값이 남으면 전체로 취급. */}
+          <div><label style={S.label}>노선</label>
+            <select style={{...S.input,fontSize:13,padding:"8px 10px"}}
+              value={routeOptions.some(o => o.routeId === routeFilter) ? routeFilter : "전체"}
+              onChange={e=>setRouteFilter(e.target.value)}>
+              <option value="전체">전체 노선 · {partnerDispatches.length}건</option>
+              {routeOptions.map(o => <option key={o.routeId} value={o.routeId}>{o.routeName} · {o.count}건</option>)}
+            </select>
           </div>
           {/* 직접 차량 선택 (보조 — 노선별 배차가 없는 날·이전 데이터 조회용) */}
           <details style={{ background:"var(--color-bg-alt)", borderRadius:8, padding:"8px 10px" }}>
@@ -4684,6 +4744,46 @@ function HistoryTab({ companyId, vehicles, allowed }) {
               </div>
             </div>
           ))}
+          {/* 정류장 통과 시각 타임라인(2026-09-17) — 배차 선택 시 정류장 순서대로 예정 → 실제(GPS 매칭) 시각 */}
+          {selectedDispatchId && (() => {
+            const d = dispatches.find(x => x.id === selectedDispatchId);
+            if (!d) return null;
+            const tl = stopTimeline(d);
+            if (tl.length === 0) return null;
+            const passedN = tl.filter(t => t.actualAt).length;
+            return (
+              <div style={{ marginTop:14, paddingTop:10, borderTop:"1px solid var(--color-line)" }}>
+                <div style={{fontSize:11,color:"var(--color-label-mute)",padding:"0 2px 4px",fontWeight:700,textTransform:"uppercase",letterSpacing:0.04}}>
+                  🕒 정류장 통과 시각 · {passedN}/{tl.length}
+                </div>
+                <div style={{ fontSize:10, color:"var(--color-label-alt)", padding:"0 2px 8px", lineHeight:1.5 }}>
+                  예정 → <b style={{color:"var(--color-label-mute)"}}>실제</b>(GPS 가 정류장 반경 {arriveRadius}m 에 처음 들어온 시각). ≈ 는 신호 복구로 추정한 값.
+                </div>
+                {tl.map(t => {
+                  const passed = !!t.actualAt;
+                  const delayColor = t.delay.tone === "danger" ? "var(--color-destructive)"
+                    : t.delay.tone === "warn" ? "var(--color-cautionary)" : "var(--color-positive)";
+                  return (
+                    <div key={t.id} style={{
+                      display:"flex", alignItems:"center", gap:8, padding:"6px 8px", borderRadius:8, marginBottom:3,
+                      background: passed ? "var(--color-bg-alt)" : "transparent",
+                      border: `1px solid ${passed ? "var(--color-line)" : "transparent"}`,
+                    }}>
+                      <span style={{ width:8, height:8, borderRadius:"50%", flexShrink:0, background: passed ? "var(--color-positive)" : "#aaaaaa" }}/>
+                      <span style={{ flex:1, minWidth:0, fontSize:12, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                        color: passed ? "var(--color-label)" : "var(--color-label-mute)" }}>{t.name}</span>
+                      <span style={{ fontSize:11, color:"var(--color-label-mute)", fontFamily:"var(--font-mono)" }}>{t.plannedAt || "––:––"}</span>
+                      <span style={{ fontSize:12, fontWeight:800, fontFamily:"var(--font-mono)", minWidth:44, textAlign:"right",
+                        color: passed ? "var(--color-primary-deep)" : "var(--color-label-alt)" }}>
+                        {passed ? `${t.estimated ? "≈" : ""}${t.actualAt}` : "미통과"}
+                      </span>
+                      {t.delay.label && <span style={{ fontSize:10, fontWeight:700, color: delayColor, whiteSpace:"nowrap" }}>{t.delay.label}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
           {/* GPS 포인트 리스트 — 배차 선택 후 로드된 경우 */}
           {points.length>0 && (
             <div style={{ marginTop:14, paddingTop:10, borderTop:"1px solid var(--color-line)" }}>
@@ -4798,7 +4898,10 @@ function HistoryTab({ companyId, vehicles, allowed }) {
               })}
               {/* 정류장 위치 마커 + 이름 라벨(통과=녹/미통과=회색 tone) */}
               {showStopMarkers && validStops.map(stop => {
-                const passed = !!arrivals[stop.id];
+                const a = arrivals[stop.id];
+                const passed = !!a;
+                // 통과 시각을 이름 앞에 둔다 — 뒤에 두면 긴 이름의 말줄임에 잘린다(2026-09-17).
+                const at = fmtHM(arrivalMs(a));
                 return (
                   <CustomOverlayMap key={`label-${stop.id}`} position={{lat:stop.lat,lng:stop.lng}} yAnchor={1.4}>
                     <div style={{
@@ -4810,12 +4913,13 @@ function HistoryTab({ companyId, vehicles, allowed }) {
                       fontSize:11,
                       fontWeight:700,
                       whiteSpace:"nowrap",
-                      maxWidth:140,
+                      maxWidth: at ? 190 : 140,
                       overflow:"hidden",
                       textOverflow:"ellipsis",
                       boxShadow:"var(--shadow-soft)",
                       pointerEvents:"none",
                     }}>
+                      {at && <span style={{ fontFamily:"var(--font-mono)", fontWeight:800, marginRight:5 }}>{a.estimated ? "≈" : ""}{at}</span>}
                       {stop.name || "정류장"}
                     </div>
                   </CustomOverlayMap>
