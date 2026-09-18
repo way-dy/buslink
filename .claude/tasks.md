@@ -2,7 +2,7 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
-> **2026-09-18 — 🚧 개선요청 구글챗 답글이 원본 카드에 안 붙음 · 코드 수정·커밋 완료 · ⚠ 미배포(git > prod)**: 근인 = 첫 카드가 `MESSAGE_REPLY_OPTION_UNSPECIFIED` 라 threadKey 무시(dyops 08-26 동일). 로그상 답글 POST 는 2xx(9/14). 수정 `functions/index.js` `chatThreadUrl`(~4038, 첫 카드도 FALLBACK 옵션)·`parseChatThreadName`(~4049)·생성 트리거가 `chatThreadName` 저장·답글은 `thread.name` 우선+`landed=` 로그. `node --check` OK. **다음** = way 승인 후 `firebase deploy --only functions:onImprovementRequestCreate,functions:onImprovementRequestUpdate` → 새 요청에 댓글 달아 묶임 확인. ⚠️ 사용자가 준 웹훅(space AAQAeql01G0)이 buslink 시크릿과 같은지 미확인(시크릿 조회 분류기 거부). 옛 카드엔 소급 불가.
+> **2026-09-18 — 🚧 개선요청 구글챗 답글이 원본 카드에 안 붙음 · ✅ CF 2종 prod 배포(2026-09-18) · ⚠ 실발송 미확인**: 근인 = 첫 카드가 `MESSAGE_REPLY_OPTION_UNSPECIFIED` 라 threadKey 무시(dyops 08-26 동일). 로그상 답글 POST 는 2xx(9/14). 수정 `functions/index.js` `chatThreadUrl`(~4038, 첫 카드도 FALLBACK 옵션)·`parseChatThreadName`(~4049)·생성 트리거가 `chatThreadName` 저장·답글은 `thread.name` 우선+`landed=` 로그. `node --check` OK. **다음** = way 승인 후 `firebase deploy --only functions:onImprovementRequestCreate,functions:onImprovementRequestUpdate` → 새 요청에 댓글 달아 묶임 확인. ⚠️ 사용자가 준 웹훅(space AAQAeql01G0)이 buslink 시크릿과 같은지 미확인(시크릿 조회 분류기 거부). 옛 카드엔 소급 불가.
 
 > **2026-09-18 — 게시판 `43HgiApQpBTGneWJt2dI`(최우석) 하단 탑승하기 버튼 삭제 · ✅ prod 배포 `main.405b2a31.js`(4개 도메인 해시 일치) + CF `boardStatic`·`boardNfc`**: 요청 = 정류장을 안 고르고 하단 탑승 버튼으로 바로 태깅해 전체 인원 ≠ 정류장별 인원.
 > 🔴 **요청자의 인과 가설은 절반만 맞았다** — 정류장별 집계(`stopMapping.aggregateBoardingsByStop`)는 승객이 고른 정류장이 아니라 **탑승 순간 차량 GPS** 로 묶는다. 승객이 고른 정류장은 탑승 기록에 **아예 안 실렸다**(9/15~18 dy001 3,478건 전부 `stopId=""`). 신촌세브란스 9/16·17 실측: GPS 매핑 성공 ~35% · GPS 없음 ~40% · 반경 300m 밖 ~25%. **버튼만 지우면 숫자는 그대로**였다.
