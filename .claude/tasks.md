@@ -8,6 +8,7 @@
 > 효과 추정(9/17) = 924건 중 **354건(38%)** 이 저장 정류장으로 바로 확정 · 429건은 정류장 미지정자 → 이번 탭 제거가 유도하는 대상. 141건은 다른 노선 정류장 저장(출퇴근 교차)이라 GPS 폴백.
 > 검증 = 신규 `scripts/test_passenger_stop_on_boarding.cjs` 13단언(함수 본문을 index.js 에서 뽑아 가짜 Firestore 로) · `test_qr_boarding_visibility`·`test_inquiry_link` 탭 단언 갱신 · 게이트 **55/55** · 빌드 경고 21↔21.
 > ⚠ **미검증** = 실탑승 1건(내일 아침 첫 태깅이 첫 실전 — `boardings/{date}/list` 에 stopId 가 찍히는지 볼 것) · 폰 실화면(탭바 4개·정류장 고르기 전 버튼 없음). QR 탑승 숨김 거래처 스위치는 이제 홈 버튼만 가린다(탭은 원래 없음). 고정 QR 외부 카메라 경로(`BoardingApp`)도 서버가 같은 헬퍼로 정류장을 싣는다(앱에서 정류장을 지정해 둔 사람이면).
+> 설명서 `.md` 갱신 = `EMPLOYEE_GUIDE` §4 · `PASSENGER_QUICK` §3(「아래 메뉴 탑승」→「내 정류장을 고른 뒤 QR 탑승」). ⚠ PDF 재빌드·`07-scan.png` 재캡처는 아직(기존 백로그와 함께).
 
 > **2026-09-17 — 운행 이력 ① 노선별 검색 ② 정류장 GPS 매칭 시각 표기(way 스크린샷 · ✅ prod 배포 완료 `main.fa7377fe.js` · `--only hosting` · web.app+d+p+partner 4개 도메인 해시 일치 · 라이브 번들 디코드 대조 5/5(신규 3·대조군 2))**: 요청 = 운행 이력 좌측 목록을 노선으로 좁히고, 각 정류장을 «언제 지나갔는지» 보이게.
 > **수정** = `src/pages/AdminApp.js` `HistoryTab` 만. ① 거래처 아래 **노선 select**(`routeFilter`) — 후보는 그 날짜·거래처 배차에 실제로 있는 노선만(이름순·건수). 날짜·거래처 바꾸면 전체로 복귀, 후보에 없는 값은 전체로 취급. ② 배차 선택 시 사이드바에 **🕒 정류장 통과 시각** 타임라인(정류장 순서 · 예정 `plannedAt` 없으면 `departTime+offsetMin` → 실제 `stopArrivals[stopId].actualAt` HH:MM · 지연 라벨 `formatDelayLabel` · `estimated` 는 ≈ 접두) + 지도 정류장 라벨에 통과 시각을 **이름 앞에**(뒤에 두면 말줄임에 잘린다).
