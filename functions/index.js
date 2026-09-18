@@ -4027,14 +4027,32 @@ function improvementPreviewText(content, max) {
   return label ? `${text} · ${label}` : text;
 }
 
-/** 웹훅 URL 에 스레드 옵션 쿼리 부착. reply=true 면 같은 스레드 답글. */
-function chatThreadUrl(baseUrl, reply) {
+/**
+ * 웹훅 URL 에 스레드 옵션 쿼리 부착.
+ * 🔴 첫 카드에도 REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD 를 붙인다(2026-09-18 답글 미부착 신고).
+ *    예전엔 첫 카드에 MESSAGE_REPLY_OPTION_UNSPECIFIED 를 줬는데, 구글챗 기본값은 «새 스레드를
+ *    시작하고 함께 온 threadKey 는 무시» 라서 원본 카드가 키 없는 토픽이 됐다 → 이후 답글이
+ *    imp-<id> 로 붙으려 해도 그런 스레드가 없어 매번 새 토픽으로 떨어졌다(dyops 2026-08-26 동일 실측).
+ *    되돌리지 말 것.
+ */
+function chatThreadUrl(baseUrl) {
   const u = new URL(baseUrl);
-  u.searchParams.set(
-    "messageReplyOption",
-    reply ? "REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD" : "MESSAGE_REPLY_OPTION_UNSPECIFIED"
-  );
+  u.searchParams.set("messageReplyOption", "REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD");
   return u.toString();
+}
+
+/**
+ * 구글챗 응답에서 실제 스레드 이름(`spaces/…/threads/…`)을 뽑는다.
+ * 🔴 요즘 스페이스는 threadKey 를 무시하므로 **이 이름이 유일한 연결고리**다.
+ * 형식이 다르면 버린다 — 엉뚱한 값을 저장하면 다음 답글이 깨진다.
+ */
+function parseChatThreadName(text) {
+  try {
+    const name = (JSON.parse(text) || {}).thread?.name || "";
+    return /^spaces\/[^/]+\/threads\/[^/]+$/.test(name) ? name : null;
+  } catch {
+    return null;
+  }
 }
 
 exports.onImprovementRequestCreate = onDocumentCreated(
@@ -4068,8 +4086,18 @@ exports.onImprovementRequestCreate = onDocumentCreated(
           },
         }],
       };
-      await postJson(chatThreadUrl(webhookUrl, false), body);
-      console.log(`[개선요청] 생성 알림 발송 id=${id}`);
+      const text = await postJson(chatThreadUrl(webhookUrl), body);
+      // 첫 카드의 실제 스레드 이름을 저장 → 이후 답글이 이 카드 아래로 묶인다.
+      // ⚠️ 이 write 는 onUpdate 를 1회 깨우지만 history 길이가 그대로라 즉시 skip 된다(재귀 없음).
+      const threadName = parseChatThreadName(text);
+      if (threadName) {
+        try {
+          await db.collection("improvement_requests").doc(id).set({ chatThreadName: threadName }, { merge: true });
+        } catch (e) {
+          console.warn("[개선요청] chatThreadName 저장 실패(무시):", e.message);
+        }
+      }
+      console.log(`[개선요청] 생성 알림 발송 id=${id} thread=${threadName || "(미확인)"}`);
     } catch (e) {
       console.warn("[개선요청] 생성 알림 실패:", e.message);
     }
@@ -4098,6 +4126,9 @@ exports.onImprovementRequestUpdate = onDocumentUpdated(
 
       const id = event.params.id;
       const companyName = await getImprovementCompanyName(db, after.companyId);
+      // 저장된 실제 스레드 이름이 있으면 그것으로, 없으면 threadKey 폴백.
+      // 폴백으로 보낸 응답에서 이름을 받아 저장 → 옛 글도 다음 답글부터는 묶인다.
+      let threadName = after.chatThreadName || null;
 
       for (const h of notifiable) {
         const isStatus = !!h.statusTo;
@@ -4111,7 +4142,7 @@ exports.onImprovementRequestUpdate = onDocumentUpdated(
         widgets.push({ buttonList: { buttons: [{ text: "이 요청 열기", onClick: { openLink: { url: improvementDeepLink(id) } } }] } });
 
         const body = {
-          thread: { threadKey: "imp-" + id },
+          thread: threadName ? { name: threadName } : { threadKey: "imp-" + id },
           cardsV2: [{
             cardId: `imp-${id}-${afterHist.length}`,
             card: {
@@ -4120,7 +4151,19 @@ exports.onImprovementRequestUpdate = onDocumentUpdated(
             },
           }],
         };
-        await postJson(chatThreadUrl(webhookUrl, true), body);
+        const text = await postJson(chatThreadUrl(webhookUrl), body);
+        const landed = parseChatThreadName(text);
+        // 🔴 보낸 스레드와 실제로 붙은 스레드를 함께 남긴다 — 폴백은 200 을 주고 조용히 새 토픽으로 보낸다.
+        console.log(`[개선요청] 답글 id=${id} requested=${threadName || "(threadKey)"} landed=${landed || "(응답에 없음)"}` +
+          (threadName && landed && landed !== threadName ? " ⚠️FALLBACK" : ""));
+        if (!threadName && landed) {
+          threadName = landed;
+          try {
+            await db.collection("improvement_requests").doc(id).set({ chatThreadName: landed }, { merge: true });
+          } catch (e) {
+            console.warn("[개선요청] chatThreadName 저장 실패(무시):", e.message);
+          }
+        }
       }
       console.log(`[개선요청] 업데이트 알림 발송 id=${id} 건수=${notifiable.length}`);
     } catch (e) {
