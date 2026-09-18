@@ -107,8 +107,9 @@ eq("미리보기도 형식 위반이면 null", buildInquiryPreviewUrl("한화", 
 console.log("\n[4] 하단 탭 구성 — 켠 거래처만 6탭");
 const off = visibleTabsFor(false, false).map(t => t.id);
 const on = visibleTabsFor(true, false).map(t => t.id);
-eq("꺼짐 = 기존 5탭 그대로(회귀 0)", off.join(","), "home,routes,notices,scan,settings");
-eq("켜짐 = 설정 왼쪽에 문의 삽입", on.join(","), "home,routes,notices,scan,inquiry,settings");
+// 🔄 2026-09-18 탑승(scan) 탭 제거(최우석 개선요청 `43HgiApQ…`) — 기본 4탭.
+eq("꺼짐 = 기본 4탭 그대로(회귀 0)", off.join(","), "home,routes,notices,settings");
+eq("켜짐 = 설정 왼쪽에 문의 삽입", on.join(","), "home,routes,notices,inquiry,settings");
 ok("🔴 설정은 언제나 맨 끝", on[on.length - 1] === "settings");
 ok("기존 탭의 순서·id 는 그대로", on.filter(id => id !== "inquiry").join(",") === off.join(","));
 ok("문의 탭에 아이콘·라벨이 있다",
@@ -118,7 +119,7 @@ ok("문의 탭에 아이콘·라벨이 있다",
 // (둘을 나란히 두면 승객이 어디로 문의해야 하는지 갈린다. ⚠ 대체되는 순간 그 거래처의
 //  dycs 문의 위젯 유입은 끊긴다 — 이 규칙이 조용히 뒤집히면 유입 경로가 통째로 바뀐다.)
 const hp = visibleTabsFor(false, true).map(t => t.id);
-eq("홈페이지만 켬 = 설정 왼쪽에 홈페이지 삽입", hp.join(","), "home,routes,notices,scan,homepage,settings");
+eq("홈페이지만 켬 = 설정 왼쪽에 홈페이지 삽입", hp.join(","), "home,routes,notices,homepage,settings");
 const both = visibleTabsFor(true, true).map(t => t.id);
 eq("🔴 둘 다 켜면 홈페이지가 문의를 대체(나란히 두지 않는다)", both.join(","), hp.join(","));
 ok("문의 탭은 그때 사라진다", !both.includes("inquiry"));

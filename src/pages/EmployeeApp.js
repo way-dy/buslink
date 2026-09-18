@@ -263,7 +263,9 @@ const TABS = [
   { id: "home",     icon: "home",     label: "홈" },
   { id: "routes",   icon: "route",    label: "노선" },
   { id: "notices",  icon: "bell",     label: "공지" },
-  { id: "scan",     icon: "qr",       label: "탑승" },
+  // 🔴 「탑승」(scan) 탭은 탭바에 두지 않는다(2026-09-18 최우석 개선요청 `43HgiApQ…`).
+  //    탭으로 바로 찍으면 정류장을 안 고른 채 탑승이 적재돼 정류장별 집계가 전체와 어긋난다.
+  //    스캔 화면은 홈에서 **내 정류장을 고른 뒤** 뜨는 `QR 탑승` 버튼으로만 들어간다.
   { id: "settings", icon: "settings", label: "설정" },
 ];
 
@@ -278,10 +280,9 @@ const INQUIRY_TAB = { id: "inquiry", icon: "chat", label: "문의" };
 // ⚠ 대체되는 순간 그 거래처의 dycs 문의 위젯 유입은 끊긴다(켜기 전 확인 필요).
 const HOMEPAGE_TAB = { id: "homepage", icon: "globe", label: "홈페이지" };
 
-// 🔴 `scanOn` 의 기본값은 **true**(=현행) — QR 탑승은 신규 기능이 아니라 이미 모든 거래처에
-//    보이던 탭이다. 인자를 안 넘긴 호출부가 탭을 잃으면 안 된다(`resolveQrBoardingConfig` 와 같은 폴러리티).
-function visibleTabsFor(inquiryOn, homepageOn, scanOn = true) {
-  const base = scanOn ? TABS : TABS.filter(t => t.id !== "scan");
+// 탑승 탭은 2026-09-18 부터 탭바에 없다(위 TABS 주석) — QR 탑승 노출 스위치는 이제 홈 버튼만 가린다.
+function visibleTabsFor(inquiryOn, homepageOn) {
+  const base = TABS;
   const extra = homepageOn ? HOMEPAGE_TAB : (inquiryOn ? INQUIRY_TAB : null);
   if (!extra) return base;
   const at = base.findIndex(t => t.id === "settings");
@@ -571,7 +572,7 @@ export default function EmployeeApp() {
   // — 안 그러면 빈 탭에 갇힌다(탭 목록에서는 이미 사라진 뒤라 돌아올 버튼이 없다).
   const inquiryOn = !!(inquiry && inquiry.enabled);
   const homepageOn = !!(homepage && homepage.enabled);
-  const visibleTabs = useMemo(() => visibleTabsFor(inquiryOn, homepageOn, qrBoardingOn), [inquiryOn, homepageOn, qrBoardingOn]);
+  const visibleTabs = useMemo(() => visibleTabsFor(inquiryOn, homepageOn), [inquiryOn, homepageOn]);
   useEffect(() => {
     // 홈페이지가 켜지면 문의 탭은 사라진다 — 문의 탭에 있던 사람도 홈으로 되돌린다.
     if (tab === "inquiry" && (!inquiryOn || homepageOn)) setTab("home");
@@ -2084,12 +2085,8 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
             <div style={{ flex: 1, fontSize: 12, color: 'var(--color-label-mute)' }}>
               {buses.length === 0 ? '현재 운행중인 버스가 없습니다' : '노선도에서 내 탑승 정류장을 클릭하세요'}
             </div>
-            {onScanTab && (
-            <button onClick={onScanTab}
-              style={{ background: 'var(--color-primary)', border: 'none', borderRadius: 'var(--radius-12)', padding: '10px 16px', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0, boxShadow: 'var(--shadow-strong)' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}><Icon name="qr" size={14} stroke={2} /> QR 탑승</span>
-            </button>
-            )}
+            {/* 🔴 정류장 미선택 상태의 QR 탑승 버튼은 두지 않는다(2026-09-18 `43HgiApQ…`) —
+                여기서 찍으면 어느 정류장에서 탔는지 없이 적재된다. 정류장을 고르면 위 카드에 버튼이 뜬다. */}
           </div>
         )}
       </div>{/* /하단 ETA+QR 패널 — fixed 오버레이(모달/카드)는 이 아래 형제로 유지 */}

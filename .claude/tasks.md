@@ -2,6 +2,13 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
+> **2026-09-18 — 게시판 `43HgiApQpBTGneWJt2dI`(최우석) 하단 탑승하기 버튼 삭제 · ✅ prod 배포 `main.405b2a31.js`(4개 도메인 해시 일치) + CF `boardStatic`·`boardNfc`**: 요청 = 정류장을 안 고르고 하단 탑승 버튼으로 바로 태깅해 전체 인원 ≠ 정류장별 인원.
+> 🔴 **요청자의 인과 가설은 절반만 맞았다** — 정류장별 집계(`stopMapping.aggregateBoardingsByStop`)는 승객이 고른 정류장이 아니라 **탑승 순간 차량 GPS** 로 묶는다. 승객이 고른 정류장은 탑승 기록에 **아예 안 실렸다**(9/15~18 dy001 3,478건 전부 `stopId=""`). 신촌세브란스 9/16·17 실측: GPS 매핑 성공 ~35% · GPS 없음 ~40% · 반경 300m 밖 ~25%. **버튼만 지우면 숫자는 그대로**였다.
+> **수정 2겹** ① 앱 `EmployeeApp.js` — 탭바 「탑승」 탭 제거(`TABS`·`visibleTabsFor` 의 scanOn 인자 삭제) + 정류장 미선택 상태의 홈 하단 `QR 탑승` 버튼 제거 → 스캔은 **내 정류장을 고른 카드의 버튼**으로만 ② 서버 `functions/index.js resolvePassengerStopAdmin` 신설 — `fcmTokens/{empNo}` 의 내 정류장을 **이번 탑승 노선과 같을 때만** `stopId/stopName` 에 싣는다(집계가 stopId 를 GPS 보다 우선). 🔴 클라 값은 안 받는다(위조) · 노선 불일치(출근 정류장 ↔ 퇴근 탑승)는 빈 값 · 실패해도 탑승은 진행.
+> 효과 추정(9/17) = 924건 중 **354건(38%)** 이 저장 정류장으로 바로 확정 · 429건은 정류장 미지정자 → 이번 탭 제거가 유도하는 대상. 141건은 다른 노선 정류장 저장(출퇴근 교차)이라 GPS 폴백.
+> 검증 = 신규 `scripts/test_passenger_stop_on_boarding.cjs` 13단언(함수 본문을 index.js 에서 뽑아 가짜 Firestore 로) · `test_qr_boarding_visibility`·`test_inquiry_link` 탭 단언 갱신 · 게이트 **55/55** · 빌드 경고 21↔21.
+> ⚠ **미검증** = 실탑승 1건(내일 아침 첫 태깅이 첫 실전 — `boardings/{date}/list` 에 stopId 가 찍히는지 볼 것) · 폰 실화면(탭바 4개·정류장 고르기 전 버튼 없음). QR 탑승 숨김 거래처 스위치는 이제 홈 버튼만 가린다(탭은 원래 없음). 고정 QR 외부 카메라 경로(`BoardingApp`)도 서버가 같은 헬퍼로 정류장을 싣는다(앱에서 정류장을 지정해 둔 사람이면).
+
 > **2026-09-17 — 운행 이력 ① 노선별 검색 ② 정류장 GPS 매칭 시각 표기(way 스크린샷 · ✅ prod 배포 완료 `main.fa7377fe.js` · `--only hosting` · web.app+d+p+partner 4개 도메인 해시 일치 · 라이브 번들 디코드 대조 5/5(신규 3·대조군 2))**: 요청 = 운행 이력 좌측 목록을 노선으로 좁히고, 각 정류장을 «언제 지나갔는지» 보이게.
 > **수정** = `src/pages/AdminApp.js` `HistoryTab` 만. ① 거래처 아래 **노선 select**(`routeFilter`) — 후보는 그 날짜·거래처 배차에 실제로 있는 노선만(이름순·건수). 날짜·거래처 바꾸면 전체로 복귀, 후보에 없는 값은 전체로 취급. ② 배차 선택 시 사이드바에 **🕒 정류장 통과 시각** 타임라인(정류장 순서 · 예정 `plannedAt` 없으면 `departTime+offsetMin` → 실제 `stopArrivals[stopId].actualAt` HH:MM · 지연 라벨 `formatDelayLabel` · `estimated` 는 ≈ 접두) + 지도 정류장 라벨에 통과 시각을 **이름 앞에**(뒤에 두면 말줄임에 잘린다).
 > 🔴 «통과 시각» 은 GPS 가 감지 반경에 **처음 들어온** 시각(첫 도착만 멱등 기록)이지 정차 시각이 아니다 — 화면 안내문에도 그렇게 적었다. `actualAt` 은 Timestamp·millis·ISO 세 형태 공존 → `arrivalMs` 로만 읽을 것.

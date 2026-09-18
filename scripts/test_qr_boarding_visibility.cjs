@@ -62,28 +62,28 @@ ok('문자열 "false" 는 숨기지 않는다', R({ qrBoarding: { visible: "fals
 ok("0·null 도 숨기지 않는다",
   R({ qrBoarding: { visible: 0 } }).visible === true && R({ qrBoarding: { visible: null } }).visible === true);
 
-console.log("\n[C] 탭바 — 끈 거래처는 '탑승' 탭이 사라지고 나머지 순서는 그대로");
-ok("기본(전부 꺼짐)은 5탭 — 현행 그대로", ids(visibleTabsFor(false, false, true)) === "home,routes,notices,scan,settings");
-// 🔴 인자를 안 넘긴 옛 호출부가 탭을 잃으면 안 된다(기본값 true).
-ok("scanOn 인자를 생략해도 탑승 탭이 남는다", ids(visibleTabsFor(false, false)) === "home,routes,notices,scan,settings");
-ok("scanOn=false 면 탑승 탭만 빠진다", ids(visibleTabsFor(false, false, false)) === "home,routes,notices,settings");
+// 🔄 2026-09-18 최우석 개선요청 `43HgiApQ…` — 탑승(scan) 탭은 **모든 거래처에서** 탭바에 없다.
+//    탭으로 바로 찍으면 정류장 없이 적재돼 정류장별 집계가 어긋난다. 스캔 화면은 홈에서 정류장을
+//    고른 뒤 뜨는 버튼으로만 들어간다. 그래서 이 스위치는 이제 **홈 버튼만** 가린다.
+console.log("\n[C] 탭바 — 탑승 탭은 어느 거래처에도 없다(2026-09-18)");
+ok("기본 = 4탭", ids(visibleTabsFor(false, false)) === "home,routes,notices,settings");
+ok("🔴 탭바에 scan 이 다시 들어오지 않았다", !/id:\s*"scan"/.test(tabsBlock[0]));
 ok("문의 탭과 함께 — 문의는 설정 앞자리를 지킨다",
-  ids(visibleTabsFor(true, false, false)) === "home,routes,notices,inquiry,settings");
+  ids(visibleTabsFor(true, false)) === "home,routes,notices,inquiry,settings");
 ok("홈페이지 탭과 함께 — 홈페이지가 문의를 대체하는 규칙은 그대로",
-  ids(visibleTabsFor(true, true, false)) === "home,routes,notices,homepage,settings");
-ok("숨겨도 설정 탭은 언제나 맨 끝",
-  visibleTabsFor(true, false, false).slice(-1)[0].id === "settings" &&
-  visibleTabsFor(true, true, true).slice(-1)[0].id === "settings");
+  ids(visibleTabsFor(true, true)) === "home,routes,notices,homepage,settings");
+ok("설정 탭은 언제나 맨 끝", visibleTabsFor(true, false).slice(-1)[0].id === "settings");
 
 console.log("\n[D] 홈 화면 — 탭과 버튼이 «한 값»으로 묶여 있는가(반쪽 상태 금지)");
 // 🔴 소스를 문자열로 잰다. 버튼을 탭과 따로 판정하면 «탭은 없는데 버튼은 남는» 상태가 생기고,
 //    그게 이 요청이 다시 올라오는 경로다.
 ok("HomeTab 에 onScanTab 을 조건부로 넘긴다(qrBoardingOn ? … : null)",
   /onScanTab=\{qrBoardingOn \? \(\) => setTab\("scan"\) : null\}/.test(empSrc));
+// 🔄 2026-09-18 — 정류장 미선택 상태의 버튼은 지웠다(그 버튼이 정류장 없는 적재의 통로였다).
 const qrButtons = empSrc.match(/<button onClick=\{onScanTab\}/g) || [];
-ok("홈의 QR 탑승 버튼은 2곳(내 정류장 있음/없음)", qrButtons.length === 2, `실제 ${qrButtons.length}곳`);
+ok("🔴 홈의 QR 탑승 버튼은 1곳 — 내 정류장을 고른 카드에만", qrButtons.length === 1, `실제 ${qrButtons.length}곳`);
 const guards = empSrc.match(/\{onScanTab && \(/g) || [];
-ok("두 버튼 모두 onScanTab 가드 안에 있다", guards.length === 2, `가드 ${guards.length}개`);
+ok("그 버튼은 onScanTab 가드 안에 있다", guards.length === 1, `가드 ${guards.length}개`);
 // 노선도 위 안내 문구가 없는 버튼을 가리키면 안 된다.
 ok("안내 문구가 QR 탑승 유무로 갈린다",
   /탑승하실 정류장을 선택하시면 QR탑승 하실 수 있습니다\./.test(empSrc) &&

@@ -1127,6 +1127,30 @@ exports.recordStopArrival = onCall(async (request) => {
 // firestore.rules 변경 없음 — Admin SDK 가 우회. 배차 admin/driver 잠금 유지가 이 방식의 핵심.
 // ════════════════════════════════════════════════════════
 
+// 승객이 앱에서 지정한 '내 정류장' → 탑승 기록의 stopId/stopName (2026-09-18 최우석 개선요청 `43HgiApQ…`).
+// 정류장별 집계(`stopMapping.aggregateBoardingsByStop`)는 stopId 가 있으면 그걸 우선하고, 없을 때만
+// 차량 GPS 로 매핑한다. 실측(9/16·17 신촌세브란스): GPS 매핑 성공 ~35% · GPS 없음 ~40% · 반경 밖 ~25%
+// → 전체 인원과 정류장별 인원이 크게 어긋났다. 승객이 고른 정류장이 그 공백을 메운다.
+// 🔴 정본 = `fcmTokens/{empNo}`(앱이 내 정류장 선택 시 기록). 클라가 보낸 값은 받지 않는다(위조 방지).
+// 🔴 **그 정류장의 노선 == 이번 탑승 노선일 때만** 쓴다 — 출근 노선에서 고른 정류장을 퇴근 탑승에 붙이면
+//    엉뚱한 정류장으로 집계된다. 불일치·미지정이면 빈 값(=기존처럼 GPS 매핑).
+// best-effort: 실패해도 탑승은 진행.
+async function resolvePassengerStopAdmin(db, companyId, empNo, routeId) {
+  if (!empNo || !routeId) return { stopId: "", stopName: "" };
+  try {
+    const tok = await db.collection("companies").doc(companyId)
+      .collection("fcmTokens").doc(String(empNo)).get();
+    const t = tok.exists ? (tok.data() || {}) : {};
+    if (!t.stopId || t.routeId !== routeId) return { stopId: "", stopName: "" };
+    const stopSnap = await db.collection("companies").doc(companyId)
+      .collection("routes").doc(routeId).collection("stops").doc(String(t.stopId)).get();
+    if (!stopSnap.exists) return { stopId: "", stopName: "" }; // 지워진 정류장 — 이름 없는 stopId 는 집계가 무시한다
+    return { stopId: String(t.stopId), stopName: String((stopSnap.data() || {}).name || "") };
+  } catch (_) {
+    return { stopId: "", stopName: "" };
+  }
+}
+
 // 오늘(KST) 이 차량 배차 해석 — 두 onCall 공용(로직 중복 0).
 // 배차 없으면 failed-precondition(클라 확인/오류 화면이 그대로 메시지 표시).
 // selectedRouteId(옵션, 2026-07-16 회의 #1): 승객이 앱에서 선택한 노선.
@@ -1856,8 +1880,7 @@ exports.boardStatic = onCall(async (request) => {
     tokenId: "",           // 정적 QR 은 토큰 없음(스키마 자리 유지)
     companyId, routeId, routeName,
     vehicleId, vehicleNo, driverId,
-    stopId: "",
-    stopName: "",
+    ...(await resolvePassengerStopAdmin(db, companyId, trimmedEmpNo, routeId)), // 승객 지정 정류장(노선 일치 시만)
     partnerCode,
     vehicleLat, vehicleLng, vehicleSpeed,
     via: "static",         // 정적 QR 탑승 식별(통계 read 호환·옵셔널)
@@ -2007,8 +2030,7 @@ exports.boardNfc = onCall(async (request) => {
     tokenId: "",                 // NFC 는 토큰 없음(스키마 자리 유지)
     companyId, routeId, routeName,
     vehicleId, vehicleNo, driverId,
-    stopId: "",
-    stopName: "",
+    ...(await resolvePassengerStopAdmin(db, companyId, empNo, routeId)), // 승객 지정 정류장(노선 일치 시만)
     partnerCode: pass.partnerCode || null,
     vehicleLat, vehicleLng, vehicleSpeed,
     via: "nfc",                  // 탑승 모드 식별(기존 통계 read 호환·옵셔널)
