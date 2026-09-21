@@ -24,6 +24,8 @@ import { sendGPS } from "../lib/gps";
 import { toLatLngPath } from "../lib/routeProgress";
 // 운행 이력 GPS 궤적 분해(2026-08-18) — 연속 구간/신호 공백/표본 간격 실측
 import { trackSegments, formatDuration, TRACK_GAP_SEC } from "../lib/gpsTrack";
+// 노선 준수 점검(2026-09-21) — "배차된 차량이 그 노선을 실제로 지났는가"
+import { adherenceRows, adherenceLabel } from "../lib/routeAdherence";
 import { forceReconnect } from "../lib/forceReconnect";
 import { pendingSleepChecks, sleepCheckSummary, formatWaited, sleepCheckAudit, sleepAuditLabel, sleepCheckRoutes, sleepCheckRows, sleepCheckedAtLabel, sleepCheckPlaceLabel, sleepCheckViaLabel, sleepCheckedAt } from "../lib/sleepingCheck";
 import { classifyRunSignals, STALE_SIGNAL_MIN } from "../lib/runSignals";
@@ -4385,6 +4387,11 @@ function HistoryTab({ companyId, vehicles, allowed }) {
   const [arriveRadius, setArriveRadius] = useState(100); // 저장된 값(원·감지)
   const [radiusInput, setRadiusInput] = useState(100);   // 슬라이더 로컬 입력값
   const [radiusSaving, setRadiusSaving] = useState(false);
+  // 노선 준수 점검(2026-09-21) — 버튼을 눌렀을 때만 돈다.
+  // 🔴 실시간 관제에 얹지 않은 이유: 판정에 그날 궤적 전체가 필요해(차량당 수십 문서)
+  //    5초마다 도는 화면에 붙이면 읽기가 폭발한다. 여기는 이미 gpsHistory 를 읽는 탭이다.
+  const [adhRows, setAdhRows] = useState(null);   // null = 아직 안 돌림
+  const [adhBusy, setAdhBusy] = useState(false);
   const vehicle = vehicles.find(v=>v.id===vehicleId);
 
   // 회사 도착 감지 반경 구독 — 저장 즉시 반영.
@@ -4653,6 +4660,45 @@ function HistoryTab({ companyId, vehicles, allowed }) {
     });
   };
 
+  // ── 노선 준수 점검(2026-09-21 도봉 사고) ────────────────────────────────
+  // 배차된 차량이 그 노선을 실제로 지났는지 그날 궤적으로 채점한다. 판정 정본은
+  // src/lib/routeAdherence.js — 통과율과 최근접 중앙값이 **둘 다** 나쁠 때만 "이상".
+  // 🔴 한쪽만 보면 정류장 좌표가 도로에서 떨어진 노선(파주)·단말 신호가 희박한
+  //    차량(김포)이 매일 걸려 목록이 곧 무시된다(2026-09-21 실측·격리 테스트가 잠금).
+  const runAdherenceCheck = async () => {
+    setAdhBusy(true);
+    try {
+      const vids = Array.from(new window.Set(filteredDispatches.map(d => d.vehicleId).filter(Boolean)));
+      const pairs = await Promise.all(vids.map(async vid => {
+        try {
+          const snap = await getDocs(query(
+            collection(db, "gpsHistory", companyId, vid, date, "points"), orderBy("ts", "asc")
+          ));
+          return [vid, snap.docs.map(p => {
+            const v = p.data();
+            const ts = v.ts;
+            const ms = ts?.toMillis ? ts.toMillis() : (typeof ts === "number" ? ts : (ts ? new Date(ts).getTime() : null));
+            return { lat: v.lat, lng: v.lng, ms };
+          }).filter(p => p.ms != null)];
+        } catch (_) { return [vid, []]; }
+      }));
+      const pointsByVehicle = {};
+      pairs.forEach(([vid, pts]) => { pointsByVehicle[vid] = pts; });
+      const dayStartMs = new Date(date + "T00:00:00").getTime();
+      // 🔴 nowMs 를 넘겨 **아직 출발 전인 회차는 "운행 전"** 으로 빠지게 한다.
+      //    안 그러면 아침 점검에서 그날 퇴근 배차가 전부 "판정 불가" 로 쌓인다(실측 67건 중 37건).
+      setAdhRows(adherenceRows(filteredDispatches, stopsByRoute, pointsByVehicle, dayStartMs, { nowMs: Date.now() }));
+    } catch (e) {
+      alert(`점검 오류: ${e.message}`);
+    } finally {
+      setAdhBusy(false);
+    }
+  };
+  const adhBad = (adhRows || []).filter(r => r.verdict === "offroute");
+  // 아직 출발 전인 회차는 목록에서 빼고 건수만 알린다(= 잡음 제거, 숨겼다는 사실은 밝힌다).
+  const adhShown = (adhRows || []).filter(r => r.verdict !== "pending");
+  const adhPending = (adhRows || []).length - adhShown.length;
+
   return (
     <div style={{display:"flex",flexDirection:isMobile?"column":"row",height:"100%",minHeight:0,minWidth:0}}>
       <div style={{...S.mapSidebar,...(isMobile?S.mapSidebarMobile:{})}}>
@@ -4661,9 +4707,9 @@ function HistoryTab({ companyId, vehicles, allowed }) {
           {points.length>0&&<span style={{fontSize:12,fontWeight:600,color:"var(--color-positive)"}}>{points.length}개 포인트</span>}
         </div>
         <div style={{padding:"14px 16px 10px",display:"flex",flexDirection:"column",gap:10,borderBottom:"1px solid var(--color-line-soft)"}}>
-          <div><label style={S.label}>날짜</label><input type="date" style={S.dateInput} value={date} onChange={e=>{ if(e.target.value) { setDate(e.target.value); setSelectedDispatchId(null); setPoints([]); setRouteFilter("전체"); }}}/></div>
+          <div><label style={S.label}>날짜</label><input type="date" style={S.dateInput} value={date} onChange={e=>{ if(e.target.value) { setDate(e.target.value); setSelectedDispatchId(null); setPoints([]); setRouteFilter("전체"); setAdhRows(null); }}}/></div>
           <div><label style={S.label}>거래처</label>
-            <PartnerFilter companyId={companyId} value={partnerCode} onChange={v=>{ setPartnerCode(v); setRouteFilter("전체"); }} compact={false} allowedCodes={allowed} />
+            <PartnerFilter companyId={companyId} value={partnerCode} onChange={v=>{ setPartnerCode(v); setRouteFilter("전체"); setAdhRows(null); }} compact={false} allowedCodes={allowed} />
           </div>
           {/* 노선 필터(2026-09-17) — 그 날짜·거래처에 배차가 있는 노선만 후보. 후보에 없는 값이 남으면 전체로 취급. */}
           <div><label style={S.label}>노선</label>
@@ -4685,9 +4731,64 @@ function HistoryTab({ companyId, vehicles, allowed }) {
               <button style={{...S.addBtn,padding:"6px 10px",fontSize:12}} onClick={handleLoad} disabled={loading||!vehicleId}>{loading?"…":"조회"}</button>
             </div>
           </details>
+          {/* 노선 준수 점검(2026-09-21) — 배차된 차량이 그 노선을 실제로 지났는지 그날 궤적으로 채점 */}
+          <button style={{...S.addBtn,width:"100%",padding:"9px 10px",fontSize:12.5,background:"var(--color-bg-alt)",color:"var(--color-label)",border:"1px solid var(--color-line)"}}
+            onClick={runAdherenceCheck} disabled={adhBusy || filteredDispatches.length === 0}>
+            {adhBusy ? "점검 중…" : `🔍 노선 점검 · ${filteredDispatches.length}건`}
+          </button>
         </div>
         {/* 노선별 배차 그룹 */}
         <div style={{flex:1,overflowY:"auto",padding:"10px 12px"}}>
+          {/* 노선 준수 점검 결과(2026-09-21) — 이상 건이 먼저 온다 */}
+          {adhRows && (
+            <div style={{ marginBottom:14, paddingBottom:12, borderBottom:"1px solid var(--color-line)" }}>
+              <div style={{fontSize:11,fontWeight:700,color:"var(--color-label-mute)",padding:"0 2px 6px",textTransform:"uppercase",letterSpacing:0.04}}>
+                🔍 노선 점검 · {adhBad.length > 0
+                  ? <span style={{color:"var(--color-destructive)"}}>이상 {adhBad.length}건</span>
+                  : <span style={{color:"var(--color-positive)"}}>이상 없음</span>}
+              </div>
+              <div style={{ fontSize:10, color:"var(--color-label-alt)", padding:"0 2px 8px", lineHeight:1.6 }}>
+                배차된 차량의 그날 궤적이 그 노선 정류장을 지났는지 봅니다. <b>통과율</b>과 <b>최근접 중앙값</b>이
+                둘 다 나쁠 때만 이상으로 봅니다 — 한쪽만 보면 정류장이 도로에서 떨어진 노선이 매일 걸립니다.
+                {adhPending > 0 && <> · 아직 출발 전인 회차 <b>{adhPending}건</b>은 뺐습니다.</>}
+              </div>
+              {adhShown.length === 0 && <div style={{ ...S.empty, padding:"14px 12px" }}>점검할 배차가 없습니다{adhPending > 0 ? ` (운행 전 ${adhPending}건)` : ""}</div>}
+              {adhShown.map(r => {
+                const tone = r.verdict === "offroute" ? "var(--color-destructive)"
+                  : r.verdict === "insufficient" ? "var(--color-cautionary)" : "var(--color-positive)";
+                const mark = r.verdict === "offroute" ? "🔴 다른 노선"
+                  : r.verdict === "insufficient" ? "⚠ 판정 불가" : "✅ 정상";
+                return (
+                  <div key={r.id} style={{
+                    padding:"7px 9px", borderRadius:8, marginBottom:4,
+                    background: r.verdict === "ok" ? "transparent" : "var(--color-bg-alt)",
+                    border:`1px solid ${r.verdict === "ok" ? "var(--color-line-soft)" : tone}`,
+                  }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:8 }}>
+                      <span style={{ fontSize:12, fontWeight:800, color:"var(--color-label)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        {r.departTime} {r.routeName}
+                      </span>
+                      <span style={{ fontSize:10.5, fontWeight:700, color:tone, whiteSpace:"nowrap" }}>{mark}</span>
+                    </div>
+                    <div style={{ fontSize:10.5, color:"var(--color-label-mute)", marginTop:3 }}>
+                      {r.vehicleNo || "차량 미지정"}{r.driverName ? ` · ${r.driverName}` : ""} · {adherenceLabel(r.score)}
+                    </div>
+                    {r.verdict === "offroute" && (
+                      <div style={{ fontSize:10.5, color:"var(--color-destructive)", marginTop:4, lineHeight:1.5 }}>
+                        이 차량은 그 노선을 거의 지나지 않았습니다. 실제로 다른 차량이 운행 중인지 확인하세요 —
+                        배차와 실 운행차가 다르면 승객앱 위치·도착 알림·기사 인증이 모두 어긋납니다.
+                      </div>
+                    )}
+                    {r.verdict === "insufficient" && (
+                      <div style={{ fontSize:10.5, color:"var(--color-label-alt)", marginTop:4 }}>
+                        궤적 {r.score.n}점 · 정류장 {r.score.total}개 — 판단할 근거가 모자랍니다(단말 신호 부족·정류장 좌표 미등록).
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div style={{ fontSize:11, fontWeight:700, color:"var(--color-label-mute)", padding:"4px 2px 10px", textTransform:"uppercase", letterSpacing:0.04 }}>
             노선별 배차 · {filteredDispatches.length}건
           </div>
