@@ -10,11 +10,12 @@
 // 🔴 승객 `SAMPLE-SEC` 은 **실제로 로그인되는 계정**이다(PIN = `SAMPLE_PIN`). 시연·검토용으로
 //    쓰라고 넣었다 — 실제 사람 계정을 문서·데모에 쓰지 않기 위한 것이다.
 //    ⚠ 그러므로 **아무나 보는 문서에 사번·PIN 을 적지 말 것.** 데모가 끝나면 지운다.
-// 🔴 **지금은 지우지 말 것 — 2026-09 첫째 주 삼성전자 시연까지 유지**(2026-08-27 way 결정).
-//    협력사 관리 목록에 `삼성전자 (샘플)` 이 떠 있는 건 의도된 상태다. "정리 안 된 테스트
-//    데이터"로 보고 치우지 말 것.
-// ⚠ 시연이 끝나면 `--remove --apply` 로 지운다. 남겨 두면 로그인되는 계정이 하나 계속
-//    살아 있는 셈이 된다. 실제 계약이 되면 정식 업체코드로 새로 발급할 것.
+// 🔴 **지우지 말 것 — 기한 없이 유지**(2026-09-22 way 「다시 열어주면 될 것 같아(시간은 넉넉하게)」).
+//    2026-09-15 에 한 번 지웠다가 영업(최주호)이 고객 시연 링크로 다시 쓰면서 되살렸다.
+//    거래처 `expiresAt: null` = 만료 없음. 협력사 관리 목록에 `삼성전자 (샘플)` 이 떠 있는 건
+//    의도된 상태다. 지우는 건 way 가 지시할 때만 `--remove --apply`.
+//    실제 계약이 되면 정식 업체코드로 새로 발급할 것.
+// 🔴 PIN 해시는 **`passengerSecrets` 에만** 쓴다(2026-08-28 P3-a — 명부는 익명에게 읽힌다).
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
@@ -122,7 +123,7 @@ const routeRef = (id) => db.collection("companies").doc(CID).collection("routes"
 
   const now = admin.firestore.FieldValue.serverTimestamp();
   await db.collection("partnerCodes").doc(CODE).set({
-    companyId: CID, partnerName: NAME, active: true, createdAt: now,
+    companyId: CID, code: CODE, partnerName: NAME, active: true, createdAt: now,
     expiresAt: null, opsControlEnabled: true,
     theme: { preset: "kakao" },
     branding: { primaryColor: null, logo: null, logoHeight: 28 },
@@ -152,8 +153,12 @@ const routeRef = (id) => db.collection("companies").doc(CID).collection("routes"
   await db.collection("companies").doc(CID).collection("passengers").doc(EMP).set({
     companyId: CID, partnerCode: CODE, partnerName: NAME,
     name: "김샘플", dept: "반도체연구소", routeId: ROUTES[0].id,
-    active: true, pinInitial: false, pinLocked: false, pinHash,
+    active: true, pinInitial: false, pinLocked: false,
+    pinHash: admin.firestore.FieldValue.delete(),   // 명부에는 해시를 두지 않는다
     lastLoginAt: now, note: "문서·시연용 샘플 — 실제 사람 아님",
+  }, { merge: true });
+  await db.collection("companies").doc(CID).collection("passengerSecrets").doc(EMP).set({
+    companyId: CID, empNo: EMP, pinHash, updatedAt: now,
   }, { merge: true });
   console.log(`  승객 ${EMP} (김샘플 · 반도체연구소 · 기흥 출근 · PIN ${SAMPLE_PIN})`);
 
