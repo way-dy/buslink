@@ -10,9 +10,14 @@
 //   이 모듈이 하는 일은 **여러 일정의 `excludeDates` 를 한 번에 계산해 주는 것**뿐이다.
 //
 // 🔴 «운행 재개» 는 만능이 아니다 — `excludeDates` 에서 날짜를 빼는 것뿐이라
-//   ⓐ 공휴일(`excludeHolidays`) ⓑ 운행 요일이 아닌 날 ⓒ 일정 기간(`startDate`~`endDate`) 밖은
-//   그대로 쉰다. 호출부는 `blockedReasons` 로 그 사실을 **화면에 밝혀야** 한다
+//   ⓑ 운행 요일이 아닌 날 ⓒ 일정 기간(`startDate`~`endDate`) 밖은 그대로 쉰다.
+//   호출부는 `blockedReasons` 로 그 사실을 **화면에 밝혀야** 한다
 //   (안 밝히면 「켰는데 왜 안 나오냐」가 그대로 다음 문의가 된다).
+// ⓐ 공휴일만은 예외다(2026-09-28 배시현 개선요청 `ZKe91r2YPz1QSmxvpErB`): 추석 대체공휴일 9/28 에
+//   통근 거래처가 정상 운행하는데 「운행」으로 되돌려도 공휴일이라 배차가 안 떴다.
+//   사유가 «공휴일» 하나뿐인 날은 `includeDates`(강제 운행일)에 넣어 연다 — 판정 정본
+//   `shouldExpandOn`(+ 서버 미러 `shouldExpand`)이 이 필드를 읽는다.
+//   «운행 중지» 는 반대로 그 날을 `includeDates` 에서 빼고 `excludeDates` 에 넣는다.
 //
 // 이 모듈은 **순수**(Firebase import 0) — 격리 테스트가 그대로 태운다.
 
@@ -23,6 +28,9 @@ import { routeKind } from "./routeKind";
 export const BULK_MAX_DAYS = 186;
 
 export const BULK_MODES = { OFF: "off", ON: "on" };
+
+/** `blockedReasons` 가 공휴일일 때 내는 사유 — ON 은 이 사유 하나뿐인 날을 `includeDates` 로 연다. */
+export const HOLIDAY_REASON = "공휴일";
 export const BULK_MODE_LABELS = {
   off: "운행 중지 (이 기간은 쉽니다)",
   on: "운행 (막아 둔 날을 되돌립니다)",
@@ -72,7 +80,7 @@ export function blockedReasons(schedule, day) {
   const wd = schedule.weekdays;
   if (!Array.isArray(wd) || wd.length === 0 || !wd.includes(dayOfWeekForDate(day))) out.push("운행 요일 아님");
   // 공휴일 판정은 정본에만 있으므로 나머지가 전부 통과했는데도 false 면 공휴일이다.
-  if (out.length === 0 && !runsOnIgnoringExcludes(schedule, day)) out.push("공휴일");
+  if (out.length === 0 && !runsOnIgnoringExcludes(schedule, day)) out.push(HOLIDAY_REASON);
   return out;
 }
 
@@ -106,51 +114,72 @@ export function selectBulkTargets({ schedules, routes, partnerCode, kinds }) {
 }
 
 /**
- * 대상 일정마다 바뀔 `excludeDates` 를 계산한다. **쓰기는 하지 않는다**(호출부 몫).
+ * 대상 일정마다 바뀔 `excludeDates`·`includeDates` 를 계산한다. **쓰기는 하지 않는다**(호출부 몫).
  * @param {Array}  targets  `selectBulkTargets` 결과
  * @param {Array}  days     `expandDateRange` 결과
  * @param {string} mode     BULK_MODES.OFF | BULK_MODES.ON
  * @returns {{changes:Array, unchanged:Array, blocked:Array}}
- *   changes  = [{ scheduleId, name, routeName, nextExcludeDates, added:[], removed:[] }]
+ *   changes  = [{ scheduleId, name, routeName, nextExcludeDates, nextIncludeDates, includeChanged,
+ *                 added:[], removed:[], includeAdded:[], includeRemoved:[] }]
  *   unchanged= 바꿀 것이 없는 일정(이미 그렇게 돼 있음)
- *   blocked  = ON 인데 다른 이유로 여전히 쉬는 날 [{ scheduleId, name, day, reasons }]
+ *   blocked  = ON 인데 공휴일이 아닌 이유(요일·기간)로 여전히 쉬는 날 [{ scheduleId, name, day, reasons }]
  *
  * 🔴 OFF 는 **그 일정이 원래 운행하는 날만** 담는다 — 토요일까지 넣으면 `휴무 N일` 숫자가
  *   의미를 잃고 배열만 커진다(문서 1MB 상한도 이 배열이 먹는다).
+ * 🔴 ON 의 공휴일 처리: 사유가 **«공휴일» 하나뿐**일 때만 `includeDates` 로 연다. 요일·기간 밖이
+ *   섞이면 `includeDates` 로도 안 열리므로(판정 정본이 먼저 거른다) 넣지 않고 blocked 로 보고한다.
  */
 export function planBulkOperatingDays({ targets, days, mode }) {
   const changes = [];
   const unchanged = [];
   const blocked = [];
   const dayList = Array.isArray(days) ? days : [];
+  const strs = (a) => (Array.isArray(a) ? a.filter((d) => typeof d === "string") : []);
   for (const s of Array.isArray(targets) ? targets : []) {
-    const cur = Array.isArray(s.excludeDates) ? s.excludeDates.filter((d) => typeof d === "string") : [];
+    const cur = strs(s.excludeDates);
     const curSet = new Set(cur);
+    const curInc = strs(s.includeDates);
+    const incSet = new Set(curInc);
     const added = [];
     const removed = [];
+    const includeAdded = [];
+    const includeRemoved = [];
     if (mode === BULK_MODES.ON) {
       for (const d of dayList) {
-        if (curSet.has(d)) { removed.push(d); continue; }
+        if (curSet.has(d)) removed.push(d);
+        // excludeDates 를 뺀 뒤에도 쉬는 이유 — blockedReasons 는 excludeDates 를 무시하고 본다.
         const why = blockedReasons(s, d);
-        if (why.length > 0) blocked.push({ scheduleId: s.id, name: s.name || "", day: d, reasons: why });
+        if (why.length === 0) continue;
+        if (why.length === 1 && why[0] === HOLIDAY_REASON) {
+          if (!incSet.has(d)) includeAdded.push(d);
+          continue;
+        }
+        blocked.push({ scheduleId: s.id, name: s.name || "", day: d, reasons: why });
       }
     } else {
       for (const d of dayList) {
+        if (incSet.has(d)) includeRemoved.push(d);   // 강제 운행일도 이 기간엔 쉰다
         if (curSet.has(d)) continue;                 // 이미 쉬는 날
         if (!runsOnIgnoringExcludes(s, d)) continue; // 원래 안 다니는 날
         added.push(d);
       }
     }
-    if (added.length === 0 && removed.length === 0) { unchanged.push(s); continue; }
+    if (added.length === 0 && removed.length === 0 && includeAdded.length === 0 && includeRemoved.length === 0) {
+      unchanged.push(s);
+      continue;
+    }
     const next = mode === BULK_MODES.ON
       ? cur.filter((d) => !removed.includes(d))
       : [...cur, ...added];
+    const nextInc = [...curInc.filter((d) => !includeRemoved.includes(d)), ...includeAdded];
     changes.push({
       scheduleId: s.id,
       name: s.name || "",
       routeName: s.routeName || "",
       nextExcludeDates: Array.from(new Set(next)).sort(),
-      added, removed,
+      nextIncludeDates: Array.from(new Set(nextInc)).sort(),
+      includeChanged: includeAdded.length > 0 || includeRemoved.length > 0,
+      added, removed, includeAdded, includeRemoved,
     });
   }
   return { changes, unchanged, blocked };
@@ -182,8 +211,13 @@ export function collectByScheduleDay(entries, scheduleIds) {
   return out;
 }
 
-/** 미리보기 한 줄 — `[강남1] 등교 · 12일 휴무 추가`. */
+/** 미리보기 한 줄 — `[강남1] 등교 · 12일 휴무 추가` / `… · 1일 휴무 해제 · 공휴일 1일 운행`. */
 export function summarizeChange(c) {
-  const n = c.added.length || c.removed.length;
-  return `${c.name || c.routeName || c.scheduleId} · ${n}일 ${c.added.length ? "휴무 추가" : "휴무 해제"}`;
+  const len = (a) => (Array.isArray(a) ? a.length : 0);
+  const parts = [];
+  if (len(c.added)) parts.push(`${len(c.added)}일 휴무 추가`);
+  if (len(c.removed)) parts.push(`${len(c.removed)}일 휴무 해제`);
+  if (len(c.includeAdded)) parts.push(`공휴일 ${len(c.includeAdded)}일 운행`);
+  if (len(c.includeRemoved) && !len(c.added)) parts.push(`공휴일 운행 ${len(c.includeRemoved)}일 해제`);
+  return `${c.name || c.routeName || c.scheduleId} · ${parts.join(" · ")}`;
 }

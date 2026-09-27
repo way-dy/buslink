@@ -218,11 +218,65 @@ ok("해제는 «휴무 해제»", summarizeChange(onPlan.changes[0]).includes("�
 const src = fs.readFileSync(path.join(root, "src/lib/bulkOperatingDays.js"), "utf8");
 // 🔴 규칙 복제 금지 — 요일·공휴일 판정을 여기서 다시 쓰면 서버 미러와 갈린다.
 ok("판정을 정본 shouldExpandOn 에 위임한다", /shouldExpandOn\(\{ \.\.\.schedule, excludeDates: \[\] \}/.test(src));
-ok("공휴일 목록을 이 모듈이 직접 갖지 않는다", !/HOLIDAY|공휴일\s*목록|isKoreanHoliday/.test(src.replace(/^\s*\/\/.*$/gm, "")));
+// 2026-09-28: 사유 상수 `HOLIDAY_REASON`("공휴일" 문자열)이 생겨 `HOLIDAY` 단어 매칭을 목록 식별자로 좁혔다.
+//   지키는 것은 그대로 — 공휴일 **목록**(HOLIDAY_SET·KOREAN_HOLIDAYS)이나 판정 함수를 들여오지 않는다.
+ok("공휴일 목록을 이 모듈이 직접 갖지 않는다", !/HOLIDAY_SET|KOREAN_HOLIDAYS|공휴일\s*목록|isKoreanHoliday/.test(src.replace(/^\s*\/\/.*$/gm, "")));
 ok("거래처 미지정 조기 반환이 살아 있다", /if \(!partnerCode\) return \{ targets, skippedInactive \};/.test(src));
 ok("비활성 일정 제외가 살아 있다", /s\.active === false/.test(src));
 const adm = fs.readFileSync(path.join(root, "src/pages/AdminApp.js"), "utf8");
 ok("관리자 화면이 이 모듈을 쓴다", /from "\.\.\/lib\/bulkOperatingDays"/.test(adm));
+
+console.log("\n[H] 대체공휴일 강제 운행 — includeDates (2026-09-28 배시현 개선요청 ZKe91r2YPz1QSmxvpErB)");
+// 신고: 추석 연휴를 통합 운행일 설정으로 빼 놨는데 9/28(추석 대체공휴일·월) 정상배차일에 차량이 안 뜬다.
+const SUB = "2026-09-28";
+ok("🔴 신호 유무 — 9/28 이 실제로 공휴일 목록에 있다", HOLIDAY_SET.has(SUB));
+ok("신고 재현 — includeDates 없이는 평일 일정이 9/28 에 안 펼쳐진다", ctx.shouldExpandOn(s1, SUB) === false);
+ok("그리고 옛 동작(excludeDates 에서 빼기)만으로는 풀 수 없었다 — 사유 = 공휴일 하나",
+  JSON.stringify(blockedReasons(s1, SUB)) === JSON.stringify(["공휴일"]));
+const onSub = planBulkOperatingDays({ targets: [s1], days: [SUB], mode: BULK_MODES.ON });
+ok("ON — 공휴일뿐인 날은 blocked 가 아니라 includeDates 추가", onSub.blocked.length === 0 && onSub.changes.length === 1
+  && onSub.changes[0].includeAdded.join(",") === SUB, onSub);
+ok("ON — includeChanged 표시(호출부가 includeDates 를 쓰는 신호)", onSub.changes[0].includeChanged === true);
+ok("ON — excludeDates 는 건드리지 않는다", onSub.changes[0].nextExcludeDates.length === 0 && onSub.changes[0].removed.length === 0);
+const s1Sub = { ...s1, excludeDates: onSub.changes[0].nextExcludeDates, includeDates: onSub.changes[0].nextIncludeDates };
+ok("🔴 적용 후 판정 정본이 9/28 을 펼친다", ctx.shouldExpandOn(s1Sub, SUB) === true);
+ok("요약 문구에 «공휴일 1일 운행»", summarizeChange(onSub.changes[0]).includes("공휴일 1일 운행"), summarizeChange(onSub.changes[0]));
+ok("🔴 멱등 — 다시 ON 하면 바꿀 것 없음",
+  (() => { const p = planBulkOperatingDays({ targets: [s1Sub], days: [SUB], mode: BULK_MODES.ON }); return p.changes.length === 0 && p.unchanged.length === 1; })());
+// 막아 둔 공휴일 — excludeDates 에서 빼면서 includeDates 에도 넣어야 운행된다(둘 다 한 번에).
+const both = planBulkOperatingDays({ targets: [{ ...s1, excludeDates: [SUB] }], days: [SUB], mode: BULK_MODES.ON });
+ok("막아 둔 공휴일 — 휴무 해제 + 공휴일 운행이 한 번에",
+  both.changes[0].removed.join() === SUB && both.changes[0].includeAdded.join() === SUB && both.changes[0].nextExcludeDates.length === 0);
+ok("그 요약은 두 가지를 다 말한다", /휴무 해제/.test(summarizeChange(both.changes[0])) && /공휴일 1일 운행/.test(summarizeChange(both.changes[0])));
+// 🔴 요일·기간 밖은 includeDates 로도 안 연다(기존 blockedReasons 계약 유지).
+const CHUSEOK = expandDateRange("2026-09-24", "2026-09-28"); // 목 금 토 일 월
+const onRange = planBulkOperatingDays({ targets: [s1], days: CHUSEOK, mode: BULK_MODES.ON });
+ok("연휴 전체 ON — 평일 공휴일(9/24·25·28)만 includeDates", onRange.changes[0].includeAdded.join(",") === "2026-09-24,2026-09-25,2026-09-28",
+  onRange.changes[0].includeAdded);
+ok("🔴 주말(토 공휴일·일)은 includeDates 에 안 넣고 blocked 로 보고",
+  onRange.blocked.map(b => b.day).join(",") === "2026-09-26,2026-09-27"
+  && onRange.blocked.every(b => b.reasons.includes("운행 요일 아님")), onRange.blocked);
+const early = planBulkOperatingDays({ targets: [{ ...s1, startDate: "2026-10-01" }], days: [SUB], mode: BULK_MODES.ON });
+ok("🔴 기간 밖 공휴일도 includeDates 로 안 연다", early.changes.length === 0 && early.blocked.length === 1
+  && early.blocked[0].reasons.includes("일정 시작일 이전"));
+const noHol = planBulkOperatingDays({ targets: [{ ...s1, excludeHolidays: false }], days: [SUB], mode: BULK_MODES.ON });
+ok("공휴일도 운행하는 일정(excludeHolidays:false)은 바꿀 것 없음", noHol.changes.length === 0 && noHol.unchanged.length === 1);
+// OFF — 강제 운행일을 다시 쉬게: includeDates 에서 빼고 excludeDates 에 넣는다.
+const offSub = planBulkOperatingDays({ targets: [s1Sub], days: [SUB], mode: BULK_MODES.OFF });
+ok("OFF — includeDates 에서 제거 + excludeDates 추가",
+  offSub.changes[0].includeRemoved.join() === SUB && offSub.changes[0].added.join() === SUB
+  && offSub.changes[0].nextIncludeDates.length === 0 && offSub.changes[0].nextExcludeDates.join() === SUB);
+ok("OFF 적용 후 9/28 은 다시 쉰다",
+  ctx.shouldExpandOn({ ...s1, excludeDates: offSub.changes[0].nextExcludeDates, includeDates: offSub.changes[0].nextIncludeDates }, SUB) === false);
+ok("🔴 excludeDates 가 이긴다 — 둘 다 있으면 쉰다", ctx.shouldExpandOn({ ...s1, excludeDates: [SUB], includeDates: [SUB] }, SUB) === false);
+ok("OFF 가 기존 방학 기능을 안 바꾼다 — includeDates 없는 일정은 includeChanged:false", c1.includeChanged === false && c1.includeRemoved.length === 0);
+ok("🔴 기간 밖 includeDates 는 보존", (() => {
+  const p = planBulkOperatingDays({ targets: [{ ...s1, includeDates: [SUB, "2026-10-05"] }], days: [SUB], mode: BULK_MODES.OFF });
+  return p.changes[0].nextIncludeDates.join() === "2026-10-05";
+})());
+ok("관리자 적용부가 includeDates 도 쓴다(바뀐 일정만)", /if \(c\.includeChanged\) patch\.includeDates = c\.nextIncludeDates/.test(adm));
+ok("일정 편집 저장이 includeDates 를 싣는다(안 실으면 편집 직후 정리가 강제 운행일 배차를 지우자고 한다)",
+  /includeDates: form\.includeDates/.test(adm));
 
 console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass}/${pass + fail} 통과`);
 process.exit(fail === 0 ? 0 : 1);

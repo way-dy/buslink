@@ -3062,7 +3062,11 @@ function shouldExpand(schedule, day) {
   const dow = dayOfWeekKST(day);
   if (!schedule.weekdays.includes(dow)) return false;
   if (Array.isArray(schedule.excludeDates) && schedule.excludeDates.includes(day)) return false;
-  if (schedule.excludeHolidays !== false && HOLIDAY_SET.has(day)) return false;
+  // `includeDates`(강제 운행일, 2026-09-28 개선요청 ZKe91r2YPz1QSmxvpErB) — 공휴일 제외를 그 날만 푼다.
+  //   요일·기간 밖은 열지 않고 excludeDates 가 이긴다(둘 다 위에서 이미 걸렀다).
+  //   🔴 클라 미러 src/lib/dispatchSchedule.js shouldExpandOn 과 같은 계약 — 함께 고칠 것.
+  if (schedule.excludeHolidays !== false && HOLIDAY_SET.has(day)
+      && !(Array.isArray(schedule.includeDates) && schedule.includeDates.includes(day))) return false;
   return true;
 }
 

@@ -77,9 +77,20 @@ const SCHEDULES = [
   { name: "제외일", weekdays: [1, 2, 3, 4, 5], startDate: "2026-01-01", endDate: null, excludeHolidays: true, excludeDates: ["2026-08-13", "2026-08-14"] },
   { name: "요일없음", weekdays: [], startDate: "2026-01-01", endDate: null, excludeHolidays: true, excludeDates: [] },
   { name: "주말만", weekdays: [0, 6], startDate: "2026-01-01", endDate: null, excludeHolidays: true, excludeDates: [] },
+  // includeDates(강제 운행일, 2026-09-28 ZKe91r2YPz1QSmxvpErB) — 공휴일(평일·주말)·일반일·기간 밖을 섞는다.
+  { name: "강제운행일", weekdays: [1, 2, 3, 4, 5], startDate: "2026-01-01", endDate: null, excludeHolidays: true, excludeDates: [],
+    includeDates: ["2026-08-17", "2026-08-15", "2026-09-28", "2026-09-24", "2026-09-26", "2026-08-20"] },
+  { name: "강제+제외충돌", weekdays: [1, 2, 3, 4, 5], startDate: "2026-01-01", endDate: null, excludeHolidays: true,
+    excludeDates: ["2026-09-28"], includeDates: ["2026-09-28", "2026-09-25"] },
+  { name: "강제·기간밖", weekdays: [1, 2, 3, 4, 5], startDate: "2026-09-26", endDate: null, excludeHolidays: true, excludeDates: [],
+    includeDates: ["2026-09-24", "2026-09-25", "2026-09-28"] },
+  { name: "강제·공휴일도운행", weekdays: [1, 2, 3, 4, 5], startDate: "2026-01-01", endDate: null, excludeHolidays: false, excludeDates: [],
+    includeDates: ["2026-09-28"] },
+  { name: "강제·배열아님", weekdays: [1, 2, 3, 4, 5], startDate: "2026-01-01", endDate: null, excludeHolidays: true, excludeDates: [],
+    includeDates: "2026-09-28" },
 ];
-// 광복절(토)·대체공휴일(월)·주말·평일이 모두 들어가는 구간
-const SWEEP_DAYS = datesFrom("2026-08-10", 30);
+// 광복절(토)·대체공휴일(월)·주말·평일 + 추석 연휴·대체공휴일(9/24~9/28)·개천절 대체(10/5)가 들어가는 구간
+const SWEEP_DAYS = datesFrom("2026-08-10", 30).concat(datesFrom("2026-09-20", 20));
 
 let mismatch = 0, expandTrue = 0;
 for (const s of SCHEDULES) {
@@ -103,6 +114,22 @@ ok("요일 계산 400일 일치 (getUTCDay 고정)", dowMismatch === 0, { dowMis
 ok("2026-08-12 는 수요일(3)", C.dayOfWeekForDate("2026-08-12") === 3, C.dayOfWeekForDate("2026-08-12"));
 ok("2026-08-17 는 광복절 대체공휴일이라 평일 일정도 제외",
   C.shouldExpandOn(SCHEDULES[3], "2026-08-17") === false);
+
+// includeDates 계약(2026-09-28) — 서버·클라 양쪽을 직접 대조한다.
+const byName = (n) => SCHEDULES.find(s => s.name === n);
+const both = (s, d) => [S.shouldExpand(s, d), C.shouldExpandOn(s, d)];
+ok("🔴 신호 유무 — includeDates 가 결과를 실제로 뒤집는 조합이 스윕에 있다",
+  SWEEP_DAYS.some(d => HOLIDAY_SET.has(d) && S.shouldExpand(byName("강제운행일"), d)
+    && !S.shouldExpand({ ...byName("강제운행일"), includeDates: [] }, d)));
+ok("9/28(추석 대체·월) — includeDates 면 서버·클라 모두 펼친다", both(byName("강제운행일"), "2026-09-28").join() === "true,true");
+ok("9/28 — includeDates 없으면 서버·클라 모두 안 펼친다(옛 동작)",
+  both({ ...byName("강제운행일"), includeDates: [] }, "2026-09-28").join() === "false,false");
+ok("🔴 주말 공휴일(9/26 토)은 includeDates 로도 안 연다", both(byName("강제운행일"), "2026-09-26").join() === "false,false");
+ok("🔴 excludeDates 가 이긴다(9/28 둘 다)", both(byName("강제+제외충돌"), "2026-09-28").join() === "false,false");
+ok("🔴 기간 밖 공휴일(9/24·25)은 includeDates 로도 안 연다",
+  both(byName("강제·기간밖"), "2026-09-24").join() === "false,false" && both(byName("강제·기간밖"), "2026-09-25").join() === "false,false");
+ok("평일 비공휴일에 includeDates 가 있어도 영향 없음(8/20)", both(byName("강제운행일"), "2026-08-20").join() === "true,true");
+ok("includeDates 가 배열이 아니면 무시(9/28 안 펼침)", both(byName("강제·배열아님"), "2026-09-28").join() === "false,false");
 
 console.log("\n── ② isExpandTarget — active 게이트 ──");
 const live = { ...SCHEDULES[3], active: true };
@@ -222,6 +249,8 @@ ok("🔴 클라 미러가 getDay() 를 쓰지 않는다", !/\.getDay\(\)/.test(l
 ok("클라 미러에 Firebase import 가 없다", !/from ["']firebase/.test(lib));
 const fn = fs.readFileSync(path.join(root, "functions/index.js"), "utf8");
 ok("서버 shouldExpand 가 그대로 있다(미러 대상 존재)", /function shouldExpand\(schedule, day\)/.test(fn));
+ok("🔴 서버·클라 둘 다 includeDates 를 읽는다(한쪽만 고치면 그날 밤 CF 와 화면이 갈린다)",
+  /schedule\.includeDates/.test(S.shouldExpand.toString()) && /schedule\.includeDates/.test(C.shouldExpandOn.toString()));
 
 console.log("\n── ⑨ 일정 값 변경 → 이미 펼쳐진 배차 맞추기(2026-08-20 mXPK2Y19LvONbgJTMgar) ──");
 // 신고 재현: 하교 일정의 차량을 바꿨는데 그 전에 펼쳐진 8/21·8/24 배차가 옛 차량을 들고 있었다.

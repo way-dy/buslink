@@ -1941,7 +1941,7 @@ const blankScheduleForm = () => ({
   startDate: new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul'}).format(new Date()),
   endDate:"", endOpen:true,
   weekdays:[1,2,3,4,5],
-  excludeDates:[], excludeInput:"",
+  excludeDates:[], excludeInput:"", includeDates:[],
   excludeHolidays:true, active:true,
 });
 
@@ -1988,6 +1988,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
       weekdays: Array.isArray(s.weekdays) ? [...s.weekdays].sort((a,b)=>a-b) : [1,2,3,4,5],
       excludeDates: Array.isArray(s.excludeDates) ? [...s.excludeDates].sort() : [],
       excludeInput: "",
+      includeDates: Array.isArray(s.includeDates) ? s.includeDates.filter(d => typeof d === "string").sort() : [],
       excludeHolidays: s.excludeHolidays !== false,
       active: s.active !== false,
     });
@@ -2191,15 +2192,18 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
     if (changes.length === 0) {
       return alert(isOff
         ? "이미 그 기간은 모두 쉬는 것으로 되어 있습니다."
-        : "그 기간에 막아 둔 날이 없습니다.\n\n공휴일이나 운행 요일이 아닌 날은 이 기능으로 운행하게 만들 수 없습니다.");
+        : "그 기간에 막아 둔 날이 없습니다.\n\n운행 요일이 아니거나 일정 기간 밖인 날은 이 기능으로 운행하게 만들 수 없습니다.");
     }
+    // 공휴일인데 운행으로 여는 날(includeDates) — 날짜를 밝혀야 운영자가 추석 당일까지 여는 실수를 알아챈다.
+    const holidayOpened = Array.from(new Set(changes.flatMap(c => c.includeAdded || []))).sort();
     const preview = changes.slice(0, 10).map(c => `· ${summarizeChange(c)}`).join("\n");
     const more = changes.length > 10 ? `\n… 외 ${changes.length - 10}개 일정` : "";
     const notes = [
       unchanged.length > 0 ? `이미 그렇게 되어 있는 일정 ${unchanged.length}개는 그대로 둡니다.` : "",
       skippedInactive.length > 0 ? `사용 안 함 상태인 일정 ${skippedInactive.length}개는 제외했습니다.` : "",
       // 🔴 못 되돌리는 날을 말하지 않으면 「켰는데 안 나온다」가 그대로 다음 문의가 된다.
-      (!isOff && blocked.length > 0) ? `공휴일·운행 요일이 아닌 ${new Set(blocked.map(b => b.day)).size}일은 그대로 쉽니다.` : "",
+      (!isOff && holidayOpened.length > 0) ? `공휴일이지만 운행하는 날로 바꿉니다: ${holidayOpened.join(", ")}` : "",
+      (!isOff && blocked.length > 0) ? `운행 요일이 아니거나 일정 기간 밖인 ${new Set(blocked.map(b => b.day)).size}일은 그대로 쉽니다.` : "",
     ].filter(Boolean).map(t => `※ ${t}`).join("\n");
     if (!window.confirm(
       `${bulk.from} ~ ${bulk.to} (${days.length}일)\n배차 일정 ${changes.length}개를 ${isOff ? "쉬는 것으로" : "운행하는 것으로"} 바꿉니다.\n\n${preview}${more}` +
@@ -2211,9 +2215,12 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
     const nextById = {};
     for (const c of changes) {
       try {
-        await updateDoc(doc(db, "companies", companyId, "dispatchSchedules", c.scheduleId), { excludeDates: c.nextExcludeDates });
+        // includeDates(강제 운행일)는 바뀐 일정만 쓴다 — 방학 OFF 처럼 무관한 일괄 적용이 빈 필드를 뿌리지 않게.
+        const patch = { excludeDates: c.nextExcludeDates };
+        if (c.includeChanged) patch.includeDates = c.nextIncludeDates;
+        await updateDoc(doc(db, "companies", companyId, "dispatchSchedules", c.scheduleId), patch);
         const base = targets.find(t => t.id === c.scheduleId);
-        nextById[c.scheduleId] = { ...base, excludeDates: c.nextExcludeDates };
+        nextById[c.scheduleId] = { ...base, ...patch };
         done++;
       } catch (e) { /* 개별 실패는 아래 합계로 알린다 */ }
     }
@@ -2252,6 +2259,8 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
       endDate: form.endOpen ? null : (form.endDate || null),
       weekdays: form.weekdays,
       excludeDates: form.excludeDates,
+      // 🔴 빼지 말 것 — 저장 직후 pruneScheduleDispatches(editId, payload) 가 이 값으로 판정한다.
+      includeDates: form.includeDates,
       excludeHolidays: !!form.excludeHolidays,
       active: !!form.active,
       updatedAt: new Date().toISOString(),
@@ -2387,6 +2396,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
                 <td style={{...S.td, fontSize:11, color:"var(--color-label-mute)"}}>{periodLabel(s)}</td>
                 <td style={{...S.td, fontSize:11, color:"var(--color-label-mute)"}}>
                   {s.excludeHolidays !== false ? "공휴일✓" : "공휴일✗"} · 휴무 {Array.isArray(s.excludeDates) ? s.excludeDates.length : 0}일
+                  {Array.isArray(s.includeDates) && s.includeDates.length > 0 ? ` · 공휴일 운행 ${s.includeDates.length}일` : ""}
                 </td>
                 <td style={S.td}>
                   <button
@@ -2507,6 +2517,27 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
                    onChange={e=>setForm({...form, excludeHolidays:e.target.checked})} />
             한국 공휴일 자동 제외 (2026~2028 정적 — 매년 갱신 필요)
           </label>
+          {/* includeDates(강제 운행일) — 통합 운행일 설정 「운행」이 공휴일을 열 때 쓴다. 여기선 보고 빼기만. */}
+          {form.includeDates.length > 0 && (
+            <div style={{marginTop:6}}>
+              <div style={{fontSize:12, color:"var(--color-label-mute)", marginBottom:4}}>
+                공휴일이지만 운행하는 날{form.excludeHolidays ? "" : " (공휴일 자동 제외가 꺼져 있어 지금은 효과 없음)"}
+              </div>
+              <div style={{display:"flex", flexWrap:"wrap", gap:6}}>
+                {form.includeDates.map(d => (
+                  <span key={d} style={{
+                    display:"inline-flex", alignItems:"center", gap:6,
+                    background:"var(--color-primary-soft)", border:"1px solid var(--color-line)",
+                    borderRadius:14, padding:"3px 10px", fontSize:11, color:"var(--color-label)",
+                  }}>
+                    {d}
+                    <button type="button" onClick={()=>setForm(f => ({...f, includeDates: f.includeDates.filter(x => x !== d)}))}
+                      style={{background:"none", border:"none", color:"var(--color-destructive)", cursor:"pointer", fontSize:14, lineHeight:1, padding:0}}>×</button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
           <label style={{display:"flex", alignItems:"center", gap:8, marginTop:4, fontSize:13, color:"var(--color-label)"}}>
             <input type="checkbox" checked={form.active}
@@ -2625,9 +2656,15 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
             {plan.unchanged.length > 0 && <div>이미 그렇게 되어 있는 일정 {plan.unchanged.length}개는 그대로 둡니다.</div>}
             {skippedInactive.length > 0 && <div>사용 안 함 상태인 일정 {skippedInactive.length}개는 제외합니다.</div>}
             {/* 🔴 못 되돌리는 날을 말하지 않으면 「켰는데 안 나온다」가 그대로 다음 문의가 된다. */}
+            {!isOff && (() => {
+              const hol = Array.from(new Set(plan.changes.flatMap(c => c.includeAdded || []))).sort();
+              return hol.length > 0 ? (
+                <div>공휴일이지만 운행하는 날로 바꿉니다: {hol.join(", ")}</div>
+              ) : null;
+            })()}
             {!isOff && plan.blocked.length > 0 && (
               <div style={{ color:"#7A4B00" }}>
-                공휴일·운행 요일이 아닌 {new Set(plan.blocked.map(b => b.day)).size}일은 이 기능으로 운행하게 만들 수 없습니다.
+                운행 요일이 아니거나 일정 기간 밖인 {new Set(plan.blocked.map(b => b.day)).size}일은 이 기능으로 운행하게 만들 수 없습니다.
               </div>
             )}
           </div>

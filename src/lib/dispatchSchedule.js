@@ -52,7 +52,11 @@ export function shouldExpandOn(schedule, day) {
   if (!Array.isArray(schedule.weekdays) || schedule.weekdays.length === 0) return false;
   if (!schedule.weekdays.includes(dayOfWeekForDate(day))) return false;
   if (Array.isArray(schedule.excludeDates) && schedule.excludeDates.includes(day)) return false;
-  if (schedule.excludeHolidays !== false && isKoreanHoliday(day)) return false;
+  // `includeDates`(강제 운행일, 2026-09-28 배시현 개선요청 `ZKe91r2YPz1QSmxvpErB`):
+  //   공휴일 자동 제외(excludeHolidays)를 **그 날만** 푼다 — 통근·통학 거래처는 대체공휴일에도 다닌다.
+  //   🔴 요일·기간 밖은 열지 않는다 · excludeDates 가 이긴다(둘 다 위에서 이미 걸렀다).
+  if (schedule.excludeHolidays !== false && isKoreanHoliday(day)
+      && !(Array.isArray(schedule.includeDates) && schedule.includeDates.includes(day))) return false;
   return true;
 }
 
