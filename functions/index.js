@@ -3074,7 +3074,10 @@ function shouldExpand(schedule, day) {
  * 단일 회사 전체 schedule 펼침. 멱등 dispatchId = `${scheduleId}_${day}`.
  * exists() 시 skip(일별 수정 보존). 결과 카운트 반환.
  */
-async function expandCompany(companyId) {
+// onlyIds(선택, 2026-09-28): 이 일정들만 펼친다 — 관리 화면이 일정을 저장한 직후 그 일정만 바로 펼칠 때.
+// 🔴 저장 직후 회사 전체를 펼치지 말 것 — 운영자가 오늘 손으로 지운 다른 일정의 배차가 되살아난다
+//    (새벽 펼침은 00:30 이라 그날 낮에 지운 오늘 배차를 다시 만들지 않는다).
+async function expandCompany(companyId, onlyIds = null) {
   const db = admin.firestore();
   const today = new Date();
   const days = [];
@@ -3090,7 +3093,9 @@ async function expandCompany(companyId) {
     .get();
 
   let created = 0, skipped = 0;
+  const only = Array.isArray(onlyIds) ? new Set(onlyIds) : null;
   for (const sdoc of schedSnap.docs) {
+    if (only && !only.has(sdoc.id)) continue;
     const schedule = sdoc.data();
     const scheduleId = sdoc.id;
     for (const day of days) {
@@ -3155,11 +3160,21 @@ exports.expandDispatchSchedules = onSchedule(
 // 운영자 즉시 펼침 — AdminApp "지금 펼치기" 버튼
 exports.expandDispatchSchedulesNow = onCall(async (request) => {
   await assertAdmin(request);
-  const { companyId } = request.data || {};
+  const { companyId, scheduleIds } = request.data || {};
   if (!companyId) throw new HttpsError("invalid-argument", "companyId가 필요합니다");
-  console.log(`[배차펼침] 즉시 트리거 회사=${companyId} 호출자=${request.auth.uid}`);
+  // scheduleIds(선택): 저장 직후 그 일정만. 부재 = 회사 전체(「지금 펼치기」 버튼 — 기존 계약 그대로).
+  let onlyIds = null;
+  if (scheduleIds !== undefined) {
+    if (!Array.isArray(scheduleIds) || scheduleIds.length === 0 || scheduleIds.length > 300
+        || !scheduleIds.every((x) => typeof x === "string" && x && !x.includes("/"))) {
+      throw new HttpsError("invalid-argument", "scheduleIds 형식이 올바르지 않습니다");
+    }
+    onlyIds = scheduleIds;
+  }
+  console.log(`[배차펼침] 즉시 트리거 회사=${companyId} 호출자=${request.auth.uid}` +
+    (onlyIds ? ` 일정=${onlyIds.length}개` : ""));
   try {
-    const result = await expandCompany(companyId);
+    const result = await expandCompany(companyId, onlyIds);
     return { success: true, ...result };
   } catch (e) {
     console.error("[배차펼침] 즉시 오류:", e.message);

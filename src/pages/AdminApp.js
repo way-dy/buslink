@@ -2227,8 +2227,8 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
     // 이미 펼쳐진 배차는 일정만 고쳐서는 안 사라진다(CF 는 만들기만 한다) — 쉬는 쪽일 때만 정리한다.
     let tail = "";
     if (isOff && done > 0) { try { tail = await bulkPruneDispatches(nextById); } catch (e) { tail = ""; } }
-    // 다시 운행하게 바꾼 날은 새벽 자동 펼침(또는 「지금 펼치기」)이 배차를 만든다.
-    if (!isOff && done > 0) tail = `\n\n다시 운행하는 날의 배차는 오늘 밤 자동으로 만들어집니다. 바로 만들려면 「지금 펼치기」를 눌러주세요.`;
+    // 다시 운행하게 바꾼 날은 그 일정들만 바로 펼친다(7일 밖은 새벽 자동 펼침이 이어서 만든다).
+    if (!isOff && done > 0) tail = await expandSavedSchedules(Object.keys(nextById));
     setBulkBusy(false);
     alert((done === changes.length
       ? `배차 일정 ${done}개를 바꿨습니다.`
@@ -2273,11 +2273,13 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
         // 여기서 나는 오류가 저장을 되돌리지 않게 분리해 잡는다.
         try { await pruneScheduleDispatches(editId, payload); }
         catch (e) { alert("이미 만들어진 배차를 확인하지 못했습니다: " + e.message); }
+        if (payload.active) { const msg = await expandSavedSchedules([editId]); if (msg) alert(msg.trim()); }
       } else {
-        await addDoc(collection(db, "companies", companyId, "dispatchSchedules"), {
+        const ref = await addDoc(collection(db, "companies", companyId, "dispatchSchedules"), {
           ...payload, createdAt: new Date().toISOString(), createdBy: currentUserUid || null,
         });
         setShowForm(false);
+        if (payload.active) { const msg = await expandSavedSchedules([ref.id]); if (msg) alert(msg.trim()); }
       }
     } catch (e) {
       alert("저장 오류: " + e.message);
@@ -2306,9 +2308,28 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
       if (!next.active) {
         try { await pruneScheduleDispatches(s.id, next); }
         catch (e) { alert("이미 만들어진 배차를 확인하지 못했습니다: " + e.message); }
+      } else {
+        const msg = await expandSavedSchedules([s.id]);
+        if (msg) alert(msg.trim());
       }
     } catch (e) {
       alert("토글 오류: " + e.message);
+    }
+  };
+
+  // 저장 직후 그 일정만 바로 펼친다(2026-09-28 개선요청 ZKe91r2YPz1QSmxvpErB 후속 — 「활성」인데
+  // 「지금 펼치기」를 또 눌러야 오늘 배차가 생겼다). CF 는 이미 있는 배차를 건너뛰므로 여러 번 불러도 안전.
+  // 🔴 scheduleIds 를 빼고 회사 전체를 펼치지 말 것 — 오늘 손으로 지운 다른 일정의 배차가 되살아난다.
+  // 실패해도 저장은 끝났으므로 조용히 새벽 펼침에 맡긴다(문구로만 알린다).
+  const expandSavedSchedules = async (ids) => {
+    const list = (ids || []).filter(Boolean);
+    if (list.length === 0) return "";
+    try {
+      const res = await httpsCallable(functions, "expandDispatchSchedulesNow")({ companyId, scheduleIds: list });
+      const created = (res.data && res.data.created) || 0;
+      return created > 0 ? `\n\n배차 ${created}건을 바로 만들었습니다.` : "";
+    } catch (e) {
+      return `\n\n배차를 바로 만들지 못했습니다. 오늘 밤 자동으로 만들어지며, 급하면 「지금 펼치기」를 눌러주세요.`;
     }
   };
 
@@ -2551,7 +2572,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
           </div>
           {editId && (
             <div style={{fontSize:11, color:"var(--color-label-alt)", marginTop:4, lineHeight:1.5}}>
-              ※ 변경사항은 다음 새벽 펼침부터 반영. 이미 펼쳐진 미래 배차는 그대로 유지(필요시 배차 관리에서 개별 수정).
+              ※ 활성 일정은 저장하면 오늘부터 7일치 배차가 바로 만들어지고, 그 뒤 날짜는 매일 새벽에 이어서 만들어집니다.
             </div>
           )}
         </div></div>
