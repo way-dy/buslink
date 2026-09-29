@@ -2715,7 +2715,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
   const [editItem, setEditItem] = useState(null);
   const [filter, setFilter] = useState("전체");
   const [search, setSearch] = useState("");
-  const [form, setForm] = useState({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"", boardingMode:"", order:"", displayStart:"", displayEnd:"", sleepCheckEnabled:false });
+  const [form, setForm] = useState({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"", boardingMode:"", order:"", displayStart:"", displayEnd:"", boardStart:"", boardEnd:"", sleepCheckEnabled:false });
   // 회사 기본 표시 범위(2026-08-05) — companies/{cid}.gpsWindowPreMin / gpsWindowPostMin.
   // 미설정이면 30/30(routeWindow.js 기본값과 같은 수). 노선 '표시 시간'이 있으면 그쪽이 우선.
   const [winPre, setWinPre] = useState(WINDOW_PRE_MIN_DEFAULT);
@@ -2832,10 +2832,10 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
     );
   }, [stopsRoute, companyId]);
 
-  const openAdd = () => { setEditItem(null); setForm({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"", boardingMode:"", order:"", displayStart:"", displayEnd:"", sleepCheckEnabled:false }); setShowForm(true); };
+  const openAdd = () => { setEditItem(null); setForm({ name:"", code:"", type:"출근", shift:"주간조", seats:"45", departTime:"", memo:"", partnerCode:"", partnerName:"", boardingMode:"", order:"", displayStart:"", displayEnd:"", boardStart:"", boardEnd:"", sleepCheckEnabled:false }); setShowForm(true); };
   const openEdit = (item) => {
     setEditItem(item);
-    setForm({ name:item.name||"", code:item.code||"", type:item.type||"출근", shift:item.shift||"주간조", seats:item.seats?.toString()||"", departTime:item.departTime||"", memo:item.memo||"", partnerCode:item.partnerCode||"", partnerName:item.partnerName||"", boardingMode:item.boardingMode||"", order: typeof item.order === "number" ? String(item.order) : "", displayStart:item.displayStart||"", displayEnd:item.displayEnd||"", sleepCheckEnabled: !!item.sleepCheckEnabled });
+    setForm({ name:item.name||"", code:item.code||"", type:item.type||"출근", shift:item.shift||"주간조", seats:item.seats?.toString()||"", departTime:item.departTime||"", memo:item.memo||"", partnerCode:item.partnerCode||"", partnerName:item.partnerName||"", boardingMode:item.boardingMode||"", order: typeof item.order === "number" ? String(item.order) : "", displayStart:item.displayStart||"", displayEnd:item.displayEnd||"", boardStart:item.boardStart||"", boardEnd:item.boardEnd||"", sleepCheckEnabled: !!item.sleepCheckEnabled });
     setShowForm(true);
   };
 
@@ -2851,7 +2851,11 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
     // 표시 시간(2026-08-05) — 둘 다 넣어야 명시 창으로 인정. 한쪽만 넣으면 판정이 애매해지므로 거부.
     const ds = (form.displayStart || "").trim(), de = (form.displayEnd || "").trim();
     if ((ds && !de) || (!ds && de)) { setLoading(false); return alert("표시 시간은 시작·종료를 모두 입력하거나 둘 다 비워주세요"); }
-    const data = { name:form.name.trim(), code:form.code.trim(), type:form.type, shift:form.shift, seats:form.seats?parseInt(form.seats):null, departTime:form.departTime, memo:form.memo.trim(), partnerCode:form.partnerCode, partnerName:form.partnerName, boardingMode:form.boardingMode||"", order:orderVal, displayStart:ds||null, displayEnd:de||null, sleepCheckEnabled: !!form.sleepCheckEnabled, updatedAt:new Date().toISOString() };
+    // 태깅 가능 시간(2026-09-29 개선요청 3whpOuuC) — 둘 다 있을 때만 서버(boardStatic·boardNfc)가 게이트.
+    //  한쪽만이면 서버는 게이트를 안 걸어 "넣었는데 안 막힌다"가 되므로 저장 단계에서 막는다.
+    const bs = (form.boardStart || "").trim(), be = (form.boardEnd || "").trim();
+    if ((bs && !be) || (!bs && be)) { setLoading(false); return alert("태깅 가능 시간은 시작·종료를 모두 입력하거나 둘 다 비워주세요"); }
+    const data = { name:form.name.trim(), code:form.code.trim(), type:form.type, shift:form.shift, seats:form.seats?parseInt(form.seats):null, departTime:form.departTime, memo:form.memo.trim(), partnerCode:form.partnerCode, partnerName:form.partnerName, boardingMode:form.boardingMode||"", order:orderVal, displayStart:ds||null, displayEnd:de||null, boardStart:bs||null, boardEnd:be||null, sleepCheckEnabled: !!form.sleepCheckEnabled, updatedAt:new Date().toISOString() };
     try {
       if (editItem) {
         await updateDoc(doc(db, "companies", companyId, "routes", editItem.id), data);
@@ -2893,6 +2897,8 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
         boardingMode: item.boardingMode || "",
         displayStart: item.displayStart || null, // 표시 시간은 계획 정보 → 복사본도 물려받는다(2026-08-05)
         displayEnd: item.displayEnd || null,
+        boardStart: item.boardStart || null, // 태깅 가능 시간도 계획 정보 → 복사본이 물려받는다(2026-09-29)
+        boardEnd: item.boardEnd || null,
         routePath: Array.isArray(item.routePath) ? item.routePath : [], // 수동 경로 폴리라인 보존(plain number 배열)
         createdBy: currentUserUid || null, // 복사본도 본인 소유로(제한 admin 열람 보장)
         createdAt: new Date().toISOString(),
@@ -3836,6 +3842,17 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
             승객·직원앱에 이 노선 차량이 보이는 시간대입니다. <b>비워두면 출발시간 기준으로 자동</b>
             (회사 관리 &gt; 기본 표시 범위). 하루에 여러 번 도는 노선은 직접 넣어주세요.
             <br />관리자 실시간 관제에는 시간과 무관하게 항상 보입니다.
+          </div>
+          {/* 태깅 가능 시간(2026-09-29 개선요청 3whpOuuC 최우석) — 출퇴근 동일 바코드 차량에서
+              퇴근차에 타며 출근 노선으로 태깅하는 것 차단. 서버 boardStatic·boardNfc 가 강제한다. */}
+          <label style={S.label}>태깅 가능 시간</label>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <input style={{...S.input, flex:1}} type="time" value={form.boardStart} onChange={e=>setForm({...form,boardStart:e.target.value})} />
+            <span style={{ fontSize:13, color:"var(--color-label-mute)" }}>~</span>
+            <input style={{...S.input, flex:1}} type="time" value={form.boardEnd} onChange={e=>setForm({...form,boardEnd:e.target.value})} />
+          </div>
+          <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:-2, marginBottom:8, lineHeight:1.5 }}>
+            비워두면 시간 제한 없이 태깅됩니다.
           </div>
           {/* 탑승 QR 방향(노선 단위 override) — 혼승 노선 대응. 미설정 시 협력사 정책 따름. 2026-05-27 */}
           <label style={S.label}>탑승 QR 방향 (노선 override)</label>

@@ -1158,7 +1158,11 @@ async function resolvePassengerStopAdmin(db, companyId, empNo, routeId) {
 //  - 없으면(폰 기본카메라 BoardingApp 등 선택 정보 없는 진입점) 전체 배차에서 해석(하위호환).
 // 같은 차량 하루 다중 배차(7:10/7:50)는 departTime 이 현재 시각과 가장 가까운 회차 선택
 // (기존 docs[0] 임의 선택의 모호성 제거 — 단일 배차 차량은 결과 동일).
-async function resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRouteId) {
+// opts.boardWindow(2026-09-29 개선요청 3whpOuuC): **탑승 CF(boardStatic·boardNfc)와 그 프리뷰만** 켠다.
+//  켜면 오늘 배차의 노선 문서를 읽어 「태깅 가능 시간」(routes.boardStart/End)이 열린 배차를
+//  우선 고르고(functions/boardWindow.js pickDispatch) 게이트 재료(boardGate)를 함께 돌려준다.
+//  거부 자체는 탑승 CF 가 한다. recordSleepingCheck 등은 opts 없이 불러 결과가 예전과 같다.
+async function resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRouteId, opts) {
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
 
   const listSnap = await db
@@ -1192,7 +1196,26 @@ async function resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRout
     const m = hhmmToMinutes(d.departTime);
     return (m === null || nowMin === null) ? Infinity : Math.abs(m - nowMin);
   };
-  const disp = pool.reduce((best, d) => (gap(d) < gap(best) ? d : best), pool[0]);
+  // 태깅 가능 시간 — 탑승 경로(opts.boardWindow)에서만 노선 문서를 읽는다
+  //  (차량당 하루 1~3노선 · 읽기 실패 = 그 노선 창 없음 = 막지 않는다).
+  let routesById = null;
+  if (opts && opts.boardWindow) {
+    routesById = {};
+    const rids = [...new Set(all.map((d) => d.routeId).filter(Boolean))];
+    await Promise.all(rids.map(async (rid) => {
+      try {
+        const rs = await db.collection("companies").doc(companyId).collection("routes").doc(rid).get();
+        if (rs.exists) routesById[rid] = rs.data() || {};
+      } catch (e) {
+        console.warn(`[태깅시간] 노선 로드 실패 cid=${companyId} route=${rid}: ${e.message}`);
+      }
+    }));
+  }
+  // 🔴 opts 없는 호출자는 기존 reduce 그대로(글자 그대로 같은 결과). 창 설정 노선이 없으면
+  //    pickDispatch 도 같은 결과를 낸다(boardWindow.js 주석·테스트).
+  const disp = routesById
+    ? pickDispatch(pool, nowMin, routesById)
+    : pool.reduce((best, d) => (gap(d) < gap(best) ? d : best), pool[0]);
   let vehicleNo = disp.vehicleNo || "";
   // 배차에 vehicleNo 없으면 vehicles/{vehicleId}.plateNo 폴백.
   if (!vehicleNo) {
@@ -1210,6 +1233,13 @@ async function resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRout
     routeName: disp.routeName || "",
     driverId: disp.driverId || "",
     vehicleNo,
+    // 게이트 판정 재료(opts.boardWindow 일 때만) — 🔴 응답으로 그대로 클라에 넘기지 말 것(내부용).
+    ...(routesById ? {
+      boardGate: {
+        routesById, nowMin,
+        dispatches: all.map((d) => ({ routeId: d.routeId || "", routeName: d.routeName || "" })),
+      },
+    } : {}),
   };
 }
 
@@ -1466,7 +1496,11 @@ exports.resolveStaticBoarding = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  return await resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRouteId);
+  // 태깅 가능 시간이 열린 배차를 우선 고르는 선택 규칙만 탑승 CF 와 맞춘다(확인 화면 노선 = 실제 적재
+  // 노선). 🔴 거부(게이트)는 하지 않는다 — 프리뷰는 판정하지 않는다. 내부 재료(boardGate)는 뺀다.
+  const { boardGate: _bg, ...preview } =
+    await resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRouteId, { boardWindow: true });
+  return preview;
 });
 
 // ════════════════════════════════════════════════════════
@@ -1502,6 +1536,25 @@ const { planRosterWrites, planReissue, planDirectPin } = require("./passengerRos
 const {
   buildBoardingDocId,
 } = require("./boardingKey");
+// 노선별 「태깅 가능 시간」 게이트(2026-09-29 개선요청 3whpOuuC) — 판정은 전부 이 순수 모듈.
+const {
+  pickDispatch, evaluateBoardGate,
+} = require("./boardWindow");
+
+// 탑승 CF 공용 — 확정 노선의 태깅 가능 시간 밖이면 failed-precondition. 🔴 기록 생성 전에 부를 것.
+// boardGate 가 없으면(opts 없이 해석) 아무것도 하지 않는다. 다른 노선으로 자동 적재하지 않는다.
+function enforceBoardWindow(tag, { companyId, vehicleId, routeId, routeName, boardGate, who }) {
+  if (!boardGate) return;
+  const r = evaluateBoardGate({
+    routeId, routeName,
+    dispatches: boardGate.dispatches,
+    routesById: boardGate.routesById,
+    nowMin: boardGate.nowMin,
+  });
+  if (r.ok) return;
+  console.warn(`[${tag}:거부] 태깅시간 밖 cid=${companyId} veh=${vehicleId} route=${routeId} window=${r.window} now=${boardGate.nowMin} alt=${r.altRouteId || "-"} ${who || ""}`.trim());
+  throw new HttpsError("failed-precondition", r.message);
+}
 // 협력사 포털 인증(2026-09-04 P3-b) — 판정은 전부 이 순수 모듈이 한다.
 const {
   hashPartnerPassword, generateInitialPartnerPassword, checkNewPartnerPassword,
@@ -1845,8 +1898,10 @@ exports.boardStatic = onCall(async (request) => {
 
   // 오늘 배차 해석(비면 failed-precondition) — routeId/routeName/driverId/vehicleNo 확보.
   // selectedRouteId 있으면 선택 노선 매칭 강제(불일치=차단, 2026-07-16 회의 #1).
-  const { today, routeId, routeName, driverId, vehicleNo } =
-    await resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRouteId);
+  const { today, routeId, routeName, driverId, vehicleNo, boardGate } =
+    await resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRouteId, { boardWindow: true });
+  // 노선별 태깅 가능 시간(2026-09-29 3whpOuuC) — 창 밖이면 거부. 멱등 재태깅(alreadyBoarded)도 막는다.
+  enforceBoardWindow("boardStatic", { companyId, vehicleId, routeId, routeName, boardGate, who: `emp=${trimmedEmpNo}` });
 
   // partnerCode 자동 채움 — 위에서 이미 읽은 승객 문서 재사용(협력사별 통계용).
   const partnerCode = passenger.partnerCode || null;
@@ -1945,8 +2000,10 @@ exports.boardNfc = onCall(async (request) => {
   }
 
   // 오늘 배차 해석(비면 failed-precondition) — 정적 QR 과 동일 헬퍼(로직 중복 0).
-  const { today, routeId, routeName, driverId, vehicleNo } =
-    await resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRouteId);
+  const { today, routeId, routeName, driverId, vehicleNo, boardGate } =
+    await resolveStaticDispatchAdmin(db, companyId, vehicleId, selectedRouteId, { boardWindow: true });
+  // 노선별 태깅 가능 시간(2026-09-29 3whpOuuC) — 창 밖이면 카드 조회·nfcRejects·boardings 모두 전에 거부.
+  enforceBoardWindow("boardNfc", { companyId, vehicleId, routeId, routeName, boardGate, who: `uid=${cleanUid}` });
 
   // 카드 → 탑승자 조회. 단일 필드 동등 쿼리라 복합 인덱스 불요(자동 인덱스).
   const passSnap = await db
