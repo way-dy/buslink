@@ -21,5 +21,20 @@
   "display": "standalone",
   "theme_color": "#1E233D",
   "background_color": "#FFFFFF",
-  "orientation": "portrait"
+  "orientation": "portrait",
+  "related_applications": [
+    {
+      "platform": "webapp",
+      "url": "/manifest-employee.json"
+    },
+    {
+      "platform": "webapp",
+      "url": "/manifest-kakao.json"
+    },
+    {
+      "platform": "webapp",
+      "url": "/manifest-kakao-commute.json"
+    }
+  ],
+  "prefer_related_applications": false
 }

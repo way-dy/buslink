@@ -8,6 +8,7 @@
 //  - 이미 설치(standalone)면 렌더 안 함.
 //  - Android/Chrome: beforeinstallprompt 가로채 stash → 하단 배너 → [설치] 시 네이티브 프롬프트.
 //  - Android(BIP 미발화): "Chrome 메뉴 → 홈 화면에 추가" 수동 안내(android-manual).
+//    단 폰에 이미 깔려 있으면(getInstalledRelatedApps) «앱 목록에서 여세요»(android-installed).
 //  - iOS Safari: beforeinstallprompt 미지원이므로 단계 번호 일러스트 바텀시트로 안내.
 //  - **인앱 브라우저(카톡 등): 설치 안내 대신 «인터넷 브라우저로 열기»(inapp, 2026-09-04).**
 //  - 닫기/나중에: **이번 방문에만** 숨김 → 다음에 앱을 열면 다시 뜬다(설치할 때까지).
@@ -101,6 +102,18 @@ function isAndroidPwaCapable() {
   if (/FBAN|FBAV|Instagram|KAKAOTALK|Line\//.test(ua)) return false;
   // Chrome / Edge / Samsung Internet 모두 PWA 설치 지원
   return /Chrome|SamsungBrowser|EdgA/.test(ua);
+}
+
+// 이 앱(같은 origin 의 WebAPK)이 폰에 이미 깔려 있는가 — 안드로이드 크롬 전용 API.
+// 매니페스트 related_applications(platform:"webapp")에 적힌 매니페스트로 설치된 앱만 잡힌다.
+async function hasInstalledSelf() {
+  try {
+    if (!navigator.getInstalledRelatedApps) return false;
+    const apps = await navigator.getInstalledRelatedApps();
+    return Array.isArray(apps) && apps.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 // 최근에 닫았으면(3일 이내) true
@@ -416,11 +429,19 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
     // 안드로이드 Chrome BIP 영구 차단 케이스 폴백: 한 번 설치 후 홈에서 삭제해도
     // Chrome 내부가 "이미 설치됨"으로 기억해 BIP 미발화 → 우리 카드 자체 미표시.
     // 3초까지 BIP 안 오면 수동 안내 모드("android-manual")로 — "Chrome 메뉴 → 홈 화면에 추가" 가이드.
+    //
+    // 🔴 2026-10-01 way «일반 고객은 어려워 한다»: 홈 아이콘만 지운 사람(삼성 «홈 화면에서 삭제»)은
+    //    앱이 폰에 그대로 있어 ⋮ 메뉴로도 «이미 설치됨» 이 뜬다 → 위 수동 설치 안내는 막다른 길.
+    //    getInstalledRelatedApps(매니페스트 related_applications 와 짝)로 «이미 있음» 을 가려
+    //    «앱 목록에서 여세요»(android-installed)로 보낸다. API 가 없거나 실패하면 종전 그대로.
     let androidTimer = null;
     if (isAndroidPwaCapable()) {
-      androidTimer = setTimeout(() => {
+      androidTimer = setTimeout(async () => {
+        const installed = await hasInstalledSelf();
         if (mounted) {
-          setMode((prev) => (prev === "android" ? prev : "android-manual"));
+          setMode((prev) =>
+            prev === "android" ? prev : installed ? "android-installed" : "android-manual"
+          );
         }
       }, 3000);
     }
@@ -528,6 +549,9 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
   // 거래처 표기·아이콘이 오면 그것으로, 아니면 앱 기본(부재=현행).
   const name = brandName || "BusLink";
   const iconSrc = iconHref || appIcon.install;
+  // 이미 깔려 있는 앱 — 폰에 보이는 이름 그대로(홈·앱 목록 라벨 = 매니페스트 short_name).
+  const installedMode = mode === "android-installed";
+  const installedName = brandName || appIcon.title;
 
   return (
     <div
@@ -575,7 +599,11 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
                 marginBottom: 4,
               }}
             >
-              {escapeGuide ? escapeGuide.title : "앱으로 설치하면 더 빠르게 이용할 수 있어요"}
+              {escapeGuide
+                ? escapeGuide.title
+                : installedMode
+                  ? "이미 휴대폰에 앱이 설치되어 있어요"
+                  : "앱으로 설치하면 더 빠르게 이용할 수 있어요"}
             </div>
             <div
               style={{
@@ -586,7 +614,9 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
             >
               {escapeGuide
                 ? escapeGuide.body
-                : isIosMode || mode === "android-manual"
+                : installedMode
+                  ? `홈 화면이나 앱 목록에서 이 아이콘의 «${installedName}» 을 눌러 열어 주세요. 홈 화면에 없으면 화면을 위로 밀면 나오는 앱 목록에 있어요.`
+                  : isIosMode || mode === "android-manual"
                   ? `아래 순서대로 홈 화면에 ${withEulReul(name)} 추가하세요.`
                   : `홈 화면에 ${withEulReul(name)} 추가하면 앱처럼 바로 실행돼요.`}
             </div>
@@ -649,7 +679,7 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
           {/* 설치를 이미 마친 사람에게 방문마다 묻지 않기 위한 통로(2026-09-04).
               인앱 브라우저에서는 띄우지 않는다 — 거기선 애초에 설치가 불가능하므로
               «이미 설치했어요» 가 성립하지 않고, 눌러 봤자 30일간 탈출 안내만 사라진다. */}
-          {mode !== "inapp" ? (
+          {mode !== "inapp" && !installedMode ? (
             <button
               onClick={closeAsInstalled}
               style={{
@@ -670,9 +700,16 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
           )}
 
           <span style={{ display: "flex", gap: 8 }}>
-            <Btn variant="secondary" size="md" onClick={close}>
-              나중에
-            </Btn>
+            {installedMode ? (
+              // 이미 깔린 사람에게 방문마다 같은 말을 하지 않는다 — «이미 설치했어요» 와 같은 30일 침묵.
+              <Btn variant="primary" size="md" onClick={closeAsInstalled}>
+                확인
+              </Btn>
+            ) : (
+              <Btn variant="secondary" size="md" onClick={close}>
+                나중에
+              </Btn>
+            )}
             {mode === "android" && (
               <Btn variant="primary" size="md" onClick={handleInstall}>
                 설치

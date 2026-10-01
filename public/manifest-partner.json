@@ -21,5 +21,12 @@
   "display": "standalone",
   "theme_color": "#0FB5AE",
   "background_color": "#FFFFFF",
-  "orientation": "portrait"
+  "orientation": "portrait",
+  "related_applications": [
+    {
+      "platform": "webapp",
+      "url": "/manifest-partner.json"
+    }
+  ],
+  "prefer_related_applications": false
 }
