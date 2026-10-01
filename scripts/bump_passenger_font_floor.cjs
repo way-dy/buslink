@@ -9,7 +9,10 @@
 const fs = require("fs");
 const path = require("path");
 const ROOT = path.join(__dirname, "..");
-const FILES = ["src/pages/EmployeeApp.js", "src/components/HelpSheet.js", "src/components/PermissionGate.js", "src/components/InstallPrompt.js"];
+// 인자로 파일을 주면 그 파일만(2026-10-01 관리자 콘솔 2차: `-- src/pages/AdminApp.js`).
+const argFiles = process.argv.slice(2).filter((a) => a.startsWith("src/"));
+const FILES = argFiles.length ? argFiles
+  : ["src/pages/EmployeeApp.js", "src/components/HelpSheet.js", "src/components/PermissionGate.js", "src/components/InstallPrompt.js"];
 const MAP = { "10": "12", "10.5": "12", "11": "12.5", "11.5": "13", "12": "13.5", "12.5": "14", "13": "14.5", "14": "15", "14.5": "15.5" };
 const MARK = "/* font-floor-2026-10-01 */";
 const apply = process.argv.includes("--apply");

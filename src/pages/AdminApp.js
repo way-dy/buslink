@@ -1,3 +1,4 @@
+/* font-floor-2026-10-01 */
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import QRCode from "qrcode";
 import { Map, MapMarker, Polyline, CustomOverlayMap, Circle } from "react-kakao-maps-sdk";
@@ -306,7 +307,7 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
               <select
                 value={activeCompanyId || ""}
                 onChange={(e) => setSelectedCompanyId(e.target.value)}
-                style={{ background:"transparent", border:"1px solid var(--color-line)", borderRadius:6, padding:"3px 6px", fontSize:11, color:"var(--color-label)" }}
+                style={{ background:"transparent", border:"1px solid var(--color-line)", borderRadius:6, padding:"3px 6px", fontSize:12.5, color:"var(--color-label)" }}
                 title="회사 전환(슈퍼관리자 전용)"
               >
                 {companies.length === 0 && <option value={companyId}>{companyId}</option>}
@@ -334,7 +335,7 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
                 style={{ background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:8, padding:"5px 9px", color:"var(--color-label)", fontSize:18, cursor:"pointer", lineHeight:1 }}>
                 ☰
               </button>
-              <span style={{ display:"flex", alignItems:"center", gap:7, fontSize:14, fontWeight:700, color:"var(--color-primary-deep)" }}>
+              <span style={{ display:"flex", alignItems:"center", gap:7, fontSize:15, fontWeight:700, color:"var(--color-primary-deep)" }}>
                 <Icon name={TAB_ICONS[tab]} size={16} /> {TABS[tab]}
               </span>
             </div>
@@ -343,7 +344,7 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
                 <select
                   value={activeCompanyId || ""}
                   onChange={(e) => setSelectedCompanyId(e.target.value)}
-                  style={{ background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:6, padding:"3px 5px", fontSize:11, color:"var(--color-label)", maxWidth:120 }}
+                  style={{ background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:6, padding:"3px 5px", fontSize:12.5, color:"var(--color-label)", maxWidth:120 }}
                   title="회사 전환"
                 >
                   {companies.length === 0 && <option value={companyId}>{companyId}</option>}
@@ -354,9 +355,9 @@ export default function AdminApp({ user, companyId, role, allowedPartnerCodes })
                   ))}
                 </select>
               ) : (
-                <span style={{ fontSize:11, color:"var(--color-label-alt)" }}>{companyId}</span>
+                <span style={{ fontSize:12.5, color:"var(--color-label-alt)" }}>{companyId}</span>
               )}
-              <button style={{ ...S.logoutBtn, padding:"5px 10px", fontSize:11 }} onClick={() => signOut(auth)}>로그아웃</button>
+              <button style={{ ...S.logoutBtn, padding:"5px 10px", fontSize:12.5 }} onClick={() => signOut(auth)}>로그아웃</button>
             </div>
           </div>
         )}
@@ -527,12 +528,12 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
       <div style={S.panelHeader}>
         <div>
           <span style={{ fontSize:16, fontWeight:700, color:"var(--color-label)" }}>🏠 대시보드</span>
-          <div style={{ fontSize:12, color:"var(--color-label-mute)", marginTop:2 }}>
+          <div style={{ fontSize:13.5, color:"var(--color-label-mute)", marginTop:2 }}>
             {new Date().toLocaleDateString("ko-KR", { year:"numeric", month:"long", day:"numeric", weekday:"short" })}
           </div>
         </div>
         <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
-          <span style={{ fontSize:11, color:"var(--color-label-alt)" }}>거래처:</span>
+          <span style={{ fontSize:12.5, color:"var(--color-label-alt)" }}>거래처:</span>
           <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} allowedCodes={allowed} />
           <button style={S.addBtn} onClick={() => onNav(1)}>🗺 실시간 관제 →</button>
         </div>
@@ -543,9 +544,9 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
         <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:20 }}>
           {stats.map(s => (
             <div key={s.label} style={{ background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:12, padding:"18px 20px", boxShadow:"var(--shadow-emphasize)" }}>
-              <div style={{ fontSize:12, color:"var(--color-label-mute)", marginBottom:8 }}>{s.label}</div>
+              <div style={{ fontSize:13.5, color:"var(--color-label-mute)", marginBottom:8 }}>{s.label}</div>
               <div style={{ fontSize:30, fontWeight:800, fontFamily:"var(--font-brand)", letterSpacing:"-0.02em", color:s.color }}>{s.value}</div>
-              <div style={{ fontSize:11, color:"var(--color-label-alt)", marginTop:4 }}>{s.sub}</div>
+              <div style={{ fontSize:12.5, color:"var(--color-label-alt)", marginTop:4 }}>{s.sub}</div>
             </div>
           ))}
         </div>
@@ -568,7 +569,7 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
                   {[...filteredDispatches].sort((a,b) => a.departTime > b.departTime ? 1 : -1).map(d => (
                     <tr key={d.id} style={S.tr}>
                       <td style={S.td}><span style={S.timeBadge}>{d.departTime}</span></td>
-                      <td style={{ ...S.td, color:"var(--color-primary)", fontWeight:600, fontSize:12, maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{d.routeName}</td>
+                      <td style={{ ...S.td, color:"var(--color-primary)", fontWeight:600, fontSize:13.5, maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{d.routeName}</td>
                       <td style={S.td}>{driverName(d.driverId)}</td>
                     </tr>
                   ))}
@@ -596,7 +597,7 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
                     return (
                     <tr key={d.id} style={S.tr}>
                       <td style={{ ...S.td, fontWeight:600 }}>{d.name}</td>
-                      <td style={{ ...S.td, color:"var(--color-label-mute)", fontSize:12 }}>{d.vehicleNo || "–"}</td>
+                      <td style={{ ...S.td, color:"var(--color-label-mute)", fontSize:13.5 }}>{d.vehicleNo || "–"}</td>
                       <td style={S.td}>
                         {noGps ? (
                           <span style={{ ...S.statusBadge, background:"#FFF4E5", color:"#B26A00" }} title="운행중인데 GPS 위치 신호가 들어오지 않습니다">
@@ -626,10 +627,10 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
               <button style={S.editBtn} onClick={() => onNav(10)}>협력사 관리</button>
             </div>
           </div>
-          <div style={{ padding:"8px 18px", borderBottom:"1px solid var(--color-line)", background:"var(--color-bg-soft)", display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", fontSize:12 }}>
+          <div style={{ padding:"8px 18px", borderBottom:"1px solid var(--color-line)", background:"var(--color-bg-soft)", display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", fontSize:13.5 }}>
             <span style={{ color:"var(--color-label-mute)", fontWeight:600 }}>🔗 협력사 포털</span>
             <span style={{ fontFamily:"monospace", color:"var(--color-primary-deep)", wordBreak:"break-all" }}>{portalUrl}</span>
-            <button onClick={copyPortalUrl} style={{ ...S.editBtn, marginRight:0, fontSize:11, padding:"3px 8px" }}>
+            <button onClick={copyPortalUrl} style={{ ...S.editBtn, marginRight:0, fontSize:12.5, padding:"3px 8px" }}>
               {portalCopied ? "✓ 복사됨" : "복사"}
             </button>
             <span style={{ color:"var(--color-label-mute)" }}>· 발급한 업체코드와 함께 협력사에 전달하세요</span>
@@ -648,7 +649,7 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
                 {partnerStats.map(p => (
                   <tr key={p.code} style={S.tr}>
                     <td style={{ ...S.td, fontWeight:600 }}>
-                      {p.name}{!p.active && <span style={{ fontSize:10, color:"var(--color-label-mute)", marginLeft:4 }}>· 비활성</span>}
+                      {p.name}{!p.active && <span style={{ fontSize:12, color:"var(--color-label-mute)", marginLeft:4 }}>· 비활성</span>}
                     </td>
                     <td style={S.td}>{p.routeCount}</td>
                     <td style={S.td}>{p.dispatchCount}</td>
@@ -656,13 +657,13 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
                     <td style={S.td}>{p.boardingCount}</td>
                     <td style={S.td}>
                       <button onClick={() => copyPartnerCode(p.code)} title="업체코드 복사"
-                        style={{ ...S.editBtn, marginRight:0, fontSize:11, fontFamily:"monospace" }}>
+                        style={{ ...S.editBtn, marginRight:0, fontSize:12.5, fontFamily:"monospace" }}>
                         {copiedCode === p.code ? "✓ 복사됨" : `${p.code} 📋`}
                       </button>
                     </td>
                     <td style={S.td}>
                       <button onClick={() => onManageRoutes && onManageRoutes(p.code)} title="이 거래처의 노선 관리로 이동"
-                        style={{ ...S.editBtn, marginRight:0, fontSize:11 }}>🚌 노선 관리</button>
+                        style={{ ...S.editBtn, marginRight:0, fontSize:12.5 }}>🚌 노선 관리</button>
                     </td>
                   </tr>
                 ))}
@@ -677,7 +678,7 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
             <div style={{ fontWeight:700, marginBottom:10, color:"#B26A00" }}>⚠ 운행중인데 GPS 미수신 ({noGpsDrivers.length}대)</div>
             <div style={{ display:"flex", flexWrap:"wrap", gap:10 }}>
               {noGpsDrivers.map(d => (
-                <div key={d.id} style={{ background:"#FFFBF4", border:"1px solid #F0C36D", borderRadius:8, padding:"8px 14px", fontSize:12 }}>
+                <div key={d.id} style={{ background:"#FFFBF4", border:"1px solid #F0C36D", borderRadius:8, padding:"8px 14px", fontSize:13.5 }}>
                   <span style={{ fontWeight:700, color:"var(--color-label)" }}>{d.name}</span>
                   <span style={{ color:"var(--color-label-mute)", marginLeft:8 }}>{d.vehicleNo || "차량 미지정"}</span>
                   <span style={{ color:"#B26A00", marginLeft:8 }}>위치 신호 없음</span>
@@ -690,10 +691,10 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
         {/* GPS 수신 현황 */}
         {filteredGps.length > 0 && (
           <div style={{ background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:12, padding:"14px 18px", marginTop:16, boxShadow:"var(--shadow-emphasize)" }}>
-            <div style={{ fontWeight:700, marginBottom:12, color:"var(--color-label)" }}>📡 실시간 GPS 수신 차량 ({filteredGps.length}대){partnerCode !== "전체" && <span style={{ fontSize:12, color:"var(--color-label-mute)", marginLeft:8, fontWeight:500 }}>(선택 협력사)</span>}</div>
+            <div style={{ fontWeight:700, marginBottom:12, color:"var(--color-label)" }}>📡 실시간 GPS 수신 차량 ({filteredGps.length}대){partnerCode !== "전체" && <span style={{ fontSize:13.5, color:"var(--color-label-mute)", marginLeft:8, fontWeight:500 }}>(선택 협력사)</span>}</div>
             <div style={{ display:"flex", flexWrap:"wrap", gap:10 }}>
               {filteredGps.map(v => (
-                <div key={v.id} style={{ background:"var(--color-bg-alt)", border:"1px solid var(--color-line)", borderRadius:8, padding:"8px 14px", fontSize:12 }}>
+                <div key={v.id} style={{ background:"var(--color-bg-alt)", border:"1px solid var(--color-line)", borderRadius:8, padding:"8px 14px", fontSize:13.5 }}>
                   <span style={{ color:"var(--color-positive)", marginRight:6 }}>●</span>
                   <span style={{ fontWeight:700, color:"var(--color-label)" }}>{v.vehicleNo || v.vehicleId}</span>
                   <span style={{ color:"var(--color-label-mute)", marginLeft:8 }}>{v.driverName}</span>
@@ -708,14 +709,14 @@ function DashboardTab({ companyId, drivers, vehicles, onNav, onManageRoutes, all
           <div style={S.overlay}>
             <form style={S.modal} onSubmit={(e) => { e.preventDefault(); handleAddPartner(); }}>
               <div style={S.modalTitle}>+ 거래처(협력사) 신규 등록</div>
-              <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:8 }}>
+              <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginBottom:8 }}>
                 업체코드가 발급되고, 발급한 본인 계정에서 바로 열람·관리됩니다. 협력사에 코드를 전달하세요.
               </div>
               <label style={S.label}>거래처(업체) 이름</label>
               <input style={S.input} autoFocus placeholder="예: 한화판교R&D센터" value={newPartnerName}
                 onChange={(e) => setNewPartnerName(e.target.value)} />
               <div style={{ display:"flex", gap:8, marginTop:12 }}>
-                <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:13 }}
+                <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:14.5 }}
                   disabled={addingPartner} onClick={() => { setShowAddPartner(false); setNewPartnerName(""); }}>취소</button>
                 <button type="submit" style={{ ...S.addBtn, flex:2, padding:"9px 0" }} disabled={addingPartner}>
                   {addingPartner ? "발급 중..." : "발급"}
@@ -1070,7 +1071,7 @@ function MapTab({ companyId, allowed, drivers }) {
             선택 변경 시 선택 차량 해제: 필터에서 빠진 차량의 상세 패널이 남아 있으면
             "안 보이는 차량을 보고 있는" 상태가 된다. */}
         <div style={MS.topPartner}>
-          <span style={{ fontSize:11, fontWeight:600, color:"var(--color-label-alt)", flexShrink:0 }}>거래처</span>
+          <span style={{ fontSize:12.5, fontWeight:600, color:"var(--color-label-alt)", flexShrink:0 }}>거래처</span>
           <PartnerFilter companyId={companyId} value={partnerCode}
             onChange={(c) => { setPartnerCode(c); setSelected(null); }}
             allowedCodes={allowed}
@@ -1087,7 +1088,7 @@ function MapTab({ companyId, allowed, drivers }) {
         {!isPastDate && (
           <button onClick={handleRefresh} disabled={refreshing}
             title="GPS 위치를 즉시 다시 불러옵니다"
-            style={{ display:"inline-flex", alignItems:"center", gap:4, padding:"4px 10px", borderRadius:8, border:"1px solid var(--color-line)", background:"var(--color-bg-soft)", color:"var(--color-label-mute)", cursor: refreshing ? "default":"pointer", fontFamily:"inherit", fontSize:12, fontWeight:700, opacity: refreshing ? 0.6:1 }}>
+            style={{ display:"inline-flex", alignItems:"center", gap:4, padding:"4px 10px", borderRadius:8, border:"1px solid var(--color-line)", background:"var(--color-bg-soft)", color:"var(--color-label-mute)", cursor: refreshing ? "default":"pointer", fontFamily:"inherit", fontSize:13.5, fontWeight:700, opacity: refreshing ? 0.6:1 }}>
             <span style={{ display:"inline-block", animation: refreshing ? "blspin 0.8s linear infinite":"none" }}>↻</span>
             {refreshing ? "새로고침 중" : "새로고침"}
           </button>
@@ -1101,7 +1102,7 @@ function MapTab({ companyId, allowed, drivers }) {
           <span style={MS.railTitle}>운행 중인 차량</span>
           {selected ? (
             <button onClick={() => setSelected(null)}
-              style={{ fontSize:11, fontWeight:700, color:"var(--color-primary-deep)", background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:6, padding:"3px 8px", cursor:"pointer", fontFamily:"inherit" }}
+              style={{ fontSize:12.5, fontWeight:700, color:"var(--color-primary-deep)", background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:6, padding:"3px 8px", cursor:"pointer", fontFamily:"inherit" }}
               title="선택 해제 — 전체 차량 보기">✕ 전체 보기</button>
           ) : (
             <Pill tone={liveCount > 0 ? "positive" : "neutral"} dot>{liveCount}대</Pill>
@@ -1112,7 +1113,7 @@ function MapTab({ companyId, allowed, drivers }) {
             /* 필터 때문에 빈 것인지 실제로 없는 것인지 화면에서 구분되게 한다 */
             <div style={MS.empty}>
               운행 중인 차량 없음
-              {partnerCode !== "전체" && <div style={{ fontSize:11, marginTop:6 }}>거래처 필터가 걸려 있습니다</div>}
+              {partnerCode !== "전체" && <div style={{ fontSize:12.5, marginTop:6 }}>거래처 필터가 걸려 있습니다</div>}
             </div>
           ) : vehicles.map(v => {
             const on = selected?.id === v.id;
@@ -1142,9 +1143,9 @@ function MapTab({ companyId, allowed, drivers }) {
         {/* ⚠ GPS 미수신(운행중) — 좌표 없어 지도 마커 못 찍음 → 레일 경고로 표기(2026-06-23) */}
         {noGpsRunning.length > 0 && (
           <div style={{ borderTop:"1px solid var(--color-line)", padding:"10px 12px", background:"#FFF4E5" }}>
-            <div style={{ fontSize:12, fontWeight:700, color:"#B26A00", marginBottom:8 }}>⚠ GPS 미수신 (운행중) {noGpsRunning.length}</div>
+            <div style={{ fontSize:13.5, fontWeight:700, color:"#B26A00", marginBottom:8 }}>⚠ GPS 미수신 (운행중) {noGpsRunning.length}</div>
             {noGpsRunning.map(d => (
-              <div key={d.id} style={{ fontSize:11, color:"var(--color-label)", padding:"3px 0" }}>
+              <div key={d.id} style={{ fontSize:12.5, color:"var(--color-label)", padding:"3px 0" }}>
                 <div>
                   <span style={{ fontWeight:700 }}>{d.name}</span>
                   <span style={{ color:"var(--color-label-mute)", marginLeft:6 }}>{d.vehicleNo || "차량 미지정"}</span>
@@ -1153,28 +1154,28 @@ function MapTab({ companyId, allowed, drivers }) {
                 {/* 운행이 이미 끝났는데 상태만 "운행중" 으로 남은 기사를 관리자가 되돌린다
                     (기사가 운행 종료를 못 누른 채 앱 종료·폰 꺼짐 등). 2026-07-28 */}
                 {forceDone[d.id] ? (
-                  <div style={{ fontSize:10, color:"var(--color-positive)", marginTop:2 }}>✓ 대기 상태로 되돌렸습니다</div>
+                  <div style={{ fontSize:12, color:"var(--color-positive)", marginTop:2 }}>✓ 대기 상태로 되돌렸습니다</div>
                 ) : forceConfirm === d.id ? (
                   <div style={{ marginTop:4, padding:"6px 8px", background:"#fff", border:"1px solid #F0C68A", borderRadius:6 }}>
-                    <div style={{ fontSize:10, color:"var(--color-label)", lineHeight:1.5 }}>
+                    <div style={{ fontSize:12, color:"var(--color-label)", lineHeight:1.5 }}>
                       <b>{d.name}</b> 기사를 <b>대기</b> 상태로 되돌립니다.
                       {d.startedAt && <><br />운행 시작 기록: {String(d.startedAt).slice(0, 10)}</>}
                       <br />운행 중인 기사라면 실행하지 마세요.
                     </div>
                     <div style={{ display:"flex", gap:6, marginTop:6 }}>
                       <button disabled={forceBusy === d.id} onClick={() => handleForceEndDriver(d)}
-                        style={{ flex:1, fontSize:10, fontWeight:700, padding:"5px 0", borderRadius:5, border:"none", background:"var(--color-destructive)", color:"#fff", cursor: forceBusy === d.id ? "default":"pointer", fontFamily:"inherit", opacity: forceBusy === d.id ? .6:1 }}>
+                        style={{ flex:1, fontSize:12, fontWeight:700, padding:"5px 0", borderRadius:5, border:"none", background:"var(--color-destructive)", color:"#fff", cursor: forceBusy === d.id ? "default":"pointer", fontFamily:"inherit", opacity: forceBusy === d.id ? .6:1 }}>
                         {forceBusy === d.id ? "처리 중…" : "운행 강제 종료"}
                       </button>
                       <button onClick={() => setForceConfirm(null)}
-                        style={{ flex:1, fontSize:10, fontWeight:700, padding:"5px 0", borderRadius:5, border:"1px solid var(--color-line)", background:"#fff", color:"var(--color-label-mute)", cursor:"pointer", fontFamily:"inherit" }}>
+                        style={{ flex:1, fontSize:12, fontWeight:700, padding:"5px 0", borderRadius:5, border:"1px solid var(--color-line)", background:"#fff", color:"var(--color-label-mute)", cursor:"pointer", fontFamily:"inherit" }}>
                         취소
                       </button>
                     </div>
                   </div>
                 ) : (
                   <button onClick={() => setForceConfirm(d.id)}
-                    style={{ marginTop:2, fontSize:10, fontWeight:700, color:"#B26A00", background:"transparent", border:"1px solid #E8B87A", borderRadius:5, padding:"2px 6px", cursor:"pointer", fontFamily:"inherit" }}>
+                    style={{ marginTop:2, fontSize:12, fontWeight:700, color:"#B26A00", background:"transparent", border:"1px solid #E8B87A", borderRadius:5, padding:"2px 6px", cursor:"pointer", fontFamily:"inherit" }}>
                     운행 강제 종료
                   </button>
                 )}
@@ -1187,32 +1188,32 @@ function MapTab({ companyId, allowed, drivers }) {
             뒷좌석 QR/태그 확인이 없는 운행. 확인은 기사가 **차 뒤까지 가야** 찍힌다. */}
         {(sleepPending.length > 0 || sleepSummary.total > 0) && (
           <div style={{ borderTop:"1px solid var(--color-line)", padding:"10px 12px", background:"var(--color-bg-soft)" }}>
-            <div style={{ fontSize:12, fontWeight:700, color:"var(--color-label)", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+            <div style={{ fontSize:13.5, fontWeight:700, color:"var(--color-label)", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
               <span>🛏 빈 차 확인</span>
-              <span style={{ fontSize:11, fontWeight:600, color: sleepPending.length ? "var(--color-destructive)" : "var(--color-positive)" }}>
+              <span style={{ fontSize:12.5, fontWeight:600, color: sleepPending.length ? "var(--color-destructive)" : "var(--color-positive)" }}>
                 {sleepPending.length ? `미확인 ${sleepPending.length}건` : `완료 ${sleepSummary.done}건`}
               </span>
             </div>
             {sleepSuspicious.length > 0 && (
               <div style={{ marginTop:8, padding:"8px 10px", background:"var(--color-bg)", border:"1px solid var(--color-cautionary)", borderRadius:8 }}>
-                <div style={{ fontSize:11, fontWeight:800, color:"var(--color-cautionary)" }}>확인 방식 점검 {sleepSuspicious.length}건</div>
+                <div style={{ fontSize:12.5, fontWeight:800, color:"var(--color-cautionary)" }}>확인 방식 점검 {sleepSuspicious.length}건</div>
                 {sleepSuspicious.slice(0, 4).map(({ d, a }) => (
-                  <div key={d.id} style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:3 }}>
+                  <div key={d.id} style={{ fontSize:12.5, color:"var(--color-label-mute)", marginTop:3 }}>
                     {d.vehicleNo || d.vehicleId} · {sleepAuditLabel(a.reasons)}
                   </div>
                 ))}
               </div>
             )}
             {sleepPending.length === 0 ? (
-              <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:6 }}>
+              <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginTop:6 }}>
                 {sleepSummary.waiting > 0 ? `확인 대기 ${sleepSummary.waiting}건 · ` : ""}운행 종료분 모두 확인되었습니다
               </div>
             ) : sleepPending.map(d => (
               <div key={d.id} style={{ marginTop:8, padding:"8px 10px", background:"var(--color-bg)", border:"1px solid var(--color-destructive)", borderRadius:8 }}>
-                <div style={{ fontSize:12, fontWeight:700, color:"var(--color-label)" }}>
+                <div style={{ fontSize:13.5, fontWeight:700, color:"var(--color-label)" }}>
                   {d.vehicleNo || d.vehicleId || "차량"} · {d.routeName || d.routeId}
                 </div>
-                <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:2 }}>
+                <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginTop:2 }}>
                   {d.driverName ? `${d.driverName} · ` : ""}종점 도착 뒤 {formatWaited(d.waitedMs)} 확인 없음
                 </div>
               </div>
@@ -1224,19 +1225,19 @@ function MapTab({ companyId, allowed, drivers }) {
             지울지는 마지막 신호 경과시간을 보고 운영자가 판단(자동 삭제 안 함). */}
         {visibleStaleSignals.length > 0 && (
           <div style={{ borderTop:"1px solid var(--color-line)", padding:"10px 12px", background:"var(--color-bg-soft)" }}>
-            <div style={{ fontSize:12, fontWeight:700, color:"var(--color-label)", marginBottom:2 }}>
+            <div style={{ fontSize:13.5, fontWeight:700, color:"var(--color-label)", marginBottom:2 }}>
               🧹 잔존 운행 신호 {visibleStaleSignals.length}
             </div>
-            <div style={{ fontSize:10, color:"var(--color-label-mute)", marginBottom:8, lineHeight:1.5 }}>
+            <div style={{ fontSize:12, color:"var(--color-label-mute)", marginBottom:8, lineHeight:1.5 }}>
               마지막 신호가 {STALE_SIGNAL_MIN}분 넘게 끊긴 차량입니다. 승객·직원 화면에는 아직 <b>운행중</b>으로 보입니다.
             </div>
             {visibleStaleSignals.map(s => (
               <div key={s.id} style={{ padding:"6px 0", borderTop:"1px solid var(--color-line)" }}>
-                <div style={{ fontSize:11, color:"var(--color-label)" }}>
+                <div style={{ fontSize:12.5, color:"var(--color-label)" }}>
                   <span style={{ fontWeight:700 }}>{s.routeName || "노선 미지정"}</span>
                   <span style={{ color:"var(--color-label-mute)", marginLeft:6 }}>{s.vehicleNo || s.vehicleId}</span>
                 </div>
-                <div style={{ fontSize:10, color:"var(--color-label-mute)", marginTop:2, display:"flex", flexWrap:"wrap", gap:6, alignItems:"center" }}>
+                <div style={{ fontSize:12, color:"var(--color-label-mute)", marginTop:2, display:"flex", flexWrap:"wrap", gap:6, alignItems:"center" }}>
                   <span>기사 {s.driverName || "–"}</span>
                   <span style={{ color:"var(--color-destructive)", fontWeight:700 }}>마지막 신호 {s.ageLabel}</span>
                   <span style={{ border:"1px solid var(--color-line)", borderRadius:4, padding:"0 4px", background:"#fff" }}>
@@ -1249,10 +1250,10 @@ function MapTab({ companyId, allowed, drivers }) {
                   )}
                 </div>
                 {forceDone[s.id] ? (
-                  <div style={{ fontSize:10, color:"var(--color-positive)", marginTop:4 }}>✓ 정리했습니다</div>
+                  <div style={{ fontSize:12, color:"var(--color-positive)", marginTop:4 }}>✓ 정리했습니다</div>
                 ) : forceConfirm === s.id ? (
                   <div style={{ marginTop:5, padding:"7px 8px", background:"#fff", border:"1px solid var(--color-line)", borderRadius:6 }}>
-                    <div style={{ fontSize:10, color:"var(--color-label)", lineHeight:1.55 }}>
+                    <div style={{ fontSize:12, color:"var(--color-label)", lineHeight:1.55 }}>
                       이 신호를 지우면 승객·직원 화면에서 <b>운행중</b> 표시가 사라집니다.
                       <br />마지막 신호: <b>{s.ageLabel}</b>
                       {s.ownerDriverId && <><br />{s.ownerDriverName} 기사도 <b>대기</b> 상태로 되돌립니다.</>}
@@ -1263,18 +1264,18 @@ function MapTab({ companyId, allowed, drivers }) {
                     </div>
                     <div style={{ display:"flex", gap:6, marginTop:6 }}>
                       <button disabled={forceBusy === s.id} onClick={() => handleForceEnd(s)}
-                        style={{ flex:1, fontSize:10, fontWeight:700, padding:"5px 0", borderRadius:5, border:"none", background:"var(--color-destructive)", color:"#fff", cursor: forceBusy === s.id ? "default":"pointer", fontFamily:"inherit", opacity: forceBusy === s.id ? .6:1 }}>
+                        style={{ flex:1, fontSize:12, fontWeight:700, padding:"5px 0", borderRadius:5, border:"none", background:"var(--color-destructive)", color:"#fff", cursor: forceBusy === s.id ? "default":"pointer", fontFamily:"inherit", opacity: forceBusy === s.id ? .6:1 }}>
                         {forceBusy === s.id ? "처리 중…" : "운행 강제 종료"}
                       </button>
                       <button onClick={() => setForceConfirm(null)}
-                        style={{ flex:1, fontSize:10, fontWeight:700, padding:"5px 0", borderRadius:5, border:"1px solid var(--color-line)", background:"#fff", color:"var(--color-label-mute)", cursor:"pointer", fontFamily:"inherit" }}>
+                        style={{ flex:1, fontSize:12, fontWeight:700, padding:"5px 0", borderRadius:5, border:"1px solid var(--color-line)", background:"#fff", color:"var(--color-label-mute)", cursor:"pointer", fontFamily:"inherit" }}>
                         취소
                       </button>
                     </div>
                   </div>
                 ) : (
                   <button onClick={() => setForceConfirm(s.id)}
-                    style={{ marginTop:4, fontSize:10, fontWeight:700, color:"var(--color-primary-deep)", background:"#fff", border:"1px solid var(--color-line)", borderRadius:5, padding:"3px 8px", cursor:"pointer", fontFamily:"inherit" }}>
+                    style={{ marginTop:4, fontSize:12, fontWeight:700, color:"var(--color-primary-deep)", background:"#fff", border:"1px solid var(--color-line)", borderRadius:5, padding:"3px 8px", cursor:"pointer", fontFamily:"inherit" }}>
                     운행 강제 종료
                   </button>
                 )}
@@ -1358,7 +1359,7 @@ function RouteTimelineView({ companyId, routes, routeStops, dispatches, vehicles
       <div style={MS.routeWrap}>
         <div style={MS.routeEmpty}>
           {isPastDate ? `${selectedDate} 배차 내역이 없습니다.` : "오늘 배차된 노선이 없습니다."}<br/>
-          <span style={{ fontSize:12, color:"var(--color-label-alt)" }}>
+          <span style={{ fontSize:13.5, color:"var(--color-label-alt)" }}>
             {isPastDate ? "다른 날짜를 선택하거나 배차 관리에서 확인하세요." : "배차 관리 탭에서 오늘 배차를 등록하세요."}
           </span>
         </div>
@@ -1510,7 +1511,7 @@ function RouteTimelineCard({ dispatch, route, stops, vehicle, selectedDate, isPa
                         : isNext ? "var(--color-primary)"
                         : "var(--color-atomic-coolNeutral-85)",
                     }}>
-                      {arrived && <span style={{ color:"#fff", fontSize:10, fontWeight:800 }}>✓</span>}
+                      {arrived && <span style={{ color:"#fff", fontSize:12, fontWeight:800 }}>✓</span>}
                     </div>
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={MS.stopName}>{i+1}. {s.name}</div>
@@ -1536,7 +1537,7 @@ function RouteTimelineCard({ dispatch, route, stops, vehicle, selectedDate, isPa
                           )}
                           {lab.label && lab.tone !== "mute" && (
                             <span style={{
-                              fontSize:11, fontWeight:800,
+                              fontSize:12.5, fontWeight:800,
                               padding:"2px 9px", borderRadius:999,
                               background: labBg, color: labColor,
                               border: `1px solid ${labColor}`,
@@ -1545,7 +1546,7 @@ function RouteTimelineCard({ dispatch, route, stops, vehicle, selectedDate, isPa
                         </div>
                       )}
                       {!e?.plannedAt && !e?.estimatedAt && (
-                        <div style={{ fontSize:11, color:"var(--color-label-alt)", marginTop:3 }}>
+                        <div style={{ fontSize:12.5, color:"var(--color-label-alt)", marginTop:3 }}>
                           {s.address || "정류장 진입시각 미설정"}
                         </div>
                       )}
@@ -1555,7 +1556,7 @@ function RouteTimelineCard({ dispatch, route, stops, vehicle, selectedDate, isPa
                   {showBus && (
                     <div style={MS.busRow}>
                       <div style={MS.busDot}>🚌</div>
-                      <div style={{ fontSize:11, color:"var(--color-primary)", fontWeight:700 }}>
+                      <div style={{ fontSize:12.5, color:"var(--color-primary)", fontWeight:700 }}>
                         현재 위치 {vehicle && typeof vehicle.speed === "number" && (
                           <span style={{ color:"var(--color-label-mute)", fontWeight:500, marginLeft:4 }}>
                             ({Math.round(vehicle.speed)} km/h)
@@ -1580,9 +1581,9 @@ const MS = {
   map:{ position:"absolute", inset:0, width:"100%", height:"100%" },
   topbar:{ position:"absolute", top:12, left:12, right:12, height:52, display:"flex", alignItems:"center", gap:14, padding:"0 18px", background:"rgba(255,255,255,0.92)", backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)", border:"1px solid var(--color-line)", borderRadius:14, boxShadow:"var(--shadow-float)", zIndex:20 },
   topDivider:{ width:1, height:20, background:"var(--color-line)" },
-  topCo:{ fontSize:13, fontWeight:600, color:"var(--color-label-mute)" },
-  topTab:{ marginLeft:24, display:"flex", alignItems:"center", gap:6, fontSize:13, fontWeight:700, color:"var(--color-primary)", background:"var(--color-primary-soft)", padding:"7px 12px", borderRadius:8 },
-  topNow:{ marginLeft:"auto", display:"flex", alignItems:"center", gap:7, fontSize:12, fontWeight:600, color:"var(--color-label-mute)" },
+  topCo:{ fontSize:14.5, fontWeight:600, color:"var(--color-label-mute)" },
+  topTab:{ marginLeft:24, display:"flex", alignItems:"center", gap:6, fontSize:14.5, fontWeight:700, color:"var(--color-primary)", background:"var(--color-primary-soft)", padding:"7px 12px", borderRadius:8 },
+  topNow:{ marginLeft:"auto", display:"flex", alignItems:"center", gap:7, fontSize:13.5, fontWeight:600, color:"var(--color-label-mute)" },
   leftRail:{ position:"absolute", top:76, left:12, bottom:12, width:"min(280px,32vw)", minWidth:200, display:"flex", flexDirection:"column", background:"var(--color-bg)", borderRadius:16, boxShadow:"var(--shadow-float)", zIndex:10, overflow:"hidden" },
   // ── 모바일 전용(2026-08-26 way "왼쪽 메뉴가 가리지 않게 · 세로글씨 안 나오게") ──
   // 🔴 탑바가 세로글씨의 근인이었다: 컨트롤 9개를 **고정 height:52 · 줄바꿈 없음** 한 줄에
@@ -1596,65 +1597,65 @@ const MS = {
   railHead:{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 16px 12px", borderBottom:"1px solid var(--color-bg-soft)", flexShrink:0 },
   railTitle:{ fontSize:15, fontWeight:700, color:"var(--color-label)" },
   railBody:{ flex:1, overflowY:"auto", padding:"8px" },
-  empty:{ color:"var(--color-label-alt)", fontSize:13, textAlign:"center", padding:"32px 16px" },
+  empty:{ color:"var(--color-label-alt)", fontSize:14.5, textAlign:"center", padding:"32px 16px" },
   vCard:{ display:"flex", gap:10, padding:"11px 10px", borderRadius:10, marginTop:2, cursor:"pointer", transition:"background .12s" },
   vCardOn:{ background:"var(--color-primary-soft)" },
   vBar:{ width:4, alignSelf:"stretch", borderRadius:4, flexShrink:0 },
   vTop:{ display:"flex", alignItems:"center", gap:7, marginBottom:3 },
   vName:{ fontSize:13.5, fontWeight:700 },
-  vSub:{ fontSize:11.5, color:"var(--color-label-mute)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
-  vMeta:{ fontSize:11, color:"var(--color-label-alt)", marginTop:1 },
-  vSpeed:{ fontSize:14, fontWeight:800, color:"var(--color-label)", fontFamily:"var(--font-mono)" },
-  vUnit:{ fontSize:10, fontWeight:600, color:"var(--color-label-alt)", marginLeft:2 },
-  vAgo:{ fontSize:10, color:"var(--color-label-alt)", marginTop:2 },
+  vSub:{ fontSize:13, color:"var(--color-label-mute)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
+  vMeta:{ fontSize:12.5, color:"var(--color-label-alt)", marginTop:1 },
+  vSpeed:{ fontSize:15, fontWeight:800, color:"var(--color-label)", fontFamily:"var(--font-mono)" },
+  vUnit:{ fontSize:12, fontWeight:600, color:"var(--color-label-alt)", marginLeft:2 },
+  vAgo:{ fontSize:12, color:"var(--color-label-alt)", marginTop:2 },
   detail:{ position:"absolute", top:76, right:12, bottom:12, width:320, display:"flex", flexDirection:"column", background:"var(--color-bg)", borderRadius:16, boxShadow:"var(--shadow-float)", zIndex:10, overflow:"hidden" },
   detailHead:{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:10, padding:"18px 18px 14px", borderBottom:"1px solid var(--color-bg-soft)" },
-  detailAgo:{ fontSize:11, color:"var(--color-label-mute)" },
+  detailAgo:{ fontSize:12.5, color:"var(--color-label-mute)" },
   detailNo:{ fontFamily:"var(--font-brand)", fontSize:26, fontWeight:800, letterSpacing:"-0.02em", marginTop:8, color:"var(--color-label)" },
-  detailRoute:{ fontSize:13, color:"var(--color-label-mute)", marginTop:2 },
+  detailRoute:{ fontSize:14.5, color:"var(--color-label-mute)", marginTop:2 },
   closeBtn:{ width:32, height:32, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", border:"none", background:"var(--color-bg-alt)", borderRadius:8, color:"var(--color-label-mute)", cursor:"pointer", fontFamily:"inherit" },
   statGrid:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, padding:"16px 18px", borderBottom:"1px solid var(--color-bg-soft)" },
   stat:{},
-  statLabel:{ fontSize:11, fontWeight:600, color:"var(--color-label-mute)" },
+  statLabel:{ fontSize:12.5, fontWeight:600, color:"var(--color-label-mute)" },
   statVal:{ fontFamily:"var(--font-brand)", fontSize:22, fontWeight:800, letterSpacing:"-0.02em", marginTop:3, color:"var(--color-label)" },
-  statUnit:{ fontSize:11, fontWeight:600, color:"var(--color-label-mute)", marginLeft:3 },
+  statUnit:{ fontSize:12.5, fontWeight:600, color:"var(--color-label-mute)", marginLeft:3 },
   driverRow:{ display:"flex", alignItems:"center", gap:12, padding:"16px 18px", borderBottom:"1px solid var(--color-bg-soft)" },
   driverAv:{ width:40, height:40, borderRadius:"50%", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", background:"var(--color-primary-soft)", color:"var(--color-primary-deep)", fontWeight:700, fontSize:15 },
-  driverName:{ fontSize:14, fontWeight:700, color:"var(--color-label)" },
-  driverSub:{ fontSize:12, color:"var(--color-label-mute)", marginTop:1 },
+  driverName:{ fontSize:15, fontWeight:700, color:"var(--color-label)" },
+  driverSub:{ fontSize:13.5, color:"var(--color-label-mute)", marginTop:1 },
   coordBox:{ padding:"16px 18px", display:"flex", flexDirection:"column", gap:8 },
   coordItem:{ display:"flex", alignItems:"center", justifyContent:"space-between" },
-  coordLbl:{ fontSize:12, color:"var(--color-label-mute)", fontWeight:600 },
-  coordVal:{ fontSize:13, color:"var(--color-label)", fontFamily:"var(--font-mono)" },
+  coordLbl:{ fontSize:13.5, color:"var(--color-label-mute)", fontWeight:600 },
+  coordVal:{ fontSize:14.5, color:"var(--color-label)", fontFamily:"var(--font-mono)" },
   // ─── 노선도 뷰 (2026-05-26) ─────────────────────────────
   viewToggle:{ marginLeft:12, display:"flex", gap:2, padding:3, background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:8 },
-  viewBtn:{ padding:"5px 11px", fontSize:12, fontWeight:700, fontFamily:"inherit", border:"none", background:"transparent", color:"var(--color-label-mute)", borderRadius:6, cursor:"pointer", transition:"all .12s" },
+  viewBtn:{ padding:"5px 11px", fontSize:13.5, fontWeight:700, fontFamily:"inherit", border:"none", background:"transparent", color:"var(--color-label-mute)", borderRadius:6, cursor:"pointer", transition:"all .12s" },
   viewBtnOn:{ background:"var(--color-bg)", color:"var(--color-primary)", boxShadow:"0 1px 3px rgba(0,0,0,.08)" },
-  dateInput:{ marginLeft:8, padding:"5px 9px", fontSize:12, fontWeight:600, fontFamily:"inherit", color:"var(--color-label)", background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:8, outline:"none", cursor:"pointer" },
+  dateInput:{ marginLeft:8, padding:"5px 9px", fontSize:13.5, fontWeight:600, fontFamily:"inherit", color:"var(--color-label)", background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:8, outline:"none", cursor:"pointer" },
   topPartner:{ marginLeft:8, display:"flex", alignItems:"center", gap:6, minWidth:0 },
-  pastBadge:{ marginLeft:"auto", display:"inline-flex", alignItems:"center", gap:6, fontSize:12, fontWeight:700, color:"var(--color-cautionary)", background:"#FFF1E0", border:"1px solid #FFE0C2", padding:"5px 11px", borderRadius:999 },
+  pastBadge:{ marginLeft:"auto", display:"inline-flex", alignItems:"center", gap:6, fontSize:13.5, fontWeight:700, color:"var(--color-cautionary)", background:"#FFF1E0", border:"1px solid #FFE0C2", padding:"5px 11px", borderRadius:999 },
   routeWrap:{ position:"absolute", top:76, left:12, right:12, bottom:12, overflowY:"auto", zIndex:5, padding:"4px 4px 12px", background:"var(--color-bg-soft)", borderRadius:14 },
   routeGrid:{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(360px, 1fr))", gap:14 },
-  routeEmpty:{ textAlign:"center", padding:"48px 16px", color:"var(--color-label-mute)", fontSize:14, lineHeight:1.6 },
+  routeEmpty:{ textAlign:"center", padding:"48px 16px", color:"var(--color-label-mute)", fontSize:15, lineHeight:1.6 },
   routeCard:{ background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:14, boxShadow:"var(--shadow-soft)", display:"flex", flexDirection:"column", overflow:"hidden" },
   routeCardHead:{ padding:"14px 16px 12px", borderBottom:"1px solid var(--color-bg-soft)", background:"var(--color-bg)" },
   routeName:{ fontSize:15, fontWeight:800, fontFamily:"var(--font-brand)", letterSpacing:"-0.01em", color:"var(--color-label)" },
-  routeMeta:{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", fontSize:12, color:"var(--color-label-mute)", marginTop:6 },
+  routeMeta:{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", fontSize:13.5, color:"var(--color-label-mute)", marginTop:6 },
   dot:{ color:"var(--color-line)" },
-  dotSm:{ color:"var(--color-line)", fontSize:11 },
-  routeProgress:{ display:"flex", alignItems:"center", gap:8, marginTop:8, fontSize:12 },
+  dotSm:{ color:"var(--color-line)", fontSize:12.5 },
+  routeProgress:{ display:"flex", alignItems:"center", gap:8, marginTop:8, fontSize:13.5 },
   progressBar:{ flex:1, height:6, borderRadius:3, background:"var(--color-bg-soft)", overflow:"hidden" },
   progressFill:{ height:"100%", background:"linear-gradient(90deg, var(--color-primary) 0%, var(--color-positive) 100%)", borderRadius:3, transition:"width .3s ease" },
   timelineWrap:{ padding:"12px 16px 16px", maxHeight:"60vh", overflowY:"auto" },
   timelineSpine:{ position:"absolute", left:9, top:8, bottom:8, width:2, background:"var(--color-line)", borderRadius:2 },
   timelineRow:{ display:"flex", alignItems:"flex-start", gap:12, padding:"7px 0", position:"relative", zIndex:1 },
   timelineDot:{ width:20, height:20, borderRadius:"50%", border:"2.5px solid", flexShrink:0, marginTop:2, display:"flex", alignItems:"center", justifyContent:"center", background:"#fff" },
-  stopName:{ fontSize:13, fontWeight:700, color:"var(--color-label)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
-  stopTimeRow:{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap", marginTop:4, fontSize:12 },
+  stopName:{ fontSize:14.5, fontWeight:700, color:"var(--color-label)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
+  stopTimeRow:{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap", marginTop:4, fontSize:13.5 },
   stopTimeLbl:{ color:"var(--color-label-mute)", fontWeight:600 },
   stopTimeVal:{ fontWeight:800, color:"var(--color-label)", fontFamily:"var(--font-brand)" },
   busRow:{ display:"flex", alignItems:"center", gap:12, padding:"4px 0 4px 2px", position:"relative", zIndex:2 },
-  busDot:{ width:20, height:20, borderRadius:"50%", background:"var(--color-primary)", border:"2.5px solid #fff", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, boxShadow:"0 2px 8px rgba(0,102,255,.35)" },
+  busDot:{ width:20, height:20, borderRadius:"50%", background:"var(--color-primary)", border:"2.5px solid #fff", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12.5, boxShadow:"0 2px 8px rgba(0,102,255,.35)" },
 };
 
 // ═══════════════════════════════════════════════════════
@@ -1692,20 +1693,20 @@ function SearchableSelect({ value, onChange, options, placeholder = "선택", di
           boxShadow:"var(--shadow-emphasize)", maxHeight:260, overflowY:"auto" }}>
           <div style={{ padding:8, position:"sticky", top:0, background:"var(--color-bg)", borderBottom:"1px solid var(--color-line-soft)" }}>
             <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 이름·번호 검색"
-              style={{ ...S.input, margin:0, fontSize:13, padding:"7px 10px" }} />
+              style={{ ...S.input, margin:0, fontSize:14.5, padding:"7px 10px" }} />
           </div>
           <button type="button" onClick={() => pick("")}
             style={{ display:"block", width:"100%", textAlign:"left", padding:"8px 12px", background:"none",
-              border:"none", cursor:"pointer", fontSize:13, color:"var(--color-label-mute)", fontFamily:"inherit" }}>
+              border:"none", cursor:"pointer", fontSize:14.5, color:"var(--color-label-mute)", fontFamily:"inherit" }}>
             {placeholder}
           </button>
           {filtered.length === 0 ? (
-            <div style={{ padding:"10px 12px", fontSize:12, color:"var(--color-label-mute)" }}>검색 결과 없음</div>
+            <div style={{ padding:"10px 12px", fontSize:13.5, color:"var(--color-label-mute)" }}>검색 결과 없음</div>
           ) : filtered.map(o => (
             <button type="button" key={o.value} onClick={() => pick(o.value)}
               style={{ display:"block", width:"100%", textAlign:"left", padding:"8px 12px",
                 background: o.value === value ? "var(--color-primary-soft)" : "none", border:"none", cursor:"pointer",
-                fontSize:13, fontFamily:"inherit", color: o.value === value ? "var(--color-primary-deep)" : "var(--color-label)",
+                fontSize:14.5, fontFamily:"inherit", color: o.value === value ? "var(--color-primary-deep)" : "var(--color-label)",
                 overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
               {o.label}
             </button>
@@ -1863,12 +1864,12 @@ function DispatchTab({ companyId, vehicles, drivers, allowed, currentUserUid }) 
       <div style={S.panelHeader}>
         <span style={{ fontSize:16, fontWeight:700 }}>배차 관리</span>
         <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
-          <span style={{ fontSize:11, color:"var(--color-label-alt)" }}>거래처:</span>
+          <span style={{ fontSize:12.5, color:"var(--color-label-alt)" }}>거래처:</span>
           <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} allowedCodes={allowed} />
           <input type="date" value={date} onChange={e => { if (e.target.value) setDate(e.target.value); }} style={S.dateInput} />
           <button style={S.addBtn} onClick={openAdd}>+ 배차 등록</button>
           {dispatches.length > 0 && (
-            <button style={{...S.editBtn, fontSize:12, padding:"6px 10px"}} onClick={handleCopyDispatches} disabled={loading}>📋 복사</button>
+            <button style={{...S.editBtn, fontSize:13.5, padding:"6px 10px"}} onClick={handleCopyDispatches} disabled={loading}>📋 복사</button>
           )}
         </div>
       </div>
@@ -1882,9 +1883,9 @@ function DispatchTab({ companyId, vehicles, drivers, allowed, currentUserUid }) 
               return (
               <tr key={d.id} style={S.tr}>
                 <td style={S.td}><span style={S.timeBadge}>{d.departTime}</span></td>
-                <td style={{...S.td,fontSize:12}}>
+                <td style={{...S.td,fontSize:13.5}}>
                   {r?.partnerName ? (
-                    <span style={{ background:"var(--color-bg-soft)", color:"var(--color-label-mute)", borderRadius:6, padding:"2px 7px", fontSize:11, fontWeight:600, whiteSpace:"nowrap" }}>{r.partnerName}</span>
+                    <span style={{ background:"var(--color-bg-soft)", color:"var(--color-label-mute)", borderRadius:6, padding:"2px 7px", fontSize:12.5, fontWeight:600, whiteSpace:"nowrap" }}>{r.partnerName}</span>
                   ) : <span style={{ color:"var(--color-label-alt)" }}>–</span>}
                 </td>
                 <td style={{...S.td,color:"var(--color-primary)",fontWeight:600}}>{d.routeName}</td>
@@ -2383,12 +2384,12 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
       <div style={S.panelHeader}>
         <span style={{ fontSize:16, fontWeight:700 }}>배차 일정 (반복 패턴)</span>
         <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
-          <span style={{ fontSize:11, color:"var(--color-label-alt)" }}>거래처:</span>
+          <span style={{ fontSize:12.5, color:"var(--color-label-alt)" }}>거래처:</span>
           <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} allowedCodes={allowed} />
-          <span style={{ fontSize:11, color:"var(--color-label-alt)" }}>매일 새벽 00:30 자동 펼침 · 향후 7일치</span>
-          <button style={{...S.editBtn, fontSize:12, padding:"6px 10px"}} onClick={handleExpandNow} disabled={loading}>지금 펼치기</button>
+          <span style={{ fontSize:12.5, color:"var(--color-label-alt)" }}>매일 새벽 00:30 자동 펼침 · 향후 7일치</span>
+          <button style={{...S.editBtn, fontSize:13.5, padding:"6px 10px"}} onClick={handleExpandNow} disabled={loading}>지금 펼치기</button>
           {/* 방학·재량휴업일처럼 여러 노선이 같이 쉬는 기간 — 일정마다 고치지 않게(2026-09-04) */}
-          <button style={{...S.editBtn, fontSize:12, padding:"6px 10px"}}
+          <button style={{...S.editBtn, fontSize:13.5, padding:"6px 10px"}}
             onClick={() => { setBulk(b => ({ ...b, partner: partnerCode !== "전체" ? partnerCode : "" })); setBulkOpen(true); }}>
             📅 통합 운행일 설정
           </button>
@@ -2405,9 +2406,9 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
               return (
               <tr key={s.id} style={S.tr}>
                 <td style={{...S.td, fontWeight:600}}>{s.name || "(이름 없음)"}</td>
-                <td style={{...S.td, fontSize:12}}>
+                <td style={{...S.td, fontSize:13.5}}>
                   {r?.partnerName ? (
-                    <span style={{ background:"var(--color-bg-soft)", color:"var(--color-label-mute)", borderRadius:6, padding:"2px 7px", fontSize:11, fontWeight:600, whiteSpace:"nowrap" }}>{r.partnerName}</span>
+                    <span style={{ background:"var(--color-bg-soft)", color:"var(--color-label-mute)", borderRadius:6, padding:"2px 7px", fontSize:12.5, fontWeight:600, whiteSpace:"nowrap" }}>{r.partnerName}</span>
                   ) : <span style={{ color:"var(--color-label-alt)" }}>–</span>}
                 </td>
                 <td style={{...S.td, color:"var(--color-primary)", fontWeight:600}}>{s.routeName || "–"}</td>
@@ -2415,8 +2416,8 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
                 <td style={S.td}>{s.vehicleNo || "–"}</td>
                 <td style={S.td}><span style={S.timeBadge}>{s.departTime || "–"}</span></td>
                 <td style={S.td}>{weekdaysLabel(s.weekdays)}</td>
-                <td style={{...S.td, fontSize:11, color:"var(--color-label-mute)"}}>{periodLabel(s)}</td>
-                <td style={{...S.td, fontSize:11, color:"var(--color-label-mute)"}}>
+                <td style={{...S.td, fontSize:12.5, color:"var(--color-label-mute)"}}>{periodLabel(s)}</td>
+                <td style={{...S.td, fontSize:12.5, color:"var(--color-label-mute)"}}>
                   {s.excludeHolidays !== false ? "공휴일✓" : "공휴일✗"} · 휴무 {Array.isArray(s.excludeDates) ? s.excludeDates.length : 0}일
                   {Array.isArray(s.includeDates) && s.includeDates.length > 0 ? ` · 공휴일 운행 ${s.includeDates.length}일` : ""}
                 </td>
@@ -2481,7 +2482,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
               <label style={S.label}>종료일</label>
               <input style={S.input} type="date" value={form.endDate} disabled={form.endOpen}
                      onChange={e=>setForm({...form, endDate:e.target.value})} />
-              <label style={{display:"flex", alignItems:"center", gap:6, marginTop:6, fontSize:12, color:"var(--color-label-mute)"}}>
+              <label style={{display:"flex", alignItems:"center", gap:6, marginTop:6, fontSize:13.5, color:"var(--color-label-mute)"}}>
                 <input type="checkbox" checked={form.endOpen}
                        onChange={e=>setForm({...form, endOpen:e.target.checked, endDate: e.target.checked ? "" : form.endDate})} />
                 무기한
@@ -2495,7 +2496,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
               <button key={dow} type="button"
                 style={{
                   ...S.editBtn,
-                  padding:"6px 12px", fontSize:12,
+                  padding:"6px 12px", fontSize:13.5,
                   background: form.weekdays.includes(dow) ? "var(--color-primary)" : "var(--color-bg-soft)",
                   color: form.weekdays.includes(dow) ? "#fff" : "var(--color-label-mute)",
                   borderColor: form.weekdays.includes(dow) ? "var(--color-primary)" : "var(--color-line)",
@@ -2507,9 +2508,9 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
             ))}
           </div>
           <div style={{display:"flex", gap:6, marginTop:6}}>
-            <button type="button" style={{...S.editBtn, fontSize:11}} onClick={()=>setWeekdaysPreset([1,2,3,4,5])}>평일만</button>
-            <button type="button" style={{...S.editBtn, fontSize:11}} onClick={()=>setWeekdaysPreset([0,6])}>주말만</button>
-            <button type="button" style={{...S.editBtn, fontSize:11}} onClick={()=>setWeekdaysPreset([0,1,2,3,4,5,6])}>매일</button>
+            <button type="button" style={{...S.editBtn, fontSize:12.5}} onClick={()=>setWeekdaysPreset([1,2,3,4,5])}>평일만</button>
+            <button type="button" style={{...S.editBtn, fontSize:12.5}} onClick={()=>setWeekdaysPreset([0,6])}>주말만</button>
+            <button type="button" style={{...S.editBtn, fontSize:12.5}} onClick={()=>setWeekdaysPreset([0,1,2,3,4,5,6])}>매일</button>
           </div>
 
           <label style={S.label}>휴무일 (회사별 — 운행 안 함)</label>
@@ -2524,17 +2525,17 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
                 <span key={d} style={{
                   display:"inline-flex", alignItems:"center", gap:6,
                   background:"var(--color-bg-soft)", border:"1px solid var(--color-line)",
-                  borderRadius:14, padding:"3px 10px", fontSize:11, color:"var(--color-label-mute)",
+                  borderRadius:14, padding:"3px 10px", fontSize:12.5, color:"var(--color-label-mute)",
                 }}>
                   {d}
                   <button type="button" onClick={()=>removeExcludeDate(d)}
-                    style={{background:"none", border:"none", color:"var(--color-destructive)", cursor:"pointer", fontSize:14, lineHeight:1, padding:0}}>×</button>
+                    style={{background:"none", border:"none", color:"var(--color-destructive)", cursor:"pointer", fontSize:15, lineHeight:1, padding:0}}>×</button>
                 </span>
               ))}
             </div>
           )}
 
-          <label style={{display:"flex", alignItems:"center", gap:8, marginTop:10, fontSize:13, color:"var(--color-label)"}}>
+          <label style={{display:"flex", alignItems:"center", gap:8, marginTop:10, fontSize:14.5, color:"var(--color-label)"}}>
             <input type="checkbox" checked={form.excludeHolidays}
                    onChange={e=>setForm({...form, excludeHolidays:e.target.checked})} />
             한국 공휴일 자동 제외 (2026~2028 정적 — 매년 갱신 필요)
@@ -2542,7 +2543,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
           {/* includeDates(강제 운행일) — 통합 운행일 설정 「운행」이 공휴일을 열 때 쓴다. 여기선 보고 빼기만. */}
           {form.includeDates.length > 0 && (
             <div style={{marginTop:6}}>
-              <div style={{fontSize:12, color:"var(--color-label-mute)", marginBottom:4}}>
+              <div style={{fontSize:13.5, color:"var(--color-label-mute)", marginBottom:4}}>
                 공휴일이지만 운행하는 날{form.excludeHolidays ? "" : " (공휴일 자동 제외가 꺼져 있어 지금은 효과 없음)"}
               </div>
               <div style={{display:"flex", flexWrap:"wrap", gap:6}}>
@@ -2550,18 +2551,18 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
                   <span key={d} style={{
                     display:"inline-flex", alignItems:"center", gap:6,
                     background:"var(--color-primary-soft)", border:"1px solid var(--color-line)",
-                    borderRadius:14, padding:"3px 10px", fontSize:11, color:"var(--color-label)",
+                    borderRadius:14, padding:"3px 10px", fontSize:12.5, color:"var(--color-label)",
                   }}>
                     {d}
                     <button type="button" onClick={()=>setForm(f => ({...f, includeDates: f.includeDates.filter(x => x !== d)}))}
-                      style={{background:"none", border:"none", color:"var(--color-destructive)", cursor:"pointer", fontSize:14, lineHeight:1, padding:0}}>×</button>
+                      style={{background:"none", border:"none", color:"var(--color-destructive)", cursor:"pointer", fontSize:15, lineHeight:1, padding:0}}>×</button>
                   </span>
                 ))}
               </div>
             </div>
           )}
 
-          <label style={{display:"flex", alignItems:"center", gap:8, marginTop:4, fontSize:13, color:"var(--color-label)"}}>
+          <label style={{display:"flex", alignItems:"center", gap:8, marginTop:4, fontSize:14.5, color:"var(--color-label)"}}>
             <input type="checkbox" checked={form.active}
                    onChange={e=>setForm({...form, active:e.target.checked})} />
             활성 (펼침 대상)
@@ -2572,7 +2573,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
             <button style={{...S.closeBtn, flex:1}} onClick={()=>setShowForm(false)} disabled={loading}>취소</button>
           </div>
           {editId && (
-            <div style={{fontSize:11, color:"var(--color-label-alt)", marginTop:4, lineHeight:1.5}}>
+            <div style={{fontSize:12.5, color:"var(--color-label-alt)", marginTop:4, lineHeight:1.5}}>
               ※ 활성 일정은 저장하면 오늘부터 7일치 배차가 바로 만들어지고, 그 뒤 날짜는 매일 새벽에 이어서 만들어집니다.
             </div>
           )}
@@ -2608,7 +2609,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
         return (
         <div style={S.overlay}><div style={{ ...S.modal, maxHeight:"88vh", overflowY:"auto" }}>
           <div style={S.modalTitle}>📅 거래처 통합 운행일 설정</div>
-          <div style={{ fontSize:12, color:"var(--color-label-mute)", marginTop:-6, marginBottom:10, lineHeight:1.6 }}>
+          <div style={{ fontSize:13.5, color:"var(--color-label-mute)", marginTop:-6, marginBottom:10, lineHeight:1.6 }}>
             학교 방학·재량휴업일처럼 여러 노선이 같이 쉬는 기간을 거래처 단위로 한 번에 설정합니다.
           </div>
 
@@ -2621,13 +2622,13 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
 
           <label style={{ ...S.label, marginTop:12 }}>적용 대상</label>
           {kinds.length === 0 ? (
-            <div style={{ fontSize:12, color:"var(--color-label-mute)" }}>
+            <div style={{ fontSize:13.5, color:"var(--color-label-mute)" }}>
               {bulk.partner ? "이 거래처의 모든 노선에 적용됩니다." : "거래처를 먼저 선택하세요."}
             </div>
           ) : (
             <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
               <button type="button" onClick={() => setBulk(b => ({ ...b, kinds: [] }))}
-                style={{ ...S.editBtn, padding:"6px 12px", fontSize:12, fontWeight:700,
+                style={{ ...S.editBtn, padding:"6px 12px", fontSize:13.5, fontWeight:700,
                   background: bulk.kinds.length === 0 ? "var(--color-primary)" : "var(--color-bg-soft)",
                   color: bulk.kinds.length === 0 ? "#fff" : "var(--color-label-mute)",
                   borderColor: bulk.kinds.length === 0 ? "var(--color-primary)" : "var(--color-line)" }}>
@@ -2635,7 +2636,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
               </button>
               {kinds.map(k => (
                 <button key={k} type="button" onClick={() => toggleKind(k)}
-                  style={{ ...S.editBtn, padding:"6px 12px", fontSize:12, fontWeight:700,
+                  style={{ ...S.editBtn, padding:"6px 12px", fontSize:13.5, fontWeight:700,
                     background: bulk.kinds.includes(k) ? "var(--color-primary)" : "var(--color-bg-soft)",
                     color: bulk.kinds.includes(k) ? "#fff" : "var(--color-label-mute)",
                     borderColor: bulk.kinds.includes(k) ? "var(--color-primary)" : "var(--color-line)" }}>
@@ -2654,7 +2655,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
               onChange={e => setBulk(b => ({ ...b, to: e.target.value }))} />
           </div>
           {rangeBad && (
-            <div style={{ marginTop:6, fontSize:11, color:"#A81818" }}>
+            <div style={{ marginTop:6, fontSize:12.5, color:"#A81818" }}>
               시작일이 종료일보다 늦거나, 한 번에 설정할 수 있는 {BULK_MAX_DAYS}일을 넘었습니다.
             </div>
           )}
@@ -2662,7 +2663,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
           <label style={{ ...S.label, marginTop:12 }}>운행 설정</label>
           <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
             {[BULK_MODES.OFF, BULK_MODES.ON].map(m => (
-              <label key={m} style={{ display:"flex", alignItems:"flex-start", gap:8, fontSize:13, color:"var(--color-label)", cursor:"pointer" }}>
+              <label key={m} style={{ display:"flex", alignItems:"flex-start", gap:8, fontSize:14.5, color:"var(--color-label)", cursor:"pointer" }}>
                 <input type="radio" name="bulkMode" checked={bulk.mode === m}
                   onChange={() => setBulk(b => ({ ...b, mode: m }))} style={{ marginTop:2 }} />
                 <span>{BULK_MODE_LABELS[m]}</span>
@@ -2670,7 +2671,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
             ))}
           </div>
 
-          <div style={{ marginTop:12, background:"#E8F1FF", border:"1px solid #C2DCFF", borderRadius:8, padding:"10px 12px", fontSize:12, color:"#003A99", lineHeight:1.7 }}>
+          <div style={{ marginTop:12, background:"#E8F1FF", border:"1px solid #C2DCFF", borderRadius:8, padding:"10px 12px", fontSize:13.5, color:"#003A99", lineHeight:1.7 }}>
             <div style={{ fontWeight:800 }}>
               적용 대상 배차 일정 {targets.length}개 · 실제로 바뀔 일정 {plan.changes.length}개
             </div>
@@ -2690,7 +2691,7 @@ function DispatchScheduleTab({ companyId, vehicles, drivers, allowed, currentUse
               </div>
             )}
           </div>
-          <div style={{ marginTop:6, fontSize:11, color:"var(--color-label-alt)", lineHeight:1.6 }}>
+          <div style={{ marginTop:6, fontSize:12.5, color:"var(--color-label-alt)", lineHeight:1.6 }}>
             ※ 지난 날짜의 배차와 그날만 따로 고쳐 두신 배차, 이미 운행 기록이 남은 배차는 손대지 않습니다.
           </div>
 
@@ -3279,7 +3280,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
       <div style={S.panelHeader}>
         <span style={{ fontSize:16, fontWeight:700 }}>📍 노선 관리</span>
         <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-          <span style={{ fontSize:12, color:"var(--color-label-mute)" }}>총 {routes.length}개</span>
+          <span style={{ fontSize:13.5, color:"var(--color-label-mute)" }}>총 {routes.length}개</span>
           <button style={S.addBtn} onClick={openAdd}>+ 노선 추가</button>
         </div>
       </div>
@@ -3287,18 +3288,18 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
       {/* 기본 표시 범위(2026-08-05 회의 #2) — 노선에 '표시 시간'을 직접 넣지 않은 노선에
           적용되는 회사 기본값. 승객·직원앱에서 이 범위 밖 차량은 안 보인다(관제는 항상 보임). */}
       <div style={{ padding:"10px 16px", display:"flex", flexWrap:"wrap", gap:8, alignItems:"center", borderBottom:"1px solid var(--color-line)", background:"var(--color-bg-soft)" }}>
-        <span style={{ fontSize:12, fontWeight:700, color:"var(--color-label)" }}>🕒 기본 표시 범위</span>
-        <span style={{ fontSize:12, color:"var(--color-label-mute)" }}>출발</span>
+        <span style={{ fontSize:13.5, fontWeight:700, color:"var(--color-label)" }}>🕒 기본 표시 범위</span>
+        <span style={{ fontSize:13.5, color:"var(--color-label-mute)" }}>출발</span>
         <input type="number" min="0" max="240" value={winPre} onChange={e=>setWinPre(e.target.value)}
-          style={{ ...S.input, width:66, padding:"5px 8px", margin:0, fontSize:12 }} />
-        <span style={{ fontSize:12, color:"var(--color-label-mute)" }}>분 전 ~ 도착</span>
+          style={{ ...S.input, width:66, padding:"5px 8px", margin:0, fontSize:13.5 }} />
+        <span style={{ fontSize:13.5, color:"var(--color-label-mute)" }}>분 전 ~ 도착</span>
         <input type="number" min="0" max="240" value={winPost} onChange={e=>setWinPost(e.target.value)}
-          style={{ ...S.input, width:66, padding:"5px 8px", margin:0, fontSize:12 }} />
-        <span style={{ fontSize:12, color:"var(--color-label-mute)" }}>분 후</span>
-        <button style={{ ...S.editBtn, marginRight:0, fontSize:11 }} disabled={winSaving} onClick={saveWindowDefaults}>
+          style={{ ...S.input, width:66, padding:"5px 8px", margin:0, fontSize:13.5 }} />
+        <span style={{ fontSize:13.5, color:"var(--color-label-mute)" }}>분 후</span>
+        <button style={{ ...S.editBtn, marginRight:0, fontSize:12.5 }} disabled={winSaving} onClick={saveWindowDefaults}>
           {winSaving ? "저장 중…" : "저장"}
         </button>
-        <span style={{ fontSize:11, color:"var(--color-label-mute)", flexBasis:"100%", lineHeight:1.5 }}>
+        <span style={{ fontSize:12.5, color:"var(--color-label-mute)", flexBasis:"100%", lineHeight:1.5 }}>
           승객·직원앱에 차량이 보이는 시간대입니다. 노선별로 다르게 하려면 노선 수정의 <b>표시 시간</b>에 직접 넣으세요.
           관리자 실시간 관제에는 시간과 무관하게 항상 보입니다.
         </span>
@@ -3313,9 +3314,9 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
           </button>
         ))}
         {/* 거래처 필터 */}
-        <span style={{ fontSize:11, color:"var(--color-label-alt)", marginLeft:4 }}>거래처:</span>
+        <span style={{ fontSize:12.5, color:"var(--color-label-alt)", marginLeft:4 }}>거래처:</span>
         <select value={partnerFilter} onChange={e=>setPartnerFilter(e.target.value)}
-          style={{ ...S.input, padding:"5px 10px", fontSize:12, width:"auto", minWidth:100, maxWidth:160 }}>
+          style={{ ...S.input, padding:"5px 10px", fontSize:13.5, width:"auto", minWidth:100, maxWidth:160 }}>
           <option value="전체">{isAllAccess(allowed) ? "전체" : "내 협력사 전체"}</option>
           {visiblePartners.map(p => <option key={p.code} value={p.code}>{p.partnerName}</option>)}
         </select>
@@ -3344,14 +3345,14 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
                       <button title="아래로" disabled={i===filtered.length-1||reordering} onClick={()=>moveRoute(i,1)}
                         style={{...S.editBtn, padding:"1px 5px", lineHeight:1.2, opacity:(i===filtered.length-1||reordering)?0.35:1, cursor:(i===filtered.length-1||reordering)?"default":"pointer"}}>▼</button>
                     </div>
-                    <span style={{ fontSize:12, fontWeight:700, color:"var(--color-label-mute)", fontFamily:"var(--font-mono)" }}>{i+1}</span>
+                    <span style={{ fontSize:13.5, fontWeight:700, color:"var(--color-label-mute)", fontFamily:"var(--font-mono)" }}>{i+1}</span>
                   </div>
                 </td>
                 <td style={S.td}><span style={{...S.statusBadge, background:r.type==="출근"?"var(--color-primary-soft)":"#FFF1E0", color:r.type==="출근"?"var(--color-primary-deep)":"#B95300"}}>{r.type}</span></td>
-                <td style={{...S.td,fontSize:12}}><span style={{ background:"var(--color-bg-soft)", color:"var(--color-label-mute)", borderRadius:6, padding:"2px 7px", fontSize:11, fontWeight:600, whiteSpace:"nowrap" }}>{r.partnerName||"–"}</span></td>
-                <td style={{...S.td,color:"var(--color-label-mute)",fontSize:12}}>{r.shift||"–"}</td>
-                <td style={{...S.td,color:"var(--color-label-mute)",fontSize:12,fontFamily:"monospace"}}>{r.code||"–"}</td>
-                <td style={{...S.td,fontWeight:600,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</td>
+                <td style={{...S.td,fontSize:13.5}}><span style={{ background:"var(--color-bg-soft)", color:"var(--color-label-mute)", borderRadius:6, padding:"2px 7px", fontSize:12.5, fontWeight:600, whiteSpace:"nowrap" }}>{r.partnerName||"–"}</span></td>
+                <td style={{...S.td,color:"var(--color-label-mute)",fontSize:13.5}}>{r.shift||"–"}</td>
+                <td style={{...S.td,color:"var(--color-label-mute)",fontSize:13.5,fontFamily:"monospace"}}>{r.code||"–"}</td>
+                <td style={{...S.td,fontWeight:600}}><div style={{width:200,whiteSpace:"normal",wordBreak:"keep-all",overflowWrap:"anywhere",lineHeight:1.35}}>{r.name}</div></td>
                 {/* 정원 대비 등록 인원(2026-07-30) — 초과면 붉게. 정원 미설정 노선은 인원만. */}
                 <td style={S.td}>
                   {(() => {
@@ -3394,8 +3395,8 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
         <div style={{ position:"absolute", top:0, right:0, width:"min(380px,100%)", height:"100%", background:"var(--color-bg)", borderLeft:"1px solid var(--color-line)", display:"flex", flexDirection:"column", zIndex:20 }}>
           <div style={{ padding:"14px 16px", borderBottom:"1px solid var(--color-line)", display:"flex", alignItems:"center", justifyContent:"space-between", background:"var(--color-bg-alt)", flexShrink:0 }}>
             <div>
-              <div style={{ fontWeight:700, fontSize:14, color:"var(--color-primary)" }}>📍 정류장 관리</div>
-              <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:2, maxWidth:280, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{stopsRoute.name}</div>
+              <div style={{ fontWeight:700, fontSize:15, color:"var(--color-primary)" }}>📍 정류장 관리</div>
+              <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginTop:2, maxWidth:280, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{stopsRoute.name}</div>
             </div>
             <div style={{ display:"flex", gap:8 }}>
               <button style={S.addBtn} onClick={openStopAdd}>+ 추가</button>
@@ -3408,43 +3409,43 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
           {/* 정류장 목록 */}
           <div style={{ padding:"8px 12px" }}>
             {stops.length > 0 && (
-              <div style={{ fontSize:11, color:"var(--color-label-mute)", background:"var(--color-primary-soft)", border:"1px solid var(--color-line)", borderRadius:8, padding:"7px 10px", marginBottom:8, lineHeight:1.5 }}>
+              <div style={{ fontSize:12.5, color:"var(--color-label-mute)", background:"var(--color-primary-soft)", border:"1px solid var(--color-line)", borderRadius:8, padding:"7px 10px", marginBottom:8, lineHeight:1.5 }}>
                 💡 각 정류장의 <b>🕒 진입</b> 칸에 계획 시각을 바로 입력하면 즉시 저장됩니다(아래 폼 왕복 불필요). 첫 정류장은 노선 출발시각({stopsRoute?.departTime || "—"})과 동일하게.
               </div>
             )}
             {stops.length === 0 ? (
-              <div style={{ color:"var(--color-label-alt)", textAlign:"center", padding:30, fontSize:13 }}>
+              <div style={{ color:"var(--color-label-alt)", textAlign:"center", padding:30, fontSize:14.5 }}>
                 정류장이 없습니다<br/>
-                <span style={{ fontSize:11, color:"var(--color-label-assistive)" }}>+ 추가 버튼으로 정류장을 등록하세요</span>
+                <span style={{ fontSize:12.5, color:"var(--color-label-assistive)" }}>+ 추가 버튼으로 정류장을 등록하세요</span>
               </div>
             ) : stops.map((s, i) => (
               <div key={s.id} style={{ background:"var(--color-bg-alt)", border:"1px solid var(--color-line)", borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                  <div style={{ width:24, height:24, borderRadius:"50%", background:"var(--color-primary-soft)", border:"1px solid var(--color-primary)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700, color:"var(--color-primary-deep)", flexShrink:0 }}>
+                  <div style={{ width:24, height:24, borderRadius:"50%", background:"var(--color-primary-soft)", border:"1px solid var(--color-primary)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12.5, fontWeight:700, color:"var(--color-primary-deep)", flexShrink:0 }}>
                     {s.order || i+1}
                   </div>
                   {s.photo && (
                     <img src={s.photo} alt="" style={{ width:40, height:40, objectFit:"cover", borderRadius:6, border:"1px solid var(--color-line)", flexShrink:0 }}/>
                   )}
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:13, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.name}</div>
-                    {s.address && <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.address}</div>}
-                    {s.description && <div style={{ fontSize:10, color:"var(--color-label-mute)", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>📝 {s.description}</div>}
+                    <div style={{ fontSize:14.5, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.name}</div>
+                    {s.address && <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.address}</div>}
+                    {s.description && <div style={{ fontSize:12, color:"var(--color-label-mute)", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>📝 {s.description}</div>}
                     {/* 계획 진입시각 — 목록 인라인 편집(2026-06-09): 폼 왕복 없이 전체 보며 위→아래 입력. 입력 즉시 저장. */}
                     <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:3, flexWrap:"wrap" }}>
-                      <span style={{ fontSize:10, color:"var(--color-label-mute)", flexShrink:0 }}>🕒 진입</span>
+                      <span style={{ fontSize:12, color:"var(--color-label-mute)", flexShrink:0 }}>🕒 진입</span>
                       <input
                         type="time"
                         value={planTimeForStop(stopsRoute?.departTime, s.offsetMin) || ""}
                         onChange={e => saveStopTime(s, e.target.value)}
                         title="정류장 진입(계획) 시각 — 입력 즉시 저장"
-                        style={{ fontSize:11, padding:"2px 6px", border:"1px solid var(--color-line)", borderRadius:6, fontFamily:"inherit", background:"var(--color-bg)", color:"var(--color-label)" }}
+                        style={{ fontSize:12.5, padding:"2px 6px", border:"1px solid var(--color-line)", borderRadius:6, fontFamily:"inherit", background:"var(--color-bg)", color:"var(--color-label)" }}
                       />
                       {typeof s.offsetMin === "number"
-                        ? <span style={{ fontSize:10, color:"var(--color-primary-deep)", fontWeight:600, flexShrink:0 }}>+{s.offsetMin}분</span>
-                        : <span style={{ fontSize:10, color:"var(--color-label-assistive)", flexShrink:0 }}>미설정</span>}
+                        ? <span style={{ fontSize:12, color:"var(--color-primary-deep)", fontWeight:600, flexShrink:0 }}>+{s.offsetMin}분</span>
+                        : <span style={{ fontSize:12, color:"var(--color-label-assistive)", flexShrink:0 }}>미설정</span>}
                     </div>
-                    <div style={{ fontSize:10, color:"var(--color-label-alt)", marginTop:1 }}>{s.lat?.toFixed(5)}, {s.lng?.toFixed(5)}</div>
+                    <div style={{ fontSize:12, color:"var(--color-label-alt)", marginTop:1 }}>{s.lat?.toFixed(5)}, {s.lng?.toFixed(5)}</div>
                   </div>
                   <div style={{ display:"flex", flexDirection:"column", gap:4, flexShrink:0 }}>
                     <div style={{ display:"flex", gap:4 }}>
@@ -3464,7 +3465,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
           {/* 정류장 추가/수정 폼 */}
           {showStopForm && (
             <div style={{ padding:"14px 16px", borderTop:"1px solid var(--color-line)", background:"var(--color-bg-alt)" }}>
-              <div style={{ fontSize:13, fontWeight:700, marginBottom:10, color:"var(--color-primary)" }}>{editStop?"정류장 수정":"정류장 추가"}</div>
+              <div style={{ fontSize:14.5, fontWeight:700, marginBottom:10, color:"var(--color-primary)" }}>{editStop?"정류장 수정":"정류장 추가"}</div>
               <label style={S.label}>정류장명 *</label>
               <input style={{...S.input, marginBottom:6}} placeholder="예) 서대전역 5번출구" value={stopForm.name} onChange={e=>setStopForm({...stopForm,name:e.target.value})}/>
               <label style={S.label}>주소·장소 검색</label>
@@ -3478,18 +3479,18 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
                 </button>
               </div>
               {addrMsg && (
-                <div style={{ fontSize:11, color:"var(--color-label-alt)", marginBottom:6, lineHeight:1.5 }}>{addrMsg}</div>
+                <div style={{ fontSize:12.5, color:"var(--color-label-alt)", marginBottom:6, lineHeight:1.5 }}>{addrMsg}</div>
               )}
               {addrResults.length > 0 && (
                 <div style={{ border:"1px solid var(--color-line)", borderRadius:8, marginBottom:6, overflow:"hidden", background:"var(--color-bg)" }}>
                   {addrResults.map((r, i) => (
                     <button key={i} onClick={()=>pickAddrResult(r)}
                       style={{ display:"block", width:"100%", textAlign:"left", border:"none", background:"transparent", borderBottom: i<addrResults.length-1?"1px solid var(--color-line)":"none", padding:"8px 10px", cursor:"pointer", fontFamily:"inherit" }}>
-                      <div style={{ fontSize:12, fontWeight:600, color:"var(--color-label)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.name}</div>
+                      <div style={{ fontSize:13.5, fontWeight:600, color:"var(--color-label)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.name}</div>
                       {r.address && r.address!==r.name && (
-                        <div style={{ fontSize:10, color:"var(--color-label-mute)", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.address}</div>
+                        <div style={{ fontSize:12, color:"var(--color-label-mute)", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.address}</div>
                       )}
-                      <div style={{ fontSize:10, color:"var(--color-label-assistive)", marginTop:1 }}>{r.lat.toFixed(5)}, {r.lng.toFixed(5)}</div>
+                      <div style={{ fontSize:12, color:"var(--color-label-assistive)", marginTop:1 }}>{r.lat.toFixed(5)}, {r.lng.toFixed(5)}</div>
                     </button>
                   ))}
                 </div>
@@ -3504,15 +3505,15 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
                   <img src={stopForm.photo} alt="정류장 사진 미리보기"
                     style={{ width:"100%", maxHeight:160, objectFit:"cover", borderRadius:8, border:"1px solid var(--color-line)", display:"block" }}/>
                   <button onClick={()=>setStopForm(f=>({...f,photo:""}))} title="사진 삭제"
-                    style={{ position:"absolute", top:6, right:6, width:26, height:26, borderRadius:"50%", border:"none", background:"rgba(11,16,32,0.62)", color:"#fff", fontSize:14, fontWeight:700, cursor:"pointer", lineHeight:1, fontFamily:"inherit" }}>✕</button>
+                    style={{ position:"absolute", top:6, right:6, width:26, height:26, borderRadius:"50%", border:"none", background:"rgba(11,16,32,0.62)", color:"#fff", fontSize:15, fontWeight:700, cursor:"pointer", lineHeight:1, fontFamily:"inherit" }}>✕</button>
                 </div>
               ) : (
-                <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, width:"100%", padding:"12px", background:"var(--color-bg-soft)", border:"1px dashed var(--color-line)", borderRadius:8, color:"var(--color-label-mute)", fontSize:13, fontWeight:600, cursor: photoProcessing?"default":"pointer", marginBottom:8, opacity: photoProcessing?0.6:1 }}>
+                <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, width:"100%", padding:"12px", background:"var(--color-bg-soft)", border:"1px dashed var(--color-line)", borderRadius:8, color:"var(--color-label-mute)", fontSize:14.5, fontWeight:600, cursor: photoProcessing?"default":"pointer", marginBottom:8, opacity: photoProcessing?0.6:1 }}>
                   {photoProcessing ? "사진 처리 중..." : "📷 사진 첨부 (자동 압축)"}
                   <input type="file" accept="image/*" onChange={handleStopPhoto} disabled={photoProcessing} style={{ display:"none" }}/>
                 </label>
               )}
-              <div style={{ fontSize:11, color:"var(--color-label-alt)", marginTop:-4, marginBottom:8 }}>
+              <div style={{ fontSize:12.5, color:"var(--color-label-alt)", marginTop:-4, marginBottom:8 }}>
                 💡 이미지를 복사한 뒤 <b>Ctrl+V</b>로 붙여넣어도 됩니다 (스크린샷·캡처 가능)
               </div>
 
@@ -3534,7 +3535,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
                 value={stopForm.plannedTime}
                 onChange={e=>setStopForm({...stopForm, plannedTime: e.target.value})}
               />
-              <div style={{ fontSize:11, color:"var(--color-label-alt)", marginBottom:8, lineHeight:1.45 }}>
+              <div style={{ fontSize:12.5, color:"var(--color-label-alt)", marginBottom:8, lineHeight:1.45 }}>
                 {(() => {
                   if (!stopForm.plannedTime) return "미설정 시 직선거리 기반 ETA로 폴백";
                   if (!stopsRoute?.departTime) return "⚠ 노선 출발시각이 설정되어야 합니다";
@@ -3546,7 +3547,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
 
               {/* 지도 클릭 좌표 선택 버튼 */}
               <button onClick={() => setShowMapPicker(true)}
-                style={{ width:"100%", padding:"10px", background: pickerPin ? "#E6F7EB" : "var(--color-bg-soft)", border: pickerPin ? "1px solid #00BF40" : "1px solid var(--color-line)", borderRadius:8, color: pickerPin ? "#007A29" : "var(--color-label-mute)", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit", marginBottom:6 }}>
+                style={{ width:"100%", padding:"10px", background: pickerPin ? "#E6F7EB" : "var(--color-bg-soft)", border: pickerPin ? "1px solid #00BF40" : "1px solid var(--color-line)", borderRadius:8, color: pickerPin ? "#007A29" : "var(--color-label-mute)", fontSize:14.5, fontWeight:600, cursor:"pointer", fontFamily:"inherit", marginBottom:6 }}>
                 {pickerPin
                   ? `📍 ${parseFloat(stopForm.lat).toFixed(5)}, ${parseFloat(stopForm.lng).toFixed(5)}`
                   : "🗺 지도에서 위치 선택"}
@@ -3554,7 +3555,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
 
               {/* 좌표 직접 입력 (접기/펼치기) */}
               <details style={{ marginBottom:8 }}>
-                <summary style={{ fontSize:11, color:"var(--color-label-alt)", cursor:"pointer", userSelect:"none" }}>좌표 직접 입력</summary>
+                <summary style={{ fontSize:12.5, color:"var(--color-label-alt)", cursor:"pointer", userSelect:"none" }}>좌표 직접 입력</summary>
                 <div style={{ display:"flex", gap:6, marginTop:6 }}>
                   <div style={{ flex:1 }}>
                     <label style={S.label}>위도</label>
@@ -3585,8 +3586,8 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
           {/* 모달 헤더 */}
           <div style={{ background:"var(--color-bg)", padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", flexShrink:0 }}>
             <div>
-              <div style={{ fontSize:14, fontWeight:700 }}>📍 위치 선택</div>
-              <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:2 }}>
+              <div style={{ fontSize:15, fontWeight:700 }}>📍 위치 선택</div>
+              <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginTop:2 }}>
                 {pickerPin ? `선택됨: ${pickerPin.lat.toFixed(5)}, ${pickerPin.lng.toFixed(5)} · 핀을 끌거나 지도를 클릭해 미세조정` : "지도를 클릭하거나 핀을 끌어 정류장 위치를 선택하세요"}
               </div>
             </div>
@@ -3600,11 +3601,11 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
                   setShowMapPicker(false);
                 }}
                 disabled={!pickerPin}
-                style={{ background: pickerPin ? "var(--color-primary)" : "var(--color-bg-soft)", border: pickerPin ? "none" : "1px solid var(--color-line)", borderRadius:8, padding:"8px 16px", color: pickerPin ? "#fff" : "var(--color-label-alt)", fontSize:13, fontWeight:700, cursor: pickerPin ? "pointer" : "default", fontFamily:"inherit", opacity: pickerPin ? 1 : 0.6 }}>
+                style={{ background: pickerPin ? "var(--color-primary)" : "var(--color-bg-soft)", border: pickerPin ? "none" : "1px solid var(--color-line)", borderRadius:8, padding:"8px 16px", color: pickerPin ? "#fff" : "var(--color-label-alt)", fontSize:14.5, fontWeight:700, cursor: pickerPin ? "pointer" : "default", fontFamily:"inherit", opacity: pickerPin ? 1 : 0.6 }}>
                 이 위치로 선택
               </button>
               <button onClick={() => setShowMapPicker(false)}
-                style={{ background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:8, padding:"8px 14px", color:"var(--color-label-mute)", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>
+                style={{ background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:8, padding:"8px 14px", color:"var(--color-label-mute)", fontSize:14.5, cursor:"pointer", fontFamily:"inherit" }}>
                 취소
               </button>
             </div>
@@ -3654,7 +3655,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
 
           {/* 하단 안내 */}
           <div style={{ background:"var(--color-bg)", padding:"10px 16px", borderTop:"1px solid var(--color-line)", flexShrink:0 }}>
-            <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center" }}>
+            <div style={{ fontSize:13.5, color:"var(--color-label-mute)", textAlign:"center" }}>
               지도를 클릭하면 핀이 찍힙니다 · 빨간 마커는 기존 정류장 위치입니다
             </div>
           </div>
@@ -3667,18 +3668,18 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
           {/* 헤더 */}
           <div style={{ background:"var(--color-bg)", padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", flexShrink:0, gap:12 }}>
             <div style={{ minWidth:0 }}>
-              <div style={{ fontSize:14, fontWeight:700 }}>🛣 경로 그리기</div>
-              <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:"60vw" }}>
+              <div style={{ fontSize:15, fontWeight:700 }}>🛣 경로 그리기</div>
+              <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:"60vw" }}>
                 {pathRoute.name} · 정점 {pathPoints.length}개{selectedIdx!=null ? ` · 선택 #${selectedIdx+1}` : ""}
               </div>
             </div>
             <div style={{ display:"flex", gap:8, flexShrink:0 }}>
               <button onClick={handlePathSave} disabled={pathLoading}
-                style={{ background:"var(--color-primary)", border:"none", borderRadius:8, padding:"8px 16px", color:"#fff", fontSize:13, fontWeight:700, cursor:pathLoading?"default":"pointer", fontFamily:"inherit", opacity:pathLoading?0.6:1 }}>
+                style={{ background:"var(--color-primary)", border:"none", borderRadius:8, padding:"8px 16px", color:"#fff", fontSize:14.5, fontWeight:700, cursor:pathLoading?"default":"pointer", fontFamily:"inherit", opacity:pathLoading?0.6:1 }}>
                 {pathLoading ? "저장 중..." : "경로 저장"}
               </button>
               <button onClick={closePathDraw}
-                style={{ background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:8, padding:"8px 14px", color:"var(--color-label-mute)", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>
+                style={{ background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", borderRadius:8, padding:"8px 14px", color:"var(--color-label-mute)", fontSize:14.5, cursor:"pointer", fontFamily:"inherit" }}>
                 취소
               </button>
             </div>
@@ -3699,7 +3700,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
               style={{...S.editBtn, background:prependMode?"var(--color-primary)":undefined, color:prependMode?"#fff":undefined, borderColor:prependMode?"var(--color-primary)":undefined}}>
               {prependMode ? "✓ 앞에 추가 모드" : "↟ 앞에 추가"}
             </button>
-            <span style={{ fontSize:11, color:"var(--color-label-alt)", marginLeft:"auto" }}>
+            <span style={{ fontSize:12.5, color:"var(--color-label-alt)", marginLeft:"auto" }}>
               {prependMode
                 ? "지도 클릭=출발점 앞에 추가 · ⊕=중간 삽입 · 핀 드래그=이동 · 핀 클릭=선택"
                 : "지도 클릭=뒤에 추가 · ⊕=중간 삽입 · 핀 드래그=이동 · 핀 클릭=선택"}
@@ -3784,7 +3785,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
 
           {/* 하단 안내 */}
           <div style={{ background:"var(--color-bg)", padding:"10px 16px", borderTop:"1px solid var(--color-line)", flexShrink:0 }}>
-            <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center" }}>
+            <div style={{ fontSize:13.5, color:"var(--color-label-mute)", textAlign:"center" }}>
               빨간 마커는 정류장 위치(참고용)입니다 · 경로는 도로를 따라 직접 그려주세요 (자동 도로 연결 없음)
             </div>
           </div>
@@ -3827,7 +3828,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
           {/* 표시 순서 — 승객·직원앱 노선 목록 정렬 기준. 비워두면 목록 맨 뒤(출발시간순). 2026-07-10 */}
           <label style={S.label}>표시 순서</label>
           <input style={S.input} type="number" placeholder="비워두면 맨 뒤 (작을수록 위)" value={form.order} onChange={e=>setForm({...form,order:e.target.value})} />
-          <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:-6, marginBottom:8 }}>
+          <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginTop:-6, marginBottom:8 }}>
             승객·직원앱 노선 목록에 보이는 순서입니다. 목록에서 ▲▼ 버튼으로도 바꿀 수 있습니다.
           </div>
           {/* 표시 시간 — 승객·직원앱에서 이 노선 차량을 보여줄 시간대(2026-08-05 회의 #2·#3).
@@ -3836,10 +3837,10 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
           <label style={S.label}>표시 시간</label>
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
             <input style={{...S.input, flex:1}} type="time" value={form.displayStart} onChange={e=>setForm({...form,displayStart:e.target.value})} />
-            <span style={{ fontSize:13, color:"var(--color-label-mute)" }}>~</span>
+            <span style={{ fontSize:14.5, color:"var(--color-label-mute)" }}>~</span>
             <input style={{...S.input, flex:1}} type="time" value={form.displayEnd} onChange={e=>setForm({...form,displayEnd:e.target.value})} />
           </div>
-          <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:-2, marginBottom:8, lineHeight:1.5 }}>
+          <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginTop:-2, marginBottom:8, lineHeight:1.5 }}>
             승객·직원앱에 이 노선 차량이 보이는 시간대입니다. <b>비워두면 출발시간 기준으로 자동</b>
             (회사 관리 &gt; 기본 표시 범위). 하루에 여러 번 도는 노선은 직접 넣어주세요.
             <br />관리자 실시간 관제에는 시간과 무관하게 항상 보입니다.
@@ -3849,10 +3850,10 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
           <label style={S.label}>태깅 가능 시간</label>
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
             <input style={{...S.input, flex:1}} type="time" value={form.boardStart} onChange={e=>setForm({...form,boardStart:e.target.value})} />
-            <span style={{ fontSize:13, color:"var(--color-label-mute)" }}>~</span>
+            <span style={{ fontSize:14.5, color:"var(--color-label-mute)" }}>~</span>
             <input style={{...S.input, flex:1}} type="time" value={form.boardEnd} onChange={e=>setForm({...form,boardEnd:e.target.value})} />
           </div>
-          <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:-2, marginBottom:8, lineHeight:1.5 }}>
+          <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginTop:-2, marginBottom:8, lineHeight:1.5 }}>
             비워두면 시간 제한 없이 태깅됩니다.
           </div>
           {/* 탑승 QR 방향(노선 단위 override) — 혼승 노선 대응. 미설정 시 협력사 정책 따름. 2026-05-27 */}
@@ -3863,7 +3864,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
             <option value="driver-qr">기사 발행 → 승객 스캔 (강제)</option>
             <option value="passenger-qr">승객 발행 → 기사 스캔 (강제)</option>
           </select>
-          <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:-2, marginBottom:6, lineHeight:1.4 }}>
+          <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginTop:-2, marginBottom:6, lineHeight:1.4 }}>
             여러 협력사 승객이 같이 타는 혼승 노선은 "강제"로 한쪽을 명시하세요.
           </div>
           {/* 🛏 빈 차 확인 대상(2026-08-25 미팅) — way "슬리핑 차일드 운용하는 노선 선택이
@@ -3876,7 +3877,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
               style={{ width: 16, height: 16, cursor: "pointer" }} />
             🛏 빈 차 확인 대상 노선
           </label>
-          <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:-2, marginBottom:6, lineHeight:1.4 }}>
+          <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginTop:-2, marginBottom:6, lineHeight:1.4 }}>
             켜면 <b>빈 차 확인</b> 탭 현황에 이 노선이 올라옵니다. <b>마지막 운행(하교·방과후)</b>에만 켜세요 —
             등교처럼 뒤에 운행이 더 있는 노선은 확인할 필요가 없습니다.
           </div>
@@ -4004,17 +4005,17 @@ function DriverTab({ companyId, vehicles, allowed, currentUserUid }) {
           <input style={S.input} placeholder="홍길동" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/>
           <label style={S.label}>사번 {editItem?"":"*"}</label>
           <input style={{...S.input,...(editItem?{opacity:0.6}:{})}} placeholder="예: 10001" value={form.empNo} onChange={e=>setForm({...form,empNo:e.target.value})} readOnly={!!editItem} autoComplete="off" name="driver-empno-noauto"/>
-          {!editItem && <div style={{fontSize:11,color:"var(--color-label-mute)",margin:"-2px 0 2px",lineHeight:1.45}}>기사앱 <b>로그인 ID</b>입니다(숫자·영문, 회사 사번 사용 권장). 기사는 <b>사번 + PIN</b>으로 기사앱에 로그인합니다.</div>}
+          {!editItem && <div style={{fontSize:12.5,color:"var(--color-label-mute)",margin:"-2px 0 2px",lineHeight:1.45}}>기사앱 <b>로그인 ID</b>입니다(숫자·영문, 회사 사번 사용 권장). 기사는 <b>사번 + PIN</b>으로 기사앱에 로그인합니다.</div>}
           <label style={S.label}>{editItem?"비밀번호 변경 (변경 시에만 입력)":"PIN * (최소 6자리)"}</label>
           <input style={S.input} placeholder={editItem?"변경하지 않으려면 비워두세요":"예: 000000"} type="password" value={form.pin} onChange={e=>setForm({...form,pin:e.target.value})} autoComplete="new-password" name="driver-pin-noauto"/>
-          {!editItem && <div style={{fontSize:11,color:"var(--color-label-mute)",margin:"-2px 0 2px",lineHeight:1.45}}>기사앱 <b>로그인 비밀번호</b>입니다(숫자 6자리 이상). 기사가 첫 로그인 후 변경하도록 안내하세요.</div>}
+          {!editItem && <div style={{fontSize:12.5,color:"var(--color-label-mute)",margin:"-2px 0 2px",lineHeight:1.45}}>기사앱 <b>로그인 비밀번호</b>입니다(숫자 6자리 이상). 기사가 첫 로그인 후 변경하도록 안내하세요.</div>}
           <label style={S.label}>배정 차량</label>
           <SearchableSelect value={form.vehicleId} onChange={handleVehicleSelect}
             options={visibleVehicles.map(v => ({ value:v.id, label:`${v.plateNo} (${v.model || v.type || v.id})` }))}
             placeholder="차량 선택 (검색·선택사항)" />
           <label style={S.label}>연락처</label>
           <input style={S.input} placeholder="010-0000-0000" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/>
-          {error&&<p style={{color:"var(--color-destructive)",fontSize:13,margin:0}}>{error}</p>}
+          {error&&<p style={{color:"var(--color-destructive)",fontSize:14.5,margin:0}}>{error}</p>}
           <div style={{display:"flex",gap:8,marginTop:8}}>
             <button style={{...S.addBtn,flex:1,opacity:loading?0.6:1}} onClick={handleSave} disabled={loading}>{loading?"저장 중...":"저장"}</button>
             <button style={{...S.closeBtn,flex:1}} onClick={()=>setShowForm(false)}>취소</button>
@@ -4164,7 +4165,7 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
       <div style={S.panelHeader}>
         <span style={{fontSize:16,fontWeight:700}}>차량 관리</span>
         <div style={{display:"flex",gap:12,alignItems:"center"}}>
-          <span style={{fontSize:13,color:"var(--color-label-mute)"}}>총 {visibleVehicles.length}대</span>
+          <span style={{fontSize:14.5,color:"var(--color-label-mute)"}}>총 {visibleVehicles.length}대</span>
           <button style={S.addBtn} onClick={openAdd}>+ 차량 등록</button>
         </div>
       </div>
@@ -4175,7 +4176,7 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
             {visibleVehicles.length===0?<tr><td colSpan={9} style={{...S.td,textAlign:"center",color:"var(--color-label-alt)"}}>등록된 차량이 없습니다</td></tr>
             :visibleVehicles.map(v=>(
               <tr key={v.id} style={S.tr}>
-                <td style={{...S.td,color:"var(--color-label-mute)",fontSize:12}}>{v.id}</td>
+                <td style={{...S.td,color:"var(--color-label-mute)",fontSize:13.5}}>{v.id}</td>
                 <td style={{...S.td,fontWeight:600}}>{v.plateNo}</td>
                 <td style={S.td}>{v.gpsSource==="device"
                   ? <span style={{...S.statusBadge,background:"var(--color-primary-soft)",color:"var(--color-primary-deep)"}}>🛰️ 단말{v.carId?` (${v.carId})`:""}</span>
@@ -4184,7 +4185,7 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
                 <td style={S.td}>{v.model||"–"}</td>
                 <td style={S.td}>{v.seats?`${v.seats}석`:"–"}</td>
                 <td style={S.td}>{v.year||"–"}</td>
-                <td style={{...S.td,fontSize:12,color:"var(--color-label-mute)"}}>{v.memo||"–"}</td>
+                <td style={{...S.td,fontSize:13.5,color:"var(--color-label-mute)"}}>{v.memo||"–"}</td>
                 <td style={S.td}>
                   <button style={S.editBtn} onClick={()=>openEdit(v)}>수정</button>
                   <button style={S.editBtn} onClick={()=>setQrVehicle(v)}>🖨 QR</button>
@@ -4205,7 +4206,7 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
             {[["mobile","📱 모바일 앱"],["device","🛰️ GPS 단말"]].map(([val,lbl])=>(
               <button key={val} type="button"
                 onClick={()=>setForm(f=>({...f,gpsSource:val}))}
-                style={{flex:1,padding:"9px 8px",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",
+                style={{flex:1,padding:"9px 8px",borderRadius:8,fontSize:14.5,fontWeight:600,cursor:"pointer",
                   border:form.gpsSource===val?"1.5px solid var(--color-primary)":"1px solid var(--color-border)",
                   background:form.gpsSource===val?"var(--color-primary-soft)":"var(--color-bg)",
                   color:form.gpsSource===val?"var(--color-primary-deep)":"var(--color-label-mute)"}}>
@@ -4215,7 +4216,7 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
           </div>
           {form.gpsSource==="device"&&(
             <div style={{marginTop:8,padding:12,borderRadius:8,background:"var(--color-bg-alt)"}}>
-              <div style={{fontSize:12,color:"var(--color-label-mute)",marginBottom:6}}>
+              <div style={{fontSize:13.5,color:"var(--color-label-mute)",marginBottom:6}}>
                 GPS 단말은 서버가 busin 편성의 carId 로 위치를 조회해 자동 추적합니다. 차량번호로 carId 를 조회하세요.
               </div>
               <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -4224,7 +4225,7 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
                   {carIdLoading?"조회 중…":"번호로 carId 조회"}
                 </button>
               </div>
-              {carIdMsg&&<div style={{fontSize:12,marginTop:6,color:carIdMsg.startsWith("⚠")||carIdMsg.startsWith("조회 실패")?"var(--color-destructive)":"var(--color-positive)"}}>{carIdMsg}</div>}
+              {carIdMsg&&<div style={{fontSize:13.5,marginTop:6,color:carIdMsg.startsWith("⚠")||carIdMsg.startsWith("조회 실패")?"var(--color-destructive)":"var(--color-positive)"}}>{carIdMsg}</div>}
             </div>
           )}
           <label style={S.label}>차종</label>
@@ -4248,7 +4249,7 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
       {qrVehicle&&(
         <div style={S.overlay}><div style={S.modal}>
           <div style={S.modalTitle}>고정 QR — {qrVehicle.plateNo||qrVehicle.id}</div>
-          <div style={{fontSize:12,color:"var(--color-label-mute)",marginBottom:12,lineHeight:1.6}}>
+          <div style={{fontSize:13.5,color:"var(--color-label-mute)",marginBottom:12,lineHeight:1.6}}>
             차량에 부착하는 고정 QR입니다. 직원이 스캔하면 그날 이 차량 배차 노선으로 탑승 기록됩니다(만료 없음·재사용). 오늘 배차가 있어야 탑승됩니다.
           </div>
           <div style={{display:"flex",justifyContent:"center",padding:"8px 0"}}>
@@ -4256,7 +4257,7 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
               ? <img src={qrDataUrl} alt="고정 QR" style={{width:240,height:240}}/>
               : <div style={{width:240,height:240,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--color-label-mute)"}}>QR 생성 중…</div>}
           </div>
-          <div style={{fontSize:11,color:"var(--color-label-mute)",wordBreak:"break-all",textAlign:"center",marginTop:8}}>
+          <div style={{fontSize:12.5,color:"var(--color-label-mute)",wordBreak:"break-all",textAlign:"center",marginTop:8}}>
             {getStaticBoardingUrl({companyId,vehicleId:qrVehicle.id,partnerCode:qrPartner||undefined})}
           </div>
           {/* 거래처(선택) — 이 차량이 한 거래처 전용일 때만 고른다.
@@ -4264,7 +4265,7 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
                  여러 거래처를 뛰는 차량에는 고르지 말 것(인쇄물이 한 색으로 굳는다).
               ⚠ `pc` 는 표시 전용이다 — 탑승 판정은 서버가 토큰의 사번과 오늘 배차로만 한다. */}
           <div style={{marginTop:14}}>
-            <div style={{fontSize:12,fontWeight:700,color:"var(--color-label-mute)",marginBottom:6}}>
+            <div style={{fontSize:13.5,fontWeight:700,color:"var(--color-label-mute)",marginBottom:6}}>
               거래처 (선택 — 이 차량이 한 거래처 전용일 때만)
             </div>
             <select value={qrPartner} style={{...S.input,marginBottom:0}}
@@ -4287,11 +4288,11 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
           {/* 인쇄 톤 — 거래처를 고르면 그 프리셋으로 맞춰지지만, 뽑는 사람이 바꿀 수 있다.
               기본은 예전 인쇄물 그대로라 회귀 0. */}
           <div style={{display:"flex",alignItems:"center",gap:8,marginTop:14,flexWrap:"wrap"}}>
-            <span style={{fontSize:12,fontWeight:700,color:"var(--color-label-mute)"}}>인쇄 톤</span>
+            <span style={{fontSize:13.5,fontWeight:700,color:"var(--color-label-mute)"}}>인쇄 톤</span>
             {Object.entries(QR_TONES).map(([k,v])=>(
               <button key={k} onClick={()=>setQrTone(k)}
                 style={{display:"inline-flex",alignItems:"center",gap:6,padding:"5px 12px",borderRadius:999,
-                  cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700,
+                  cursor:"pointer",fontFamily:"inherit",fontSize:13.5,fontWeight:700,
                   border:`2px solid ${qrTone===k?"var(--color-primary)":"var(--color-line)"}`,
                   background:qrTone===k?"var(--color-primary-soft)":"var(--color-bg)",
                   color:"var(--color-label)"}}>
@@ -4306,8 +4307,8 @@ function VehicleTab({ companyId, vehicles, allowed, currentUserUid }) {
           </div>
           {/* 슬리핑 차일드 — 맨 뒷좌석 확인 QR(2026-08-18 건의). 탑승 QR 과 경로가 다르다. */}
           <div style={{marginTop:18,paddingTop:16,borderTop:"1px solid var(--color-line)"}}>
-            <div style={{fontSize:13,fontWeight:800,color:"var(--color-label)"}}>빈 차 확인 QR (맨 뒷좌석)</div>
-            <div style={{fontSize:12,color:"var(--color-label-mute)",margin:"6px 0 10px",lineHeight:1.6}}>
+            <div style={{fontSize:14.5,fontWeight:800,color:"var(--color-label)"}}>빈 차 확인 QR (맨 뒷좌석)</div>
+            <div style={{fontSize:13.5,color:"var(--color-label-mute)",margin:"6px 0 10px",lineHeight:1.6}}>
               운행이 끝나면 기사가 맨 뒷좌석까지 가서 이 QR을 스캔합니다. 확인 여부는 실시간 관제에서 보입니다.
             </div>
             <div style={{display:"flex",justifyContent:"center"}}>
@@ -4371,7 +4372,7 @@ function SimulatorTab({ companyId, vehicles, drivers }) {
       <div style={{...S.mapSidebar,padding:"0 0 16px",...(isMobile?S.mapSidebarMobile:{})}}>
         <div style={S.panelHeader}>
           <span style={{fontWeight:700,color:"var(--color-label)"}}>🧪 GPS 시뮬레이터</span>
-          <span style={{fontSize:11,fontWeight:600,color:running?"var(--color-positive)":"var(--color-label-mute)"}}>{running?"● 송출 중":"○ 정지"}</span>
+          <span style={{fontSize:12.5,fontWeight:600,color:running?"var(--color-positive)":"var(--color-label-mute)"}}>{running?"● 송출 중":"○ 정지"}</span>
         </div>
         <div style={{padding:"16px 16px 0",display:"flex",flexDirection:"column",gap:10}}>
           <div><label style={S.label}>기사 선택</label>
@@ -4407,9 +4408,9 @@ function SimulatorTab({ companyId, vehicles, drivers }) {
             ?<button style={{...S.addBtn,padding:"10px"}} onClick={handleStart}>🟢 시뮬레이터 시작</button>
             :<button style={{...S.addBtn,background:"var(--color-destructive)",padding:"10px"}} onClick={handleStop}>🔴 시뮬레이터 종료</button>
           }
-          <button style={{...S.editBtn,padding:"8px",fontSize:13}} onClick={doSend} disabled={running}>📡 1회 수동 전송</button>
+          <button style={{...S.editBtn,padding:"8px",fontSize:14.5}} onClick={doSend} disabled={running}>📡 1회 수동 전송</button>
         </div>
-        <div style={{margin:"12px 16px 0",background:"var(--color-bg-alt)",borderRadius:8,padding:10,fontSize:11,color:"var(--color-label-mute)",maxHeight:200,overflowY:"auto"}}>
+        <div style={{margin:"12px 16px 0",background:"var(--color-bg-alt)",borderRadius:8,padding:10,fontSize:12.5,color:"var(--color-label-mute)",maxHeight:200,overflowY:"auto"}}>
           {log.length===0?<span style={{color:"var(--color-label-alt)"}}>로그 없음</span>:log.map((l,i)=><div key={i}>{l}</div>)}
         </div>
       </div>
@@ -4780,7 +4781,7 @@ function HistoryTab({ companyId, vehicles, allowed }) {
       <div style={{...S.mapSidebar,...(isMobile?S.mapSidebarMobile:{})}}>
         <div style={S.panelHeader}>
           <span style={{fontWeight:700}}>📅 운행 이력</span>
-          {points.length>0&&<span style={{fontSize:12,fontWeight:600,color:"var(--color-positive)"}}>{points.length}개 포인트</span>}
+          {points.length>0&&<span style={{fontSize:13.5,fontWeight:600,color:"var(--color-positive)"}}>{points.length}개 포인트</span>}
         </div>
         <div style={{padding:"14px 16px 10px",display:"flex",flexDirection:"column",gap:10,borderBottom:"1px solid var(--color-line-soft)"}}>
           <div><label style={S.label}>날짜</label><input type="date" style={S.dateInput} value={date} onChange={e=>{ if(e.target.value) { setDate(e.target.value); setSelectedDispatchId(null); setPoints([]); setRouteFilter("전체"); setAdhRows(null); }}}/></div>
@@ -4789,7 +4790,7 @@ function HistoryTab({ companyId, vehicles, allowed }) {
           </div>
           {/* 노선 필터(2026-09-17) — 그 날짜·거래처에 배차가 있는 노선만 후보. 후보에 없는 값이 남으면 전체로 취급. */}
           <div><label style={S.label}>노선</label>
-            <select style={{...S.input,fontSize:13,padding:"8px 10px"}}
+            <select style={{...S.input,fontSize:14.5,padding:"8px 10px"}}
               value={routeOptions.some(o => o.routeId === routeFilter) ? routeFilter : "전체"}
               onChange={e=>setRouteFilter(e.target.value)}>
               <option value="전체">전체 노선 · {partnerDispatches.length}건</option>
@@ -4798,17 +4799,17 @@ function HistoryTab({ companyId, vehicles, allowed }) {
           </div>
           {/* 직접 차량 선택 (보조 — 노선별 배차가 없는 날·이전 데이터 조회용) */}
           <details style={{ background:"var(--color-bg-alt)", borderRadius:8, padding:"8px 10px" }}>
-            <summary style={{ cursor:"pointer", fontSize:11, fontWeight:700, color:"var(--color-label-mute)" }}>차량 직접 선택 (보조)</summary>
+            <summary style={{ cursor:"pointer", fontSize:12.5, fontWeight:700, color:"var(--color-label-mute)" }}>차량 직접 선택 (보조)</summary>
             <div style={{ marginTop:8, display:"flex", gap:6 }}>
-              <select style={{...S.input,flex:1,fontSize:12,padding:"7px 9px"}} value={vehicleId} onChange={e=>setVehicleId(e.target.value)}>
+              <select style={{...S.input,flex:1,fontSize:13.5,padding:"7px 9px"}} value={vehicleId} onChange={e=>setVehicleId(e.target.value)}>
                 <option value="">차량 선택</option>
                 {filteredVehicles.map(v=><option key={v.id} value={v.id}>{v.plateNo}</option>)}
               </select>
-              <button style={{...S.addBtn,padding:"6px 10px",fontSize:12}} onClick={handleLoad} disabled={loading||!vehicleId}>{loading?"…":"조회"}</button>
+              <button style={{...S.addBtn,padding:"6px 10px",fontSize:13.5}} onClick={handleLoad} disabled={loading||!vehicleId}>{loading?"…":"조회"}</button>
             </div>
           </details>
           {/* 노선 준수 점검(2026-09-21) — 배차된 차량이 그 노선을 실제로 지났는지 그날 궤적으로 채점 */}
-          <button style={{...S.addBtn,width:"100%",padding:"9px 10px",fontSize:12.5,background:"var(--color-bg-alt)",color:"var(--color-label)",border:"1px solid var(--color-line)"}}
+          <button style={{...S.addBtn,width:"100%",padding:"9px 10px",fontSize:14,background:"var(--color-bg-alt)",color:"var(--color-label)",border:"1px solid var(--color-line)"}}
             onClick={runAdherenceCheck} disabled={adhBusy || filteredDispatches.length === 0}>
             {adhBusy ? "점검 중…" : `🔍 노선 점검 · ${filteredDispatches.length}건`}
           </button>
@@ -4818,12 +4819,12 @@ function HistoryTab({ companyId, vehicles, allowed }) {
           {/* 노선 준수 점검 결과(2026-09-21) — 이상 건이 먼저 온다 */}
           {adhRows && (
             <div style={{ marginBottom:14, paddingBottom:12, borderBottom:"1px solid var(--color-line)" }}>
-              <div style={{fontSize:11,fontWeight:700,color:"var(--color-label-mute)",padding:"0 2px 6px",textTransform:"uppercase",letterSpacing:0.04}}>
+              <div style={{fontSize:12.5,fontWeight:700,color:"var(--color-label-mute)",padding:"0 2px 6px",textTransform:"uppercase",letterSpacing:0.04}}>
                 🔍 노선 점검 · {adhBad.length > 0
                   ? <span style={{color:"var(--color-destructive)"}}>이상 {adhBad.length}건</span>
                   : <span style={{color:"var(--color-positive)"}}>이상 없음</span>}
               </div>
-              <div style={{ fontSize:10, color:"var(--color-label-alt)", padding:"0 2px 8px", lineHeight:1.6 }}>
+              <div style={{ fontSize:12, color:"var(--color-label-alt)", padding:"0 2px 8px", lineHeight:1.6 }}>
                 배차된 차량의 그날 궤적이 그 노선 정류장을 지났는지 봅니다. <b>통과율</b>과 <b>최근접 중앙값</b>이
                 둘 다 나쁠 때만 이상으로 봅니다 — 한쪽만 보면 정류장이 도로에서 떨어진 노선이 매일 걸립니다.
                 {adhPending > 0 && <> · 아직 출발 전인 회차 <b>{adhPending}건</b>은 뺐습니다.</>}
@@ -4841,22 +4842,22 @@ function HistoryTab({ companyId, vehicles, allowed }) {
                     border:`1px solid ${r.verdict === "ok" ? "var(--color-line-soft)" : tone}`,
                   }}>
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:8 }}>
-                      <span style={{ fontSize:12, fontWeight:800, color:"var(--color-label)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                      <span style={{ fontSize:13.5, fontWeight:800, color:"var(--color-label)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                         {r.departTime} {r.routeName}
                       </span>
-                      <span style={{ fontSize:10.5, fontWeight:700, color:tone, whiteSpace:"nowrap" }}>{mark}</span>
+                      <span style={{ fontSize:12, fontWeight:700, color:tone, whiteSpace:"nowrap" }}>{mark}</span>
                     </div>
-                    <div style={{ fontSize:10.5, color:"var(--color-label-mute)", marginTop:3 }}>
+                    <div style={{ fontSize:12, color:"var(--color-label-mute)", marginTop:3 }}>
                       {r.vehicleNo || "차량 미지정"}{r.driverName ? ` · ${r.driverName}` : ""} · {adherenceLabel(r.score)}
                     </div>
                     {r.verdict === "offroute" && (
-                      <div style={{ fontSize:10.5, color:"var(--color-destructive)", marginTop:4, lineHeight:1.5 }}>
+                      <div style={{ fontSize:12, color:"var(--color-destructive)", marginTop:4, lineHeight:1.5 }}>
                         이 차량은 그 노선을 거의 지나지 않았습니다. 실제로 다른 차량이 운행 중인지 확인하세요 —
                         배차와 실 운행차가 다르면 승객앱 위치·도착 알림·기사 인증이 모두 어긋납니다.
                       </div>
                     )}
                     {r.verdict === "insufficient" && (
-                      <div style={{ fontSize:10.5, color:"var(--color-label-alt)", marginTop:4 }}>
+                      <div style={{ fontSize:12, color:"var(--color-label-alt)", marginTop:4 }}>
                         궤적 {r.score.n}점 · 정류장 {r.score.total}개 — 판단할 근거가 모자랍니다(단말 신호 부족·정류장 좌표 미등록).
                       </div>
                     )}
@@ -4865,17 +4866,17 @@ function HistoryTab({ companyId, vehicles, allowed }) {
               })}
             </div>
           )}
-          <div style={{ fontSize:11, fontWeight:700, color:"var(--color-label-mute)", padding:"4px 2px 10px", textTransform:"uppercase", letterSpacing:0.04 }}>
+          <div style={{ fontSize:12.5, fontWeight:700, color:"var(--color-label-mute)", padding:"4px 2px 10px", textTransform:"uppercase", letterSpacing:0.04 }}>
             노선별 배차 · {filteredDispatches.length}건
           </div>
           {dispatchGroups.length === 0 ? (
             <div style={{ ...S.empty, padding:"24px 12px" }}>해당 날짜에 배차된 노선이 없습니다</div>
           ) : dispatchGroups.map(group => (
             <div key={group.routeId || "_unassigned"} style={{ marginBottom:14 }}>
-              <div style={{ fontSize:13, fontWeight:800, color:"var(--color-label)", marginBottom:6, display:"flex", alignItems:"center", gap:6 }}>
+              <div style={{ fontSize:14.5, fontWeight:800, color:"var(--color-label)", marginBottom:6, display:"flex", alignItems:"center", gap:6 }}>
                 <span style={{ width:3, height:14, background:"var(--color-primary)", borderRadius:2 }}/>
                 {group.routeName}
-                <span style={{ fontSize:11, fontWeight:600, color:"var(--color-label-mute)", marginLeft:"auto" }}>{group.items.length}건</span>
+                <span style={{ fontSize:12.5, fontWeight:600, color:"var(--color-label-mute)", marginLeft:"auto" }}>{group.items.length}건</span>
               </div>
               <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
                 {group.items.map(d => {
@@ -4894,14 +4895,14 @@ function HistoryTab({ companyId, vehicles, allowed }) {
                         transition:"all .12s",
                       }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:8 }}>
-                        <span style={{ fontSize:13, fontWeight:800, color: isSelected ? "var(--color-primary-deep)" : "var(--color-label)", fontFamily:"var(--font-mono)" }}>
+                        <span style={{ fontSize:14.5, fontWeight:800, color: isSelected ? "var(--color-primary-deep)" : "var(--color-label)", fontFamily:"var(--font-mono)" }}>
                           {d.departTime || "––:––"}
                         </span>
-                        <span style={{ fontSize:11, color:"var(--color-label-mute)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        <span style={{ fontSize:12.5, color:"var(--color-label-mute)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                           {d.driverName || "기사 미지정"}
                         </span>
                       </div>
-                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:4, fontSize:11 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:4, fontSize:12.5 }}>
                         <span style={{ color:"var(--color-label-mute)" }}>
                           {d.vehicleNo || "차량 미지정"}
                           {/* 통과 카운트 — stops 캐시 로드 후에만 분수 표시, 미로드시 "—" */}
@@ -4910,7 +4911,7 @@ function HistoryTab({ companyId, vehicles, allowed }) {
                           </span>
                         </span>
                         {summ.delayMin != null && (
-                          <span style={{ color: delayColor, fontWeight:700, fontSize:11 }}>
+                          <span style={{ color: delayColor, fontWeight:700, fontSize:12.5 }}>
                             {summ.delayMin >= 2 ? `+${summ.delayMin}분` : summ.delayMin <= -2 ? `${summ.delayMin}분` : "정시"}
                           </span>
                         )}
@@ -4930,10 +4931,10 @@ function HistoryTab({ companyId, vehicles, allowed }) {
             const passedN = tl.filter(t => t.actualAt).length;
             return (
               <div style={{ marginTop:14, paddingTop:10, borderTop:"1px solid var(--color-line)" }}>
-                <div style={{fontSize:11,color:"var(--color-label-mute)",padding:"0 2px 4px",fontWeight:700,textTransform:"uppercase",letterSpacing:0.04}}>
+                <div style={{fontSize:12.5,color:"var(--color-label-mute)",padding:"0 2px 4px",fontWeight:700,textTransform:"uppercase",letterSpacing:0.04}}>
                   🕒 정류장 통과 시각 · {passedN}/{tl.length}
                 </div>
-                <div style={{ fontSize:10, color:"var(--color-label-alt)", padding:"0 2px 8px", lineHeight:1.5 }}>
+                <div style={{ fontSize:12, color:"var(--color-label-alt)", padding:"0 2px 8px", lineHeight:1.5 }}>
                   예정 → <b style={{color:"var(--color-label-mute)"}}>실제</b>(GPS 가 정류장 반경 {arriveRadius}m 에 처음 들어온 시각). ≈ 는 신호 복구로 추정한 값.
                 </div>
                 {tl.map(t => {
@@ -4947,14 +4948,14 @@ function HistoryTab({ companyId, vehicles, allowed }) {
                       border: `1px solid ${passed ? "var(--color-line)" : "transparent"}`,
                     }}>
                       <span style={{ width:8, height:8, borderRadius:"50%", flexShrink:0, background: passed ? "var(--color-positive)" : "#aaaaaa" }}/>
-                      <span style={{ flex:1, minWidth:0, fontSize:12, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                      <span style={{ flex:1, minWidth:0, fontSize:13.5, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
                         color: passed ? "var(--color-label)" : "var(--color-label-mute)" }}>{t.name}</span>
-                      <span style={{ fontSize:11, color:"var(--color-label-mute)", fontFamily:"var(--font-mono)" }}>{t.plannedAt || "––:––"}</span>
-                      <span style={{ fontSize:12, fontWeight:800, fontFamily:"var(--font-mono)", minWidth:44, textAlign:"right",
+                      <span style={{ fontSize:12.5, color:"var(--color-label-mute)", fontFamily:"var(--font-mono)" }}>{t.plannedAt || "––:––"}</span>
+                      <span style={{ fontSize:13.5, fontWeight:800, fontFamily:"var(--font-mono)", minWidth:44, textAlign:"right",
                         color: passed ? "var(--color-primary-deep)" : "var(--color-label-alt)" }}>
                         {passed ? `${t.estimated ? "≈" : ""}${t.actualAt}` : "미통과"}
                       </span>
-                      {t.delay.label && <span style={{ fontSize:10, fontWeight:700, color: delayColor, whiteSpace:"nowrap" }}>{t.delay.label}</span>}
+                      {t.delay.label && <span style={{ fontSize:12, fontWeight:700, color: delayColor, whiteSpace:"nowrap" }}>{t.delay.label}</span>}
                     </div>
                   );
                 })}
@@ -4964,12 +4965,12 @@ function HistoryTab({ companyId, vehicles, allowed }) {
           {/* GPS 포인트 리스트 — 배차 선택 후 로드된 경우 */}
           {points.length>0 && (
             <div style={{ marginTop:14, paddingTop:10, borderTop:"1px solid var(--color-line)" }}>
-              <div style={{fontSize:11,color:"var(--color-label-mute)",padding:"0 2px 4px",fontWeight:700,textTransform:"uppercase",letterSpacing:0.04}}>
+              <div style={{fontSize:12.5,color:"var(--color-label-mute)",padding:"0 2px 4px",fontWeight:700,textTransform:"uppercase",letterSpacing:0.04}}>
                 📍 GPS 포인트 · {points.length}개 ({vehicle?.plateNo || "–"})
               </div>
               {/* 표본 간격 요약 — "경로가 직선으로 나온다"의 답(2026-08-18).
                   지도의 파랑 선은 도로가 아니라 수신점을 이은 선이고, 점 사이 간격이 곧 직선의 길이다. */}
-              <div style={{ fontSize:10, color:"var(--color-label-alt)", padding:"0 2px 8px", lineHeight:1.6 }}>
+              <div style={{ fontSize:12, color:"var(--color-label-alt)", padding:"0 2px 8px", lineHeight:1.6 }}>
                 좌표 갱신 간격 중앙 <b style={{color:"var(--color-label-mute)"}}>{formatDuration(track.stats.medianMoveGapSec)}</b>
                 {" · "}점 사이 중앙 <b style={{color:"var(--color-label-mute)"}}>{track.stats.medianStepM ?? "–"}m</b>
                 {track.stats.maxStepM != null && <> (최대 {track.stats.maxStepM}m)</>}
@@ -4988,7 +4989,7 @@ function HistoryTab({ companyId, vehicles, allowed }) {
                 if (!r) return null;
                 const fmt = (ms) => { const dt = new Date(ms); return `${String(dt.getHours()).padStart(2,"0")}:${String(dt.getMinutes()).padStart(2,"0")}`; };
                 return (
-                  <div style={{ fontSize:10, color:"var(--color-label-alt)", padding:"0 2px 8px" }}>
+                  <div style={{ fontSize:12, color:"var(--color-label-alt)", padding:"0 2px 8px" }}>
                     배차 시간대 {fmt(r.start)}~{fmt(r.end)} 범위 필터 적용
                   </div>
                 );
@@ -4997,10 +4998,10 @@ function HistoryTab({ companyId, vehicles, allowed }) {
                 <div key={p.id} onClick={()=>{setSelected(p);setCenter({lat:p.lat,lng:p.lng});}}
                   style={{padding:"7px 10px",borderRadius:8,marginBottom:4,cursor:"pointer",background:selected?.id===p.id?"var(--color-primary-soft)":"var(--color-bg-alt)",border:`1px solid ${selected?.id===p.id?"var(--color-primary)":"var(--color-line)"}`}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <span style={{fontSize:11,fontWeight:700,color:"var(--color-primary)"}}>#{p.idx}</span>
-                    <span style={{fontSize:11,color:"var(--color-label-mute)"}}>{formatTs(p.ts)}</span>
+                    <span style={{fontSize:12.5,fontWeight:700,color:"var(--color-primary)"}}>#{p.idx}</span>
+                    <span style={{fontSize:12.5,color:"var(--color-label-mute)"}}>{formatTs(p.ts)}</span>
                   </div>
-                  <div style={{fontSize:11,color:"var(--color-label-mute)",marginTop:2}}>{p.speed??0} km/h</div>
+                  <div style={{fontSize:12.5,color:"var(--color-label-mute)",marginTop:2}}>{p.speed??0} km/h</div>
                 </div>
               ))}
             </div>
@@ -5111,7 +5112,7 @@ function HistoryTab({ companyId, vehicles, allowed }) {
             position:"absolute", top:12, left:12, zIndex:5,
             background:"rgba(255,255,255,0.95)", backdropFilter:"blur(8px)", WebkitBackdropFilter:"blur(8px)",
             border:"1px solid var(--color-line)", borderRadius:10, padding:"8px 12px",
-            boxShadow:"var(--shadow-soft)", display:"flex", gap:14, fontSize:12,
+            boxShadow:"var(--shadow-soft)", display:"flex", gap:14, fontSize:13.5,
           }}>
             <label style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",color:"var(--color-label)"}}>
               <input type="checkbox" checked={showStopRadius} onChange={e=>setShowStopRadius(e.target.checked)} />
@@ -5134,7 +5135,7 @@ function HistoryTab({ companyId, vehicles, allowed }) {
                   padding:"3px 10px",borderRadius:8,border:"1px solid var(--color-primary)",
                   background: (radiusSaving||radiusInput===arriveRadius) ? "var(--color-bg)" : "var(--color-primary)",
                   color: (radiusSaving||radiusInput===arriveRadius) ? "var(--color-label-mute)" : "#fff",
-                  fontWeight:700,fontSize:12,
+                  fontWeight:700,fontSize:13.5,
                   cursor:(radiusSaving||radiusInput===arriveRadius)?"default":"pointer",whiteSpace:"nowrap",
                 }}>
                 {radiusSaving ? "저장 중…" : radiusInput===arriveRadius ? "저장됨" : "저장"}
@@ -5149,7 +5150,7 @@ function HistoryTab({ companyId, vehicles, allowed }) {
             position:"absolute", left:12, bottom:12, zIndex:5,
             background:"rgba(255,255,255,0.92)", backdropFilter:"blur(8px)", WebkitBackdropFilter:"blur(8px)",
             border:"1px solid var(--color-line)", borderRadius:8, padding:"7px 10px",
-            boxShadow:"var(--shadow-soft)", fontSize:11, color:"var(--color-label-mute)",
+            boxShadow:"var(--shadow-soft)", fontSize:12.5, color:"var(--color-label-mute)",
             display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", maxWidth:"min(560px, 70%)",
           }}>
             {points.length > 0 && (
@@ -5192,7 +5193,7 @@ function HistoryTab({ companyId, vehicles, allowed }) {
           </div>
         )}
         {points.length===0&&!loading&&(
-          <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",background:"rgba(255,255,255,0.92)",backdropFilter:"blur(8px)",WebkitBackdropFilter:"blur(8px)",border:"1px solid var(--color-line)",borderRadius:12,padding:"20px 32px",textAlign:"center",color:"var(--color-label-mute)",fontSize:14,boxShadow:"var(--shadow-float)",lineHeight:1.6}}>
+          <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",background:"rgba(255,255,255,0.92)",backdropFilter:"blur(8px)",WebkitBackdropFilter:"blur(8px)",border:"1px solid var(--color-line)",borderRadius:12,padding:"20px 32px",textAlign:"center",color:"var(--color-label-mute)",fontSize:15,boxShadow:"var(--shadow-float)",lineHeight:1.6}}>
             왼쪽 사이드바에서<br/>노선·배차를 선택하면<br/>GPS 이력이 표시됩니다
           </div>
         )}
@@ -5373,7 +5374,7 @@ function BoardingStatsTab({ companyId, allowed }) {
                     display: "flex", alignItems: "center", gap: 8, padding: "6px 12px",
                     background: code === "_unassigned" ? "var(--color-bg-soft)" : "var(--color-primary-soft)",
                     border: `1px solid ${code === "_unassigned" ? "var(--color-line)" : "rgba(0,102,255,.18)"}`,
-                    borderRadius: 999, fontSize: 12, fontWeight: 600,
+                    borderRadius: 999, fontSize: 13.5, fontWeight: 600,
                   }}>
                     <span style={{ color: code === "_unassigned" ? "var(--color-label-mute)" : "var(--color-primary-deep)" }}>
                       {code === "_unassigned" ? "미지정" : partnerNameOf(code)}
@@ -5387,7 +5388,7 @@ function BoardingStatsTab({ companyId, allowed }) {
 
           {/* 정류장별 GPS 매핑 집계 */}
           <div style={panelBox}>
-            <div style={panelHead}>📍 노선별 정류장 탑승 <span style={{ fontSize: 11, fontWeight: 600, color: "var(--color-label-mute)", marginLeft: 6 }}>(GPS 매핑·반경 300m · 운행 순서)</span></div>
+            <div style={panelHead}>📍 노선별 정류장 탑승 <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--color-label-mute)", marginLeft: 6 }}>(GPS 매핑·반경 300m · 운행 순서)</span></div>
             {(() => {
               const { mapped, unmapped, noGps } = aggregateBoardingsByStop(filtered, stopsByRoute, 300);
               // 노선으로 묶고 그 안은 버스가 지나는 순서 — 탑승수 내림차순 한 줄 나열은
@@ -5416,7 +5417,7 @@ function BoardingStatsTab({ companyId, allowed }) {
                             <td style={{ ...stopGroupHead, textAlign: "center" }}>🛣</td>
                             <td style={{ ...stopGroupHead, fontWeight: 800, color: "var(--color-label)" }}>{g.routeName}</td>
                             <td style={{ ...stopGroupHead, textAlign: "right", fontWeight: 800, color: "var(--color-primary)" }}>{g.total}건</td>
-                            <td style={{ ...stopGroupHead, textAlign: "right", fontSize: 11, fontWeight: 600, color: "var(--color-label-mute)" }}>
+                            <td style={{ ...stopGroupHead, textAlign: "right", fontSize: 12.5, fontWeight: 600, color: "var(--color-label-mute)" }}>
                               정류장 {g.stops.length}{g.routeStopCount > 0 ? `/${g.routeStopCount}` : ""}곳
                             </td>
                           </tr>
@@ -5431,11 +5432,11 @@ function BoardingStatsTab({ companyId, allowed }) {
                                   <span style={stopSeqBadge}>{m.seq != null ? m.seq : "–"}</span>
                                 </td>
                                 <td style={{ ...S.td, fontWeight: 700 }}>
-                                  <span style={{ color: "var(--color-label-mute)", marginRight: 6, fontSize: 11 }}>{open ? "▾" : "▸"}</span>
+                                  <span style={{ color: "var(--color-label-mute)", marginRight: 6, fontSize: 12.5 }}>{open ? "▾" : "▸"}</span>
                                   {m.stopName}
                                 </td>
                                 <td style={{ ...S.td, textAlign: "right", fontWeight: 800, color: "var(--color-primary)" }}>{m.count}건</td>
-                                <td style={{ ...S.td, fontSize: 11, color: "var(--color-label-mute)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
+                                <td style={{ ...S.td, fontSize: 12.5, color: "var(--color-label-mute)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
                                   {m.minDist != null ? `${Math.round(m.minDist)}m` : "–"}
                                 </td>
                               </tr>
@@ -5450,19 +5451,19 @@ function BoardingStatsTab({ companyId, allowed }) {
                                     <table style={S.table}>
                                       <thead>
                                         <tr>{["시각", "사번", "이름", "협력사", "차량"].map(h => (
-                                          <th key={h} style={{ ...S.th, fontSize: 10 }}>{h}</th>
+                                          <th key={h} style={{ ...S.th, fontSize: 12 }}>{h}</th>
                                         ))}</tr>
                                       </thead>
                                       <tbody>
                                         {list.map(b => (
                                           <tr key={b.id} style={S.tr}>
-                                            <td style={{ ...S.td, fontFamily: "var(--font-mono)", fontSize: 11 }}>{fmtTime(b.boardedAt)}</td>
-                                            <td style={{ ...S.td, fontFamily: "var(--font-mono)", fontSize: 11 }}>{b.empNo}</td>
-                                            <td style={{ ...S.td, fontWeight: 700, fontSize: 12 }}>{b.name || "–"}</td>
-                                            <td style={{ ...S.td, fontSize: 11, color: "var(--color-label-mute)" }}>
+                                            <td style={{ ...S.td, fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{fmtTime(b.boardedAt)}</td>
+                                            <td style={{ ...S.td, fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{b.empNo}</td>
+                                            <td style={{ ...S.td, fontWeight: 700, fontSize: 13.5 }}>{b.name || "–"}</td>
+                                            <td style={{ ...S.td, fontSize: 12.5, color: "var(--color-label-mute)" }}>
                                               {b.partnerCode ? partnerNameOf(b.partnerCode) : "미지정"}
                                             </td>
-                                            <td style={{ ...S.td, fontFamily: "var(--font-mono)", fontSize: 11 }}>{b.vehicleNo || "–"}</td>
+                                            <td style={{ ...S.td, fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{b.vehicleNo || "–"}</td>
                                           </tr>
                                         ))}
                                       </tbody>
@@ -5478,7 +5479,7 @@ function BoardingStatsTab({ companyId, allowed }) {
                     </table>
                   )}
                   {(unmapped > 0 || noGps > 0) && (
-                    <div style={{ padding: "8px 16px", fontSize: 11, color: "var(--color-label-alt)", borderTop: "1px solid var(--color-line-soft)", background: "var(--color-bg-soft)" }}>
+                    <div style={{ padding: "8px 16px", fontSize: 12.5, color: "var(--color-label-alt)", borderTop: "1px solid var(--color-line-soft)", background: "var(--color-bg-soft)" }}>
                       ⓘ {noGps > 0 && <span>GPS 좌표 없음 {noGps}건</span>}
                       {noGps > 0 && unmapped > 0 && <span> · </span>}
                       {unmapped > 0 && <span>임계 초과(300m 이상) {unmapped}건</span>}
@@ -5530,13 +5531,13 @@ function BoardingStatsTab({ companyId, allowed }) {
             <div style={{ padding: "14px 16px", display: "flex", alignItems: "flex-end", gap: 4, height: 120 }}>
               {byHour.map((c, h) => (
                 <div key={h} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                  <div style={{ fontSize: 10, color: "var(--color-label-mute)", fontWeight: 600, opacity: c > 0 ? 1 : 0.4 }}>{c || ""}</div>
+                  <div style={{ fontSize: 12, color: "var(--color-label-mute)", fontWeight: 600, opacity: c > 0 ? 1 : 0.4 }}>{c || ""}</div>
                   <div style={{
                     width: "100%", height: `${(c / peakHourCount) * 80}px`,
                     background: c > 0 ? "var(--color-primary)" : "var(--color-bg-soft)",
                     borderRadius: "3px 3px 0 0", minHeight: 2,
                   }} />
-                  <div style={{ fontSize: 10, color: "var(--color-label-alt)", fontWeight: 600 }}>{h}</div>
+                  <div style={{ fontSize: 12, color: "var(--color-label-alt)", fontWeight: 600 }}>{h}</div>
                 </div>
               ))}
             </div>
@@ -5546,7 +5547,7 @@ function BoardingStatsTab({ companyId, allowed }) {
           <div style={panelBox}>
             <div style={{ ...panelHead, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span>📋 상세 탑승 기록 · {filtered.length}건</span>
-              <input style={{ ...S.input, width: 220, padding: "6px 10px", fontSize: 12 }}
+              <input style={{ ...S.input, width: 220, padding: "6px 10px", fontSize: 13.5 }}
                 placeholder="🔍 사번·이름·노선·정류장 검색" value={search} onChange={e => setSearch(e.target.value)} />
             </div>
             {filtered.length === 0 ? (
@@ -5564,15 +5565,15 @@ function BoardingStatsTab({ companyId, allowed }) {
                   <tbody>
                     {filtered.map(b => (
                       <tr key={b.id} style={S.tr}>
-                        <td style={{ ...S.td, fontFamily: "var(--font-mono)", fontSize: 12 }}>{fmtTime(b.boardedAt)}</td>
-                        <td style={{ ...S.td, fontFamily: "var(--font-mono)", fontSize: 12 }}>{b.empNo}</td>
+                        <td style={{ ...S.td, fontFamily: "var(--font-mono)", fontSize: 13.5 }}>{fmtTime(b.boardedAt)}</td>
+                        <td style={{ ...S.td, fontFamily: "var(--font-mono)", fontSize: 13.5 }}>{b.empNo}</td>
                         <td style={{ ...S.td, fontWeight: 700 }}>{b.name || "–"}</td>
                         <td style={{ ...S.td, color: "var(--color-label-mute)" }}>
                           {b.partnerCode ? partnerNameOf(b.partnerCode) : <span style={{ color: "var(--color-label-alt)" }}>미지정</span>}
                         </td>
                         <td style={{ ...S.td }}>{b.routeName || "–"}</td>
-                        <td style={{ ...S.td, fontFamily: "var(--font-mono)", fontSize: 12 }}>{b.vehicleNo || "–"}</td>
-                        <td style={{ ...S.td, fontSize: 12 }}>{b.stopName || "–"}</td>
+                        <td style={{ ...S.td, fontFamily: "var(--font-mono)", fontSize: 13.5 }}>{b.vehicleNo || "–"}</td>
+                        <td style={{ ...S.td, fontSize: 13.5 }}>{b.stopName || "–"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -5588,18 +5589,18 @@ function BoardingStatsTab({ companyId, allowed }) {
 
 // BoardingStatsTab 전용 보조 스타일
 const statCard = { background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 12, padding: "14px 16px", boxShadow: "0 1px 2px rgba(0,0,0,.03)" };
-const statLabel = { fontSize: 11, fontWeight: 700, color: "var(--color-label-mute)", textTransform: "uppercase", letterSpacing: 0.04 };
+const statLabel = { fontSize: 12.5, fontWeight: 700, color: "var(--color-label-mute)", textTransform: "uppercase", letterSpacing: 0.04 };
 const statValue = { fontSize: 28, fontWeight: 800, marginTop: 4, fontFamily: "var(--font-brand)", letterSpacing: "-0.02em" };
-const statUnit = { fontSize: 13, fontWeight: 600, color: "var(--color-label-mute)", marginLeft: 4 };
-const statSub = { fontSize: 11, color: "var(--color-label-alt)", marginTop: 2 };
+const statUnit = { fontSize: 14.5, fontWeight: 600, color: "var(--color-label-mute)", marginLeft: 4 };
+const statSub = { fontSize: 12.5, color: "var(--color-label-alt)", marginTop: 2 };
 const panelBox = { background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.03)" };
 // 정류장별 탑승 — 노선 구분 머리줄 / 노선 내 정류장 순번 배지
 // 🔴 `display:flex` 를 주지 말 것 — td 가 table-cell 을 벗어나면 열 정렬도 colSpan 도 죽는다(2026-09-03 실측).
-const stopGroupHead = { padding: "9px 16px", background: "var(--color-bg-soft)", borderTop: "1px solid var(--color-line)", borderBottom: "1px solid var(--color-line-soft)", fontSize: 13, whiteSpace: "nowrap", verticalAlign: "middle" };
+const stopGroupHead = { padding: "9px 16px", background: "var(--color-bg-soft)", borderTop: "1px solid var(--color-line)", borderBottom: "1px solid var(--color-line-soft)", fontSize: 14.5, whiteSpace: "nowrap", verticalAlign: "middle" };
 // 펼친 정류장의 탑승자 명단이 들어가는 칸 — 🔴 여기 colSpan 은 정상이다(머리줄과 달리 flex 를 안 쓴다).
 const stopDetailCell = { padding: "0 0 0 52px", background: "var(--color-bg-alt)", borderBottom: "1px solid var(--color-line)" };
-const stopSeqBadge = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: "50%", background: "var(--color-primary-soft)", border: "1px solid var(--color-primary)", color: "var(--color-primary-deep)", fontSize: 11, fontWeight: 700, fontFamily: "var(--font-mono)" };
-const panelHead = { padding: "12px 16px", fontWeight: 700, fontSize: 13, color: "var(--color-label)", borderBottom: "1px solid var(--color-bg-soft)", background: "var(--color-bg-alt)" };
+const stopSeqBadge = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: "50%", background: "var(--color-primary-soft)", border: "1px solid var(--color-primary)", color: "var(--color-primary-deep)", fontSize: 12.5, fontWeight: 700, fontFamily: "var(--font-mono)" };
+const panelHead = { padding: "12px 16px", fontWeight: 700, fontSize: 14.5, color: "var(--color-label)", borderBottom: "1px solid var(--color-bg-soft)", background: "var(--color-bg-alt)" };
 
 // ═══════════════════════════════════════════════════════
 // 탭10: 협력사 관리
@@ -5989,47 +5990,47 @@ ${chk.missing.slice(0,8).join(", ")}
                           : `${c.partnerName} 협력사 포털 열기 (새 탭)`}
                         style={{ color: "var(--color-primary)", textDecoration: "none", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 3 }}>
                         {c.partnerName}
-                        <span style={{ fontSize: 11, opacity: 0.65 }} aria-hidden="true">↗</span>
+                        <span style={{ fontSize: 12.5, opacity: 0.65 }} aria-hidden="true">↗</span>
                       </a>
                       {/* boardingMode 배지 — passenger-qr 만 표시(driver-qr=기본·노이즈 회피). 2026-05-27 */}
                       {c.boardingMode === "passenger-qr" && (
-                        <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#FFF1E0", color: "#B95300", border: "1px solid #FFE0C2", fontWeight: 700 }}>
+                        <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 999, background: "#FFF1E0", color: "#B95300", border: "1px solid #FFE0C2", fontWeight: 700 }}>
                           승객발행 QR
                         </span>
                       )}
                       {/* 문의 게시판 배지 — 켠 거래처만(부재=꺼짐=기본이라 노이즈 회피). 2026-08-06 */}
                       {resolveInquiryConfig(c).enabled && (
-                        <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#E9F0FF", color: "#1B4FD6", border: "1px solid #C9DAFF", fontWeight: 700 }}>
+                        <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 999, background: "#E9F0FF", color: "#1B4FD6", border: "1px solid #C9DAFF", fontWeight: 700 }}>
                           💬 문의 {resolveInquiryConfig(c).tenantId}
                         </span>
                       )}
                       {/* 포털 로그인 배지 — 켠 거래처만(부재=꺼짐=현행 코드-only 진입). 2026-09-04 */}
                       {isPartnerAuthRequired(c) && (
-                        <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#E6F7EB", color: "#007A29", border: "1px solid #BFE8CD", fontWeight: 700 }}>
+                        <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 999, background: "#E6F7EB", color: "#007A29", border: "1px solid #BFE8CD", fontWeight: 700 }}>
                           🔐 비밀번호 로그인
                         </span>
                       )}
                       {/* 홈페이지 연결 배지 — 켠 거래처만. 이게 켜져 있으면 문의 탭은 없다(대체). 2026-08-25 */}
                       {resolveHomepageConfig(c).enabled && (
-                        <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#FFF3DC", color: "#8A5200", border: "1px solid #FFDFA8", fontWeight: 700 }}>
+                        <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 999, background: "#FFF3DC", color: "#8A5200", border: "1px solid #FFDFA8", fontWeight: 700 }}>
                           🌐 홈페이지
                         </span>
                       )}
                       {/* QR 탑승 배지 — 다른 배지와 반대로 **끈 거래처만** 띄운다(켜짐이 기본이라
                           켠 곳에 배지를 달면 전 거래처가 도배된다). 2026-09-04 */}
                       {!resolveQrBoardingConfig(c).visible && (
-                        <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#F1F1F4", color: "#5B5B66", border: "1px solid #DDDDE3", fontWeight: 700 }}>
+                        <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 999, background: "#F1F1F4", color: "#5B5B66", border: "1px solid #DDDDE3", fontWeight: 700 }}>
                           QR 탑승 숨김
                         </span>
                       )}
                       {!resolveRoutePathDisplayConfig(c).visible && (
-                        <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#F1F1F4", color: "#5B5B66", border: "1px solid #DDDDE3", fontWeight: 700 }}>
+                        <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 999, background: "#F1F1F4", color: "#5B5B66", border: "1px solid #DDDDE3", fontWeight: 700 }}>
                           경로 숨김
                         </span>
                       )}
                       {/* 지도 크게 — 부재=작게(현행)라 **켠 거래처만** 배지. 2026-10-01 */}
                       {resolveHomeMapConfig(c).large && (
-                        <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#E8F1FF", color: "#003A99", border: "1px solid #C2DCFF", fontWeight: 700 }}>
+                        <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 999, background: "#E8F1FF", color: "#003A99", border: "1px solid #C2DCFF", fontWeight: 700 }}>
                           지도 크게
                         </span>
                       )}
@@ -6040,11 +6041,11 @@ ${chk.missing.slice(0,8).join(", ")}
                         (시연용 샘플 거래처) 종전에는 이 칸이 비어 보이고 `복사` 가 `undefined` 를
                         클립보드에 넣었다(2026-09-09 실측). 문서 id 가 곧 업체코드다. */}
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <code style={{ fontSize: 11, color: "var(--color-primary)", background: "var(--color-bg-alt)", padding: "2px 8px", borderRadius: 4 }}>
+                      <code style={{ fontSize: 12.5, color: "var(--color-primary)", background: "var(--color-bg-alt)", padding: "2px 8px", borderRadius: 4 }}>
                         {c.code || c.id}
                       </code>
                       <button onClick={(e) => { e.stopPropagation(); copyCode(c.code || c.id); }}
-                        style={{ ...S.editBtn, padding: "2px 8px", fontSize: 11 }}>
+                        style={{ ...S.editBtn, padding: "2px 8px", fontSize: 12.5 }}>
                         {copiedCode === (c.code || c.id) ? "✓" : "복사"}
                       </button>
                       {/* 🔗 링크 복사(2026-09-09 way "복사하고 다시 업체코드 복사해야 하는 이슈") —
@@ -6052,7 +6053,7 @@ ${chk.missing.slice(0,8).join(", ")}
                           🔴 위 '포털 URL 복사'(코드 없는 공용 주소)는 그대로 둔다 — 안내문·게시용이다. */}
                       <button onClick={(e) => { e.stopPropagation(); copyPortalLink(c.code || c.id); }}
                         title="주소+업체코드가 합쳐진 접속 링크를 복사합니다 (담당자에게 이것만 보내면 됩니다)"
-                        style={{ ...S.editBtn, padding: "2px 8px", fontSize: 11 }}>
+                        style={{ ...S.editBtn, padding: "2px 8px", fontSize: 12.5 }}>
                         {copiedLink === (c.code || c.id) ? "✓" : "🔗 링크"}
                       </button>
                     </div>
@@ -6062,19 +6063,19 @@ ${chk.missing.slice(0,8).join(", ")}
                       ● {c.active ? "활성" : "비활성"}
                     </span>
                   </td>
-                  <td style={{ ...S.td, fontSize: 12, color: "var(--color-label-mute)" }}>{formatDate(c.expiresAt)}</td>
+                  <td style={{ ...S.td, fontSize: 13.5, color: "var(--color-label-mute)" }}>{formatDate(c.expiresAt)}</td>
                   <td style={{ ...S.td, color: "var(--color-primary)", fontWeight: 600 }}>{c.uploadCount || 0}회</td>
-                  <td style={{ ...S.td, fontSize: 12, color: "var(--color-label-mute)" }}>{formatDate(c.lastUploadAt)}</td>
+                  <td style={{ ...S.td, fontSize: 13.5, color: "var(--color-label-mute)" }}>{formatDate(c.lastUploadAt)}</td>
                   <td style={S.td} onClick={e => e.stopPropagation()}>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      <button style={{ ...S.editBtn, padding: "4px 10px", fontSize: 11 }} onClick={() => openModeEdit(c)}>
+                      <button style={{ ...S.editBtn, padding: "4px 10px", fontSize: 12.5 }} onClick={() => openModeEdit(c)}>
                         QR 방향
                       </button>
-                      <button style={{ ...S.editBtn, padding: "4px 10px", fontSize: 11 }} onClick={() => openPortalEdit(c)}>
+                      <button style={{ ...S.editBtn, padding: "4px 10px", fontSize: 12.5 }} onClick={() => openPortalEdit(c)}>
                         ⚙️ 포탈 설정
                       </button>
                       {/* 포털 로그인(2026-09-04 P3-b) — 초기 비밀번호 발급·재발급 + 거래처 단위 켜기 */}
-                      <button style={{ ...S.editBtn, padding: "4px 10px", fontSize: 11 }} onClick={() => openAuthEdit(c)}>
+                      <button style={{ ...S.editBtn, padding: "4px 10px", fontSize: 12.5 }} onClick={() => openAuthEdit(c)}>
                         🔐 포털 로그인
                       </button>
                       {c.active ? (
@@ -6100,8 +6101,8 @@ ${chk.missing.slice(0,8).join(", ")}
                   {codes.find(c => c.id === selectedCode)?.partnerName} 승객 목록
                 </span>
                 <div style={{ display: "flex", gap: 10 }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-positive)" }}>재직 {passengers.filter(p => p.active).length}명</span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-cautionary)" }}>퇴사 {passengers.filter(p => !p.active).length}명</span>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--color-positive)" }}>재직 {passengers.filter(p => p.active).length}명</span>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--color-cautionary)" }}>퇴사 {passengers.filter(p => !p.active).length}명</span>
                 </div>
               </div>
               <div style={{ maxHeight: 300, overflowY: "auto" }}>
@@ -6114,10 +6115,10 @@ ${chk.missing.slice(0,8).join(", ")}
                       ? <tr><td colSpan={5} style={{ ...S.td, textAlign: "center", color: "var(--color-label-alt)" }}>등록된 승객이 없습니다</td></tr>
                       : passengers.map(p => (
                         <tr key={p.id} style={S.tr}>
-                          <td style={{ ...S.td, fontFamily: "monospace", fontSize: 12 }}>{p.empNo}</td>
+                          <td style={{ ...S.td, fontFamily: "monospace", fontSize: 13.5 }}>{p.empNo}</td>
                           <td style={{ ...S.td, fontWeight: 600 }}>{p.name}</td>
-                          <td style={{ ...S.td, color: "var(--color-label-mute)", fontSize: 12 }}>{p.dept || "–"}</td>
-                          <td style={{ ...S.td, color: "var(--color-label-mute)", fontSize: 12 }}>{p.routeCode || "–"}</td>
+                          <td style={{ ...S.td, color: "var(--color-label-mute)", fontSize: 13.5 }}>{p.dept || "–"}</td>
+                          <td style={{ ...S.td, color: "var(--color-label-mute)", fontSize: 13.5 }}>{p.routeCode || "–"}</td>
                           <td style={S.td}>
                             <span style={{ ...S.statusBadge, background: p.active ? "#E6F7EB" : "#FCE5E5", color: p.active ? "#007A29" : "#A81818" }}>
                               {p.active ? "재직" : "퇴사"}
@@ -6150,7 +6151,7 @@ ${chk.missing.slice(0,8).join(", ")}
             <option value="driver-qr">기사 발행 → 승객 스캔 (기본)</option>
             <option value="passenger-qr">승객 발행 → 기사 스캔 (승객 카메라 없을 때)</option>
           </select>
-          <div style={{ background: "#FFF1E0", border: "1px solid #FFE0C2", borderRadius: 8, padding: "10px 14px", fontSize: 12, fontWeight: 500, color: "#B95300" }}>
+          <div style={{ background: "#FFF1E0", border: "1px solid #FFE0C2", borderRadius: 8, padding: "10px 14px", fontSize: 13.5, fontWeight: 500, color: "#B95300" }}>
             ⓘ 유효기간 1년 · 발급 후 협력사 담당자에게 코드를 전달하세요
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
@@ -6167,16 +6168,16 @@ ${chk.missing.slice(0,8).join(", ")}
         <div style={S.overlay}><div style={S.modal}>
           <div style={S.modalTitle}>📷 탑승 QR 방향 변경</div>
           <div style={{ background: "var(--color-bg-alt)", borderRadius: 8, padding: "10px 14px", marginBottom: 4 }}>
-            <div style={{ fontSize: 12, color: "var(--color-label-mute)", marginBottom: 4 }}>대상 협력사</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-label)" }}>{modeEditTarget.partnerName}</div>
-            <div style={{ fontSize: 11, color: "var(--color-label-alt)", fontFamily: "monospace", marginTop: 2 }}>{modeEditTarget.code}</div>
+            <div style={{ fontSize: 13.5, color: "var(--color-label-mute)", marginBottom: 4 }}>대상 협력사</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "var(--color-label)" }}>{modeEditTarget.partnerName}</div>
+            <div style={{ fontSize: 12.5, color: "var(--color-label-alt)", fontFamily: "monospace", marginTop: 2 }}>{modeEditTarget.code}</div>
           </div>
           <label style={S.label}>QR 방향</label>
           <select style={S.input} value={modeEditValue} onChange={e => setModeEditValue(e.target.value)}>
             <option value="driver-qr">기사 발행 → 승객 스캔 (기본)</option>
             <option value="passenger-qr">승객 발행 → 기사 스캔 (승객 카메라 없을 때)</option>
           </select>
-          <div style={{ background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#003A99", lineHeight: 1.55 }}>
+          <div style={{ background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "10px 14px", fontSize: 13.5, color: "#003A99", lineHeight: 1.55 }}>
             ⓘ 변경 후, 이 협력사 소속 승객·기사는 <b>다음 로그인부터</b> 새 모드가 적용됩니다.
             노선당 한쪽 방향만 동작 — 같은 노선에서 양방향 동시 허용되지 않습니다.
           </div>
@@ -6194,7 +6195,7 @@ ${chk.missing.slice(0,8).join(", ")}
         <div style={S.overlay}><div style={{ ...S.modal, maxHeight: "88vh", overflowY: "auto" }}>
           <div style={S.modalTitle}>🔐 포털 로그인 — {authEditTarget.partnerName}</div>
 
-          <div style={{ background: "#FFF7E6", border: "1px solid #FFE0A3", borderRadius: 8, padding: "10px 12px", fontSize: 11, color: "#7A4F00", lineHeight: 1.6 }}>
+          <div style={{ background: "#FFF7E6", border: "1px solid #FFE0A3", borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: "#7A4F00", lineHeight: 1.6 }}>
             ⓘ 협력사 포털은 지금 <b>업체코드만 알면</b> 들어갑니다. 그런데 업체코드는 공개 값이라
             누구나 읽을 수 있습니다 — 비밀번호 로그인을 켜면 그 거래처 포털에 담당자만 들어옵니다.<br />
             순서: <b>① 비밀번호 발급 → ② 담당자에게 전달 → ③ 이 거래처만 켜기</b>
@@ -6202,12 +6203,12 @@ ${chk.missing.slice(0,8).join(", ")}
 
           {/* ── ① 초기 비밀번호 ── */}
           <label style={{ ...S.label, marginTop: 12 }}>초기 비밀번호</label>
-          <div style={{ fontSize: 12, color: "var(--color-label-mute)", lineHeight: 1.6, marginBottom: 6 }}>
+          <div style={{ fontSize: 13.5, color: "var(--color-label-mute)", lineHeight: 1.6, marginBottom: 6 }}>
             {authEditTarget.passwordIssuedAt
               ? <>이미 발급되어 있습니다 ({formatDate(authEditTarget.passwordIssuedAt)}). 담당자가 값을 잃어버렸거나 바뀌었을 때만 재발급하세요.</>
               : <>아직 발급된 적이 없습니다. 발급하면 <b>이 화면에 한 번만</b> 표시됩니다.</>}
           </div>
-          <button style={{ ...S.editBtn, padding: "6px 14px", fontSize: 12 }}
+          <button style={{ ...S.editBtn, padding: "6px 14px", fontSize: 13.5 }}
             onClick={handleIssuePassword} disabled={authBusy}>
             {authBusy ? "처리 중..." : (authEditTarget.passwordIssuedAt ? "🔁 비밀번호 재발급" : "🔑 초기 비밀번호 발급")}
           </button>
@@ -6215,7 +6216,7 @@ ${chk.missing.slice(0,8).join(", ")}
           {/* 🔴 평문은 여기서만 존재한다 — 서버에도 우리 DB 에도 저장하지 않는다. */}
           {authIssued && (
             <div style={{ marginTop: 10, background: "#E6F7EB", border: "1px solid #BFE8CD", borderRadius: 8, padding: "12px 14px" }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#007A29", marginBottom: 6 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#007A29", marginBottom: 6 }}>
                 {authIssued.reissued ? "재발급 완료" : "발급 완료"}
                 {authIssued.revokedSessions > 0 && ` · 기존 로그인 ${authIssued.revokedSessions}건 해제`}
               </div>
@@ -6223,16 +6224,16 @@ ${chk.missing.slice(0,8).join(", ")}
                 <code style={{ fontSize: 18, fontWeight: 800, letterSpacing: "0.06em", background: "#fff", border: "1px solid #BFE8CD", borderRadius: 6, padding: "6px 12px", userSelect: "all" }}>
                   {authIssued.password}
                 </code>
-                <button style={{ ...S.editBtn, padding: "4px 10px", fontSize: 11 }}
+                <button style={{ ...S.editBtn, padding: "4px 10px", fontSize: 12.5 }}
                   onClick={() => { navigator.clipboard.writeText(authIssued.password); setAuthCopied(true); }}>
                   {authCopied ? "✓ 복사됨" : "복사"}
                 </button>
               </div>
               {/* 🔴 문구는 상수 하나에서 온다 — 여기서 따로 타이핑하면 서버 계약과 갈린다. */}
-              <div style={{ marginTop: 8, fontSize: 11, color: "#A81818", lineHeight: 1.6, fontWeight: 600 }}>
+              <div style={{ marginTop: 8, fontSize: 12.5, color: "#A81818", lineHeight: 1.6, fontWeight: 600 }}>
                 {PARTNER_PASSWORD_ISSUE_NOTICE}
               </div>
-              <div style={{ marginTop: 4, fontSize: 11, color: "#007A29", lineHeight: 1.6 }}>
+              <div style={{ marginTop: 4, fontSize: 12.5, color: "#007A29", lineHeight: 1.6 }}>
                 담당자는 이 비밀번호로 처음 로그인한 뒤 <b>본인 비밀번호를 정하는 화면</b>을 반드시 거칩니다.
               </div>
             </div>
@@ -6240,12 +6241,12 @@ ${chk.missing.slice(0,8).join(", ")}
 
           {/* ── ② 거래처 단위 켜기 ── */}
           <label style={{ ...S.label, marginTop: 16 }}>비밀번호 로그인 요구</label>
-          <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, color: "var(--color-label)", cursor: "pointer" }}>
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 14.5, color: "var(--color-label)", cursor: "pointer" }}>
             <input type="checkbox" checked={isPartnerAuthRequired(authEditTarget)} disabled={authBusy}
               onChange={e => handleToggleAuthRequired(e.target.checked)} style={{ marginTop: 2 }} />
             <span>이 거래처 포털에 <b>업체코드 + 비밀번호</b>를 요구합니다</span>
           </label>
-          <div style={{ marginTop: 6, background: isPartnerAuthRequired(authEditTarget) ? "#E6F7EB" : "#F4F5F7", border: "1px solid var(--color-line)", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "var(--color-label-mute)", lineHeight: 1.6 }}>
+          <div style={{ marginTop: 6, background: isPartnerAuthRequired(authEditTarget) ? "#E6F7EB" : "#F4F5F7", border: "1px solid var(--color-line)", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, color: "var(--color-label-mute)", lineHeight: 1.6 }}>
             {isPartnerAuthRequired(authEditTarget)
               ? "켜져 있습니다. 이 거래처 담당자는 업체코드만으로는 들어올 수 없습니다."
               : "꺼져 있습니다 — 지금까지와 똑같이 업체코드만으로 들어옵니다(기본값)."}
@@ -6265,11 +6266,11 @@ ${chk.missing.slice(0,8).join(", ")}
           <div style={S.modalTitle}>⚙️ 포탈 설정 — {portalEditTarget.partnerName}</div>
 
           <label style={S.label}>차량 운행 현황(관제) 노출</label>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-label)", cursor: "pointer", marginBottom: 4 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14.5, color: "var(--color-label)", cursor: "pointer", marginBottom: 4 }}>
             <input type="checkbox" checked={pOps} onChange={e => setPOps(e.target.checked)} />
             협력사 포탈에 실시간 지도·노선도 표시
           </label>
-          <div style={{ background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#003A99", lineHeight: 1.5 }}>
+          <div style={{ background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, color: "#003A99", lineHeight: 1.5 }}>
             ⓘ 끄면 이 협력사 포탈에서 실시간 버스 위치·노선도 섹션이 숨겨집니다(노선 카드·탑승 현황·공지는 유지).
           </div>
 
@@ -6277,7 +6278,7 @@ ${chk.missing.slice(0,8).join(", ")}
           <label style={{ ...S.label, marginTop: 12 }}>좌석예약</label>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {[SEAT_MODES.OFF, SEAT_MODES.OPTIONAL, SEAT_MODES.REQUIRED].map(m => (
-              <label key={m} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, color: "var(--color-label)", cursor: "pointer" }}>
+              <label key={m} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 14.5, color: "var(--color-label)", cursor: "pointer" }}>
                 <input type="radio" name="seatMode" checked={pSeat === m} onChange={() => setPSeat(m)} style={{ marginTop: 2 }} />
                 <span>{SEAT_MODE_LABELS[m]}</span>
               </label>
@@ -6287,12 +6288,12 @@ ${chk.missing.slice(0,8).join(", ")}
           {pSeat !== SEAT_MODES.OFF && (() => {
             const chk = canEnableSeatReservation(routes, portalEditTarget.id);
             if (chk.ok) return (
-              <div style={{ marginTop: 6, fontSize: 11, color: "#007A29" }}>
+              <div style={{ marginTop: 6, fontSize: 12.5, color: "#007A29" }}>
                 이 협력사 노선 {chk.total}개 모두 좌석수가 설정되어 있습니다.
               </div>
             );
             return (
-              <div style={{ marginTop: 6, background: "#FDECEC", border: "1px solid #F5C6C6", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#A81818", lineHeight: 1.6 }}>
+              <div style={{ marginTop: 6, background: "#FDECEC", border: "1px solid #F5C6C6", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, color: "#A81818", lineHeight: 1.6 }}>
                 {chk.total === 0
                   ? "이 협력사에 지정된 노선이 없어 좌석예약을 켤 수 없습니다."
                   : <>좌석수가 없는 노선이 있어 켤 수 없습니다 — <b>{chk.missing.slice(0, 5).join(", ")}</b>
@@ -6304,7 +6305,7 @@ ${chk.missing.slice(0,8).join(", ")}
 
           {/* ── 문의 게시판 (2026-08-06 미팅) — 승객앱 하단 '문의' 탭 ── */}
           <label style={{ ...S.label, marginTop: 12 }}>문의 게시판 (고객문의·분실물)</label>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-label)", cursor: "pointer", marginBottom: 6 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14.5, color: "var(--color-label)", cursor: "pointer", marginBottom: 6 }}>
             <input type="checkbox" checked={pInqOn} onChange={e => setPInqOn(e.target.checked)} />
             승객 앱 하단에 '문의' 탭 표시
           </label>
@@ -6315,13 +6316,13 @@ ${chk.missing.slice(0,8).join(", ")}
               value={pInqToken} onChange={e => setPInqToken(e.target.value.trim())} />
             {/* 저장 전에 실제 위젯을 열어 거래처 ID 가 맞는지 눈으로 확인하는 통로.
                 (이름 자동 매칭을 안 하는 대신, 잘못 넣으면 바로 드러나게 한다.) */}
-            <button style={{ ...S.editBtn, padding: "8px 12px", fontSize: 11, opacity: isValidTenantId(pInqTenant) ? 1 : 0.45 }}
+            <button style={{ ...S.editBtn, padding: "8px 12px", fontSize: 12.5, opacity: isValidTenantId(pInqTenant) ? 1 : 0.45 }}
               disabled={!isValidTenantId(pInqTenant)}
               onClick={() => { const u = buildInquiryPreviewUrl(pInqTenant, pInqToken); if (u) window.open(u, "_blank", "noopener"); }}>
               열어보기
             </button>
           </div>
-          <div style={{ marginTop: 6, background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#003A99", lineHeight: 1.6 }}>
+          <div style={{ marginTop: 6, background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, color: "#003A99", lineHeight: 1.6 }}>
             ⓘ 켜면 승객 앱(설정 왼쪽)에 '문의' 탭이 생기고, 눌렀을 때 고객문의·분실물 접수 화면이 앱 안에서 열립니다.<br />
             거래처 ID 는 <b>고객CS시스템(dycs)의 거래처 ID</b> 입니다 — 버스링크 업체코드와 다르며, 자동으로 이어지지 않습니다.
             잘못 넣으면 다른 거래처로 문의가 접수되니 <b>열어보기</b>로 확인한 뒤 저장하세요.
@@ -6329,20 +6330,20 @@ ${chk.missing.slice(0,8).join(", ")}
 
           {/* ── 홈페이지 연결 (2026-08-25 미팅) — 승객앱 하단 '홈페이지' 탭 ── */}
           <label style={{ ...S.label, marginTop: 12 }}>홈페이지 연결</label>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-label)", cursor: "pointer", marginBottom: 6 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14.5, color: "var(--color-label)", cursor: "pointer", marginBottom: 6 }}>
             <input type="checkbox" checked={pHomeOn} onChange={e => setPHomeOn(e.target.checked)} />
             승객 앱 하단에 '홈페이지' 탭 표시 <b>(문의 탭 대체)</b>
           </label>
           <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
             <input style={{ ...S.input, flex: "1 1 300px", marginBottom: 0 }} placeholder="https://... (전체 주소)"
               value={pHomeUrl} onChange={e => setPHomeUrl(e.target.value.trim())} />
-            <button style={{ ...S.editBtn, padding: "8px 12px", fontSize: 11, opacity: isValidHomepageUrl(pHomeUrl) ? 1 : 0.45 }}
+            <button style={{ ...S.editBtn, padding: "8px 12px", fontSize: 12.5, opacity: isValidHomepageUrl(pHomeUrl) ? 1 : 0.45 }}
               disabled={!isValidHomepageUrl(pHomeUrl)}
               onClick={() => window.open(pHomeUrl.trim(), "_blank", "noopener")}>
               열어보기
             </button>
           </div>
-          <div style={{ marginTop: 6, background: "#FFF6E5", border: "1px solid #FFE0A3", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#7A4B00", lineHeight: 1.6 }}>
+          <div style={{ marginTop: 6, background: "#FFF6E5", border: "1px solid #FFE0A3", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, color: "#7A4B00", lineHeight: 1.6 }}>
             ⓘ 켜면 '문의' 탭 <b>대신</b> '홈페이지' 탭이 생기고, 눌러서 여는 버튼이 나옵니다(새 창).<br />
             🔴 홈페이지는 <b>앱 안에 끼워 넣을 수 없습니다</b> — 대부분의 사이트(구글 사이트 포함)가 외부 임베드를 막습니다.<br />
             🔴 켜는 순간 이 거래처의 <b>앱 내 문의 접수가 사라집니다</b>. 문의·전화는 홈페이지에서 받으세요.
@@ -6351,44 +6352,44 @@ ${chk.missing.slice(0,8).join(", ")}
           {/* ── 승객앱 QR 탑승 노출 (2026-09-04 배시현 개선요청) ──
               🔴 체크 = 보임(현행). 끄는 거래처만 체크를 푼다 — 반대로 만들면 저장 한 번에 사라진다. */}
           <label style={{ ...S.label, marginTop: 12 }}>승객앱 QR 탑승</label>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-label)", cursor: "pointer" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14.5, color: "var(--color-label)", cursor: "pointer" }}>
             <input type="checkbox" checked={pQrBoarding} onChange={e => setPQrBoarding(e.target.checked)} />
             승객앱에 'QR 탑승' 보이기
           </label>
-          <div style={{ marginTop: 6, background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#003A99", lineHeight: 1.6 }}>
+          <div style={{ marginTop: 6, background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, color: "#003A99", lineHeight: 1.6 }}>
             ⓘ 끄면 승객앱 홈의 <b>QR 탑승</b> 버튼과 아래 <b>탑승</b> 탭이 함께 사라집니다(노선·공지·설정은 그대로).<br />
             ⚠ 기사님이 들고 계신 <b>인쇄 QR</b>로 찍는 방식은 이 설정과 무관하게 계속 동작합니다.
           </div>
 
           {/* ── 승객앱 노선 경로 노출 (2026-09-15 배시현 개선요청) — 체크 = 보임(현행) ── */}
           <label style={{ ...S.label, marginTop: 12 }}>승객앱 노선 경로</label>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-label)", cursor: "pointer" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14.5, color: "var(--color-label)", cursor: "pointer" }}>
             <input type="checkbox" checked={pRoutePath} onChange={e => setPRoutePath(e.target.checked)} />
             승객앱 지도에 노선 경로(파란 선) 보이기
           </label>
-          <div style={{ marginTop: 6, background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#003A99", lineHeight: 1.6 }}>
+          <div style={{ marginTop: 6, background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, color: "#003A99", lineHeight: 1.6 }}>
             ⓘ 끄면 승객앱 홈 지도와 노선 탭 지도에서 경로 선이 사라집니다(정류장·버스 위치·도착 안내는 그대로).<br />
             노선이 날마다 달라지는 거래처처럼 그려 둔 경로가 실제 운행과 다를 수 있을 때 끄세요.
           </div>
 
           {/* ── 승객앱 홈 지도 크게 (2026-10-01 채드윅 미팅) — 체크 해제 = 현행(작게) ── */}
           <label style={{ ...S.label, marginTop: 12 }}>승객앱 홈 지도 크기</label>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-label)", cursor: "pointer" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14.5, color: "var(--color-label)", cursor: "pointer" }}>
             <input type="checkbox" checked={pHomeMapLarge} onChange={e => setPHomeMapLarge(e.target.checked)} />
             승객앱 홈에서 지도 크게 보기
           </label>
-          <div style={{ marginTop: 6, background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#003A99", lineHeight: 1.6 }}>
+          <div style={{ marginTop: 6, background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, color: "#003A99", lineHeight: 1.6 }}>
             ⓘ 켜면 홈 지도가 화면의 절반 가까이를 차지하고, 아래 노선도는 남은 칸에서 스크롤합니다. QR 탑승 버튼 위치는 그대로입니다.<br />
             끄면(기본) 노선도를 먼저 보여 주고 지도는 남는 공간만 씁니다.
           </div>
 
           {/* ── QR 태깅 소리 (2026-08-25 미팅) ── */}
           <label style={{ ...S.label, marginTop: 12 }}>QR 태깅 소리</label>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-label)", cursor: "pointer" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14.5, color: "var(--color-label)", cursor: "pointer" }}>
             <input type="checkbox" checked={pSoundForced} onChange={e => setPSoundForced(e.target.checked)} />
             항상 소리 나게 (승객이 끌 수 없음)
           </label>
-          <div style={{ marginTop: 6, background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#003A99", lineHeight: 1.6 }}>
+          <div style={{ marginTop: 6, background: "#E8F1FF", border: "1px solid #C2DCFF", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, color: "#003A99", lineHeight: 1.6 }}>
             ⓘ 확인음은 <b>기본으로 켜져 있고</b> 승객이 설정에서 끌 수 있습니다. 이 항목을 켜면 끄지 못합니다.<br />
             ⚠ 휴대폰이 <b>무음 모드</b>이거나 미디어 볼륨이 0이면 소리는 나지 않습니다(웹이 넘을 수 없는 벽입니다). 진동은 항상 울립니다.
           </div>
@@ -6418,15 +6419,15 @@ ${chk.missing.slice(0,8).join(", ")}
                       .map((c, i) => (
                         <span key={i} style={{ width: 14, height: 14, borderRadius: 4, background: c, border: "1px solid rgba(0,0,0,.12)", flexShrink: 0 }} />
                       ))}
-                    <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--color-label)" }}>{opt.name}</span>
+                    <span style={{ fontSize: 14, fontWeight: 800, color: "var(--color-label)" }}>{opt.name}</span>
                   </div>
-                  <div style={{ fontSize: 10.5, color: "var(--color-label-mute)", marginTop: 3 }}>{opt.desc}</div>
+                  <div style={{ fontSize: 12, color: "var(--color-label-mute)", marginTop: 3 }}>{opt.desc}</div>
                 </button>
               );
             })}
           </div>
           {pTheme && (
-            <div style={{ marginTop: 6, background: "#FFF8E1", border: "1px solid #FFE08A", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#7A5D00", lineHeight: 1.6 }}>
+            <div style={{ marginTop: 6, background: "#FFF8E1", border: "1px solid #FFE08A", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, color: "#7A5D00", lineHeight: 1.6 }}>
               ⓘ 프리셋을 쓰는 동안 <b>아래 메인 컬러는 적용되지 않습니다</b>(값은 그대로 보관되어 프리셋을 끄면 되돌아갑니다).<br />
               로고는 프리셋과 무관하게 계속 쓰입니다.
             </div>
@@ -6442,7 +6443,7 @@ ${chk.missing.slice(0,8).join(", ")}
             <input style={{ ...S.input, flex: 1, marginBottom: 0 }} placeholder="#0066FF" value={pColor}
               onChange={e => setPColor(e.target.value.trim())} />
             {pColor && (
-              <button style={{ ...S.editBtn, padding: "6px 10px", fontSize: 11 }} onClick={() => setPColor("")}>기본으로</button>
+              <button style={{ ...S.editBtn, padding: "6px 10px", fontSize: 12.5 }} onClick={() => setPColor("")}>기본으로</button>
             )}
           </div>
 
@@ -6450,9 +6451,9 @@ ${chk.missing.slice(0,8).join(", ")}
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <input type="file" accept="image/png,image/jpeg,image/webp"
               onChange={e => { handleLogoFile(e.target.files?.[0]); e.target.value = ""; }}
-              style={{ fontSize: 12 }} />
+              style={{ fontSize: 13.5 }} />
             {pLogo && (
-              <button style={{ ...S.delBtn, padding: "4px 10px", fontSize: 11 }} onClick={() => setPLogo(null)}>로고 제거</button>
+              <button style={{ ...S.delBtn, padding: "4px 10px", fontSize: 12.5 }} onClick={() => setPLogo(null)}>로고 제거</button>
             )}
           </div>
           {pLogo && (
@@ -6487,14 +6488,14 @@ ${chk.missing.slice(0,8).join(", ")}
                       <img src={pLogo} alt="" style={{ height: Math.min(pLogoHeight, 24), maxWidth: 120, objectFit: "contain", display: "block" }} />
                     </span>
                   )}
-                  <div style={{ fontSize: 11, color: bandFg, opacity: 0.75 }}>홍길동 · 운영팀</div>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: bandFg, marginTop: 2 }}>[기흥] 출근</div>
+                  <div style={{ fontSize: 12.5, color: bandFg, opacity: 0.75 }}>홍길동 · 운영팀</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: bandFg, marginTop: 2 }}>[기흥] 출근</div>
                 </div>
                 <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ padding: "4px 11px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: chipBg, color: "var(--color-primary-deep)" }}>
+                  <span style={{ padding: "4px 11px", borderRadius: 999, fontSize: 12.5, fontWeight: 700, background: chipBg, color: "var(--color-primary-deep)" }}>
                     출근
                   </span>
-                  <span style={{ padding: "6px 14px", borderRadius: 9, fontSize: 11.5, fontWeight: 800, background: btnBg, color: "#fff" }}>
+                  <span style={{ padding: "6px 14px", borderRadius: 9, fontSize: 13, fontWeight: 800, background: btnBg, color: "#fff" }}>
                     QR 탑승하기
                   </span>
                 </div>
@@ -6677,7 +6678,7 @@ function NoticeTab({ companyId, allowed }) {
     const s = queueDoc.status;
     if (s === "pending") {
       return (
-        <div style={{ background:"#FFF7E0", border:"1px solid #F6E0A0", borderRadius:8, padding:"10px 14px", fontSize:13, color:"#8A6500", fontWeight:600 }}>
+        <div style={{ background:"#FFF7E0", border:"1px solid #F6E0A0", borderRadius:8, padding:"10px 14px", fontSize:14.5, color:"#8A6500", fontWeight:600 }}>
           ⏳ 발송 처리 중...
         </div>
       );
@@ -6687,10 +6688,10 @@ function NoticeTab({ companyId, allowed }) {
       const fail = queueDoc.failureCount ?? 0;
       const tot = queueDoc.totalTokens ?? (ok + fail);
       return (
-        <div style={{ background:"#E6F7EB", border:"1px solid #A7E2BB", borderRadius:8, padding:"10px 14px", fontSize:13, color:"#007A29", fontWeight:600 }}>
+        <div style={{ background:"#E6F7EB", border:"1px solid #A7E2BB", borderRadius:8, padding:"10px 14px", fontSize:14.5, color:"#007A29", fontWeight:600 }}>
           ✅ 발송 완료 — 총 {tot}건 중 성공 {ok}건 / 실패 {fail}건
           {fail > 0 && (
-            <div style={{ fontSize:11, color:"#A86500", marginTop:4, fontWeight:500, lineHeight:1.55 }}>
+            <div style={{ fontSize:12.5, color:"#A86500", marginTop:4, fontWeight:500, lineHeight:1.55 }}>
               ※ 실패 토큰은 자동 정리됩니다(만료/무효 토큰).<br/>
               📌 해당 승객이 EmployeeApp(<code>/p</code>) 재로그인 + 설정 → 🔔 알림 진단 → 재발급 필요
             </div>
@@ -6700,9 +6701,9 @@ function NoticeTab({ companyId, allowed }) {
     }
     if (s === "no_tokens") {
       return (
-        <div style={{ background:"#FFF7E0", border:"1px solid #F6E0A0", borderRadius:8, padding:"10px 14px", fontSize:13, color:"#8A6500", fontWeight:600 }}>
+        <div style={{ background:"#FFF7E0", border:"1px solid #F6E0A0", borderRadius:8, padding:"10px 14px", fontSize:14.5, color:"#8A6500", fontWeight:600 }}>
           ⚠ 발송 대상 토큰이 없습니다 — 승객이 EmployeeApp 에서 알림 권한을 허용해야 합니다
-          <div style={{ fontSize:11, color:"#8A6500", marginTop:6, fontWeight:500, lineHeight:1.55 }}>
+          <div style={{ fontSize:12.5, color:"#8A6500", marginTop:6, fontWeight:500, lineHeight:1.55 }}>
             📌 원인: 해당 협력사 승객이 EmployeeApp(<code>/p</code>) → <b>설정</b> 탭 → <b>🔔 알림 진단</b>에서<br/>
             권한 허용 + 토큰 재발급 필요(이전 토큰이 만료되어 자동 삭제되었을 수 있음)
           </div>
@@ -6711,7 +6712,7 @@ function NoticeTab({ companyId, allowed }) {
     }
     if (s === "error") {
       return (
-        <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", borderRadius:8, padding:"10px 14px", fontSize:13, color:"#A81818", fontWeight:600 }}>
+        <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", borderRadius:8, padding:"10px 14px", fontSize:14.5, color:"#A81818", fontWeight:600 }}>
           ❌ 발송 오류: {queueDoc.error || "알 수 없는 오류"}
         </div>
       );
@@ -6723,16 +6724,16 @@ function NoticeTab({ companyId, allowed }) {
     <div style={S.panel}>
       <div style={S.panelHeader}>
         <span style={{ fontSize:16, fontWeight:700 }}>📢 공지 발송</span>
-        <span style={{ fontSize:12, color:"var(--color-label-mute)" }}>인앱 배너 + FCM 푸시 (협력사 단위)</span>
+        <span style={{ fontSize:13.5, color:"var(--color-label-mute)" }}>인앱 배너 + FCM 푸시 (협력사 단위)</span>
       </div>
 
       <div style={{ padding:"16px 20px", display:"flex", flexDirection:"column", gap:12, overflowY:"auto" }}>
         {/* ── 진단 패널 silent-fail 경보 ─────────────── */}
         {/* onSnapshot error 콜백이 잡은 권한/네트워크 오류 가시화 — 향후 진짜 silent fail 즉시 진단 */}
         {snapshotError && (
-          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", borderRadius:8, padding:"10px 14px", fontSize:13, color:"#A81818", fontWeight:600 }}>
+          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", borderRadius:8, padding:"10px 14px", fontSize:14.5, color:"#A81818", fontWeight:600 }}>
             ⚠ {snapshotError.src} 구독 실패: {snapshotError.msg}
-            <div style={{ fontSize:11, color:"#A81818", marginTop:4, fontWeight:500 }}>
+            <div style={{ fontSize:12.5, color:"#A81818", marginTop:4, fontWeight:500 }}>
               Firestore 권한·네트워크 확인 필요. 진단 패널이 실제 데이터를 못 읽는 상태입니다.
             </div>
           </div>
@@ -6740,9 +6741,9 @@ function NoticeTab({ companyId, allowed }) {
 
         {/* ── 진단 패널 — 알림 수신 가능 분포 ─────────────── */}
         <div style={{ background:"var(--color-bg)", border:"1px solid var(--color-line)", borderRadius:10, padding:"12px 14px", boxShadow:"var(--shadow-emphasize)" }}>
-          <div style={{ fontSize:12, fontWeight:700, color:"var(--color-label-mute)", marginBottom:8 }}>📊 알림 수신 가능 승객 분포 (fcmTokens)</div>
+          <div style={{ fontSize:13.5, fontWeight:700, color:"var(--color-label-mute)", marginBottom:8 }}>📊 알림 수신 가능 승객 분포 (fcmTokens)</div>
           <div style={{ display:"flex", flexWrap:"wrap", gap:8, alignItems:"center" }}>
-            <span style={{ background:"var(--color-primary-soft)", color:"var(--color-primary-deep)", borderRadius:8, padding:"4px 10px", fontSize:12, fontWeight:700 }}>
+            <span style={{ background:"var(--color-primary-soft)", color:"var(--color-primary-deep)", borderRadius:8, padding:"4px 10px", fontSize:13.5, fontWeight:700 }}>
               전체 {tokens.length}건
             </span>
             {partners.filter(p => p.active !== false).map(p => {
@@ -6750,19 +6751,19 @@ function NoticeTab({ companyId, allowed }) {
               const n = tokensByPartner.map.get(code) || 0;
               const danger = n === 0;
               return (
-                <span key={p.id} style={{ background: danger ? "#FCE5E5" : "var(--color-bg-soft)", color: danger ? "#A81818" : "var(--color-label-mute)", border: `1px solid ${danger ? "#F6C9C9" : "var(--color-line)"}`, borderRadius:8, padding:"4px 10px", fontSize:11, fontWeight:600 }}>
+                <span key={p.id} style={{ background: danger ? "#FCE5E5" : "var(--color-bg-soft)", color: danger ? "#A81818" : "var(--color-label-mute)", border: `1px solid ${danger ? "#F6C9C9" : "var(--color-line)"}`, borderRadius:8, padding:"4px 10px", fontSize:12.5, fontWeight:600 }}>
                   {danger && "● "}{p.partnerName}: {n}건{danger && " (수신자 없음)"}
                 </span>
               );
             })}
             {tokensByPartner.nullCount > 0 && (
-              <span style={{ background:"var(--color-bg-soft)", color:"var(--color-label-alt)", border:"1px solid var(--color-line)", borderRadius:8, padding:"4px 10px", fontSize:11, fontWeight:600 }}>
+              <span style={{ background:"var(--color-bg-soft)", color:"var(--color-label-alt)", border:"1px solid var(--color-line)", borderRadius:8, padding:"4px 10px", fontSize:12.5, fontWeight:600 }}>
                 협력사 미지정: {tokensByPartner.nullCount}건
               </span>
             )}
           </div>
           {tokens.length === 0 && (
-            <div style={{ marginTop:8, fontSize:11, color:"#A86500", lineHeight:1.55 }}>
+            <div style={{ marginTop:8, fontSize:12.5, color:"#A86500", lineHeight:1.55 }}>
               ※ 등록된 FCM 토큰이 0건입니다. 승객이 EmployeeApp 에서 알림 권한을 허용해야 합니다.<br/>
               📌 토큰이 invalid 상태였다면 발송 시 자동 삭제되어 0건이 됩니다 — 승객 본인이<br/>
               <code>/p</code> → <b>설정</b> → <b>🔔 알림 진단</b> → <b>재발급</b> 버튼으로 갱신 가능
@@ -6774,7 +6775,7 @@ function NoticeTab({ companyId, allowed }) {
         <div style={{ display:"flex", gap:8 }}>
           {[["normal","📋 일반 공지","var(--color-primary-soft)","var(--color-primary-deep)","var(--color-primary)"],["emergency","🚨 긴급 공지","#FCE5E5","#A81818","var(--color-destructive)"]].map(([v,label,softBg,deepFg,line])=>(
             <button key={v} onClick={()=>setType(v)}
-              style={{ flex:1, padding:"10px", borderRadius:10, cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700,
+              style={{ flex:1, padding:"10px", borderRadius:10, cursor:"pointer", fontFamily:"inherit", fontSize:14.5, fontWeight:700,
                 background: type===v ? softBg : "var(--color-bg-soft)",
                 color: type===v ? deepFg : "var(--color-label-mute)",
                 border: type===v ? `1px solid ${line}` : "1px solid var(--color-line)" }}>
@@ -6785,7 +6786,7 @@ function NoticeTab({ companyId, allowed }) {
 
         {/* 긴급 안내 */}
         {type === "emergency" && (
-          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", borderRadius:8, padding:"10px 14px", fontSize:12, fontWeight:500, color:"#A81818" }}>
+          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", borderRadius:8, padding:"10px 14px", fontSize:13.5, fontWeight:500, color:"#A81818" }}>
             🚨 긴급 공지는 홈 화면 최상단에 빨간 배너로 표시되며, FCM 푸시 알림이 즉시 발송됩니다
           </div>
         )}
@@ -6801,12 +6802,12 @@ function NoticeTab({ companyId, allowed }) {
             compact={false}
             allowedCodes={allowed}
           />
-          <div style={{ marginTop:6, fontSize:12, color: targetCount === 0 ? "#A81818" : "var(--color-primary-deep)", fontWeight:600 }}>
-            📡 이 발송으로 알림을 받을 승객: <span style={{ fontSize:14, fontWeight:800 }}>{targetCount}명</span>
+          <div style={{ marginTop:6, fontSize:13.5, color: targetCount === 0 ? "#A81818" : "var(--color-primary-deep)", fontWeight:600 }}>
+            📡 이 발송으로 알림을 받을 승객: <span style={{ fontSize:15, fontWeight:800 }}>{targetCount}명</span>
             {partnerCode !== "전체" && <span style={{ color:"var(--color-label-mute)", fontWeight:500 }}> ({partnerNameOf(partnerCode)})</span>}
           </div>
           {targetCount === 0 && (
-            <div style={{ marginTop:6, background:"#FFF7E0", border:"1px solid #F6E0A0", borderRadius:8, padding:"8px 12px", fontSize:11, color:"#8A6500", fontWeight:600 }}>
+            <div style={{ marginTop:6, background:"#FFF7E0", border:"1px solid #F6E0A0", borderRadius:8, padding:"8px 12px", fontSize:12.5, color:"#8A6500", fontWeight:600 }}>
               ⚠ 발송할 토큰이 없습니다 — 해당 협력사 승객이 EmployeeApp 에서 알림 권한을 허용해야 합니다
             </div>
           )}
@@ -6829,7 +6830,7 @@ function NoticeTab({ companyId, allowed }) {
 
         {/* 결과 메시지 */}
         {result && (
-          <div style={{ background: result.ok?"#E6F7EB":"#FCE5E5", border:`1px solid ${result.ok?"#A7E2BB":"#F6C9C9"}`, borderRadius:8, padding:"10px 14px", fontSize:13, fontWeight:500, color: result.ok?"#007A29":"#A81818", whiteSpace:"pre-line" }}>
+          <div style={{ background: result.ok?"#E6F7EB":"#FCE5E5", border:`1px solid ${result.ok?"#A7E2BB":"#F6C9C9"}`, borderRadius:8, padding:"10px 14px", fontSize:14.5, fontWeight:500, color: result.ok?"#007A29":"#A81818", whiteSpace:"pre-line" }}>
             {result.msg}
           </div>
         )}
@@ -6870,8 +6871,8 @@ function NoticeTab({ companyId, allowed }) {
           return (
           <>
           <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:8, flexWrap:"wrap" }}>
-            <div style={{ fontSize:13, fontWeight:700 }}>발송 이력</div>
-            <div style={{ fontSize:11, color:"var(--color-label-alt)" }}>
+            <div style={{ fontSize:14.5, fontWeight:700 }}>발송 이력</div>
+            <div style={{ fontSize:12.5, color:"var(--color-label-alt)" }}>
               전체 {listed.length}건 · 앱에 표시 중 {shownCount}건
             </div>
           </div>
@@ -6881,7 +6882,7 @@ function NoticeTab({ companyId, allowed }) {
           <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap" }}>
             {["표시중","숨김","전체"].map(f => (
               <button key={f} onClick={()=>{ setHistFilter(f); setHistLimit(10); }}
-                style={{ fontSize:11, fontWeight:700, padding:"5px 12px", borderRadius:14, cursor:"pointer", fontFamily:"inherit",
+                style={{ fontSize:12.5, fontWeight:700, padding:"5px 12px", borderRadius:14, cursor:"pointer", fontFamily:"inherit",
                   border:`1px solid ${histFilter===f?"var(--color-primary)":"var(--color-line)"}`,
                   background: histFilter===f?"var(--color-primary-soft)":"transparent",
                   color: histFilter===f?"var(--color-primary-deep)":"var(--color-label-mute)" }}>
@@ -6890,7 +6891,7 @@ function NoticeTab({ companyId, allowed }) {
             ))}
           </div>
           {matched.length === 0 ? (
-            <div style={{ color:"var(--color-label-alt)", fontSize:13, textAlign:"center", padding:"16px 0" }}>
+            <div style={{ color:"var(--color-label-alt)", fontSize:14.5, textAlign:"center", padding:"16px 0" }}>
               {listed.length === 0 ? "발송된 공지가 없습니다" : "조건에 맞는 공지가 없습니다"}
             </div>
           ) : <>{matched.slice(0, histLimit).map(n => (
@@ -6898,38 +6899,38 @@ function NoticeTab({ companyId, allowed }) {
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4, flexWrap:"wrap" }}>
-                    <span style={{ fontSize:10, padding:"2px 8px", borderRadius:8, fontWeight:700,
+                    <span style={{ fontSize:12, padding:"2px 8px", borderRadius:8, fontWeight:700,
                       background: n.type==="emergency"?"#FCE5E5":"var(--color-primary-soft)",
                       color: n.type==="emergency"?"#A81818":"var(--color-primary-deep)" }}>
                       {n.type==="emergency"?"🚨 긴급":"📋 일반"}
                     </span>
                     {n.partnerCode && (
-                      <span style={{ fontSize:10, padding:"2px 8px", borderRadius:8, fontWeight:700, background:"var(--color-bg-soft)", color:"var(--color-label-mute)", border:"1px solid var(--color-line)" }}>
+                      <span style={{ fontSize:12, padding:"2px 8px", borderRadius:8, fontWeight:700, background:"var(--color-bg-soft)", color:"var(--color-label-mute)", border:"1px solid var(--color-line)" }}>
                         🤝 {partnerNameOf(n.partnerCode)}
                       </span>
                     )}
                     {!n.partnerCode && (
-                      <span style={{ fontSize:10, padding:"2px 8px", borderRadius:8, fontWeight:600, background:"transparent", color:"var(--color-label-alt)" }}>
+                      <span style={{ fontSize:12, padding:"2px 8px", borderRadius:8, fontWeight:600, background:"transparent", color:"var(--color-label-alt)" }}>
                         전체
                       </span>
                     )}
-                    {!isShown(n) && <span style={{ fontSize:10, color:"var(--color-label-alt)" }}>숨김</span>}
-                    <span style={{ fontSize:11, color:"var(--color-label-alt)", marginLeft:"auto" }}>{fmt(n.createdAt)}</span>
+                    {!isShown(n) && <span style={{ fontSize:12, color:"var(--color-label-alt)" }}>숨김</span>}
+                    <span style={{ fontSize:12.5, color:"var(--color-label-alt)", marginLeft:"auto" }}>{fmt(n.createdAt)}</span>
                   </div>
-                  <div style={{ fontSize:13, fontWeight:700, marginBottom:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{n.title}</div>
-                  <div style={{ fontSize:12, color:"var(--color-label-mute)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{n.body}</div>
+                  <div style={{ fontSize:14.5, fontWeight:700, marginBottom:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{n.title}</div>
+                  <div style={{ fontSize:13.5, color:"var(--color-label-mute)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{n.body}</div>
                 </div>
                 <div style={{ display:"flex", flexDirection:"column", gap:4, flexShrink:0, alignItems:"flex-end" }}>
                   {!canManage(n) ? (
-                    <span style={{ fontSize:10, color:"var(--color-label-alt)", whiteSpace:"nowrap" }}>회사 전체 공지</span>
+                    <span style={{ fontSize:12, color:"var(--color-label-alt)", whiteSpace:"nowrap" }}>회사 전체 공지</span>
                   ) : confirmDelete === n.id ? (
                     <>
                       <button onClick={()=>handleDelete(n.id)}
-                        style={{ background:"var(--color-destructive)", border:"none", borderRadius:6, padding:"4px 8px", color:"#fff", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+                        style={{ background:"var(--color-destructive)", border:"none", borderRadius:6, padding:"4px 8px", color:"#fff", fontSize:12.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
                         정말 삭제
                       </button>
                       <button onClick={()=>setConfirmDelete(null)}
-                        style={{ background:"transparent", border:"1px solid var(--color-line)", borderRadius:6, padding:"4px 8px", color:"var(--color-label-mute)", fontSize:11, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+                        style={{ background:"transparent", border:"1px solid var(--color-line)", borderRadius:6, padding:"4px 8px", color:"var(--color-label-mute)", fontSize:12.5, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
                         취소
                       </button>
                     </>
@@ -6937,17 +6938,17 @@ function NoticeTab({ companyId, allowed }) {
                     <>
                       {isShown(n) ? (
                         <button onClick={()=>handleDeactivate(n.id)}
-                          style={{ background:"transparent", border:"1px solid var(--color-line)", borderRadius:6, padding:"4px 8px", color:"var(--color-label-mute)", fontSize:11, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+                          style={{ background:"transparent", border:"1px solid var(--color-line)", borderRadius:6, padding:"4px 8px", color:"var(--color-label-mute)", fontSize:12.5, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
                           숨기기
                         </button>
                       ) : (
                         <button onClick={()=>handleReactivate(n.id)}
-                          style={{ background:"transparent", border:"1px solid var(--color-primary)", borderRadius:6, padding:"4px 8px", color:"var(--color-primary-deep)", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+                          style={{ background:"transparent", border:"1px solid var(--color-primary)", borderRadius:6, padding:"4px 8px", color:"var(--color-primary-deep)", fontSize:12.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
                           되돌리기
                         </button>
                       )}
                       <button onClick={()=>setConfirmDelete(n.id)}
-                        style={{ background:"transparent", border:"1px solid var(--color-line)", borderRadius:6, padding:"4px 8px", color:"var(--color-destructive)", fontSize:11, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+                        style={{ background:"transparent", border:"1px solid var(--color-line)", borderRadius:6, padding:"4px 8px", color:"var(--color-destructive)", fontSize:12.5, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
                         삭제
                       </button>
                     </>
@@ -6958,7 +6959,7 @@ function NoticeTab({ companyId, allowed }) {
           ))}
           {matched.length > histLimit && (
             <button onClick={()=>setHistLimit(l => l + 20)}
-              style={{ width:"100%", background:"transparent", border:"1px solid var(--color-line)", borderRadius:8, padding:"9px", color:"var(--color-label-mute)", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+              style={{ width:"100%", background:"transparent", border:"1px solid var(--color-line)", borderRadius:8, padding:"9px", color:"var(--color-label-mute)", fontSize:13.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
               더 보기 (남은 {matched.length - histLimit}건)
             </button>
           )}
@@ -7089,7 +7090,7 @@ function ImprovementTab({ companyId, user, role, companies, deepLinkId, onDeepLi
     <button key={key} onClick={() => setStatusFilter(key)}
       style={{
         border: "1px solid var(--color-line)", borderRadius: 20, padding: "5px 12px",
-        fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+        fontSize: 13.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
         background: statusFilter === key ? "var(--color-primary)" : "var(--color-bg)",
         color: statusFilter === key ? "#fff" : "var(--color-label-mute)",
       }}>
@@ -7105,7 +7106,7 @@ function ImprovementTab({ companyId, user, role, companies, deepLinkId, onDeepLi
           {/* 새로고침(2026-07-16) — stale 리스너 수동 재연결·재구독 (MapTab #2 버튼 미러) */}
           <button onClick={handleRefresh} disabled={refreshing}
             title="개선 요청 목록을 즉시 다시 불러옵니다"
-            style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 8, border: "1px solid var(--color-line)", background: "var(--color-bg-soft)", color: "var(--color-label-mute)", cursor: refreshing ? "default" : "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, opacity: refreshing ? 0.6 : 1 }}>
+            style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 8, border: "1px solid var(--color-line)", background: "var(--color-bg-soft)", color: "var(--color-label-mute)", cursor: refreshing ? "default" : "pointer", fontFamily: "inherit", fontSize: 13.5, fontWeight: 700, opacity: refreshing ? 0.6 : 1 }}>
             <span style={{ display: "inline-block", animation: refreshing ? "blspin 0.8s linear infinite" : "none" }}>↻</span>
             {refreshing ? "새로고침 중" : "새로고침"}
           </button>
@@ -7121,8 +7122,8 @@ function ImprovementTab({ companyId, user, role, companies, deepLinkId, onDeepLi
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="제목·내용·요청자 검색"
-            style={{ ...S.input, width: 220, padding: "8px 12px", fontSize: 13 }} />
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--color-label-mute)", cursor: "pointer" }}>
+            style={{ ...S.input, width: 220, padding: "8px 12px", fontSize: 14.5 }} />
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13.5, color: "var(--color-label-mute)", cursor: "pointer" }}>
             <input type="checkbox" checked={mineOnly} onChange={e => setMineOnly(e.target.checked)} />
             내 요청만
           </label>
@@ -7132,7 +7133,7 @@ function ImprovementTab({ companyId, user, role, companies, deepLinkId, onDeepLi
       {/* 목록 */}
       <div style={{ flex: 1, overflowY: "auto", padding: "12px 20px 40px" }}>
         {deepLinkMiss && (
-          <div style={{ background: "#FFF1E0", border: "1px solid #FFE0C2", borderRadius: 10, padding: "10px 14px", marginBottom: 10, fontSize: 12, fontWeight: 600, color: "#B95300" }}>
+          <div style={{ background: "#FFF1E0", border: "1px solid #FFE0C2", borderRadius: 10, padding: "10px 14px", marginBottom: 10, fontSize: 13.5, fontWeight: 600, color: "#B95300" }}>
             알림에서 연 요청을 찾지 못했습니다. 다른 회사의 요청이거나 삭제된 요청일 수 있습니다.
           </div>
         )}
@@ -7145,10 +7146,10 @@ function ImprovementTab({ companyId, user, role, companies, deepLinkId, onDeepLi
               style={{ background: "var(--color-bg)", border: "1px solid var(--color-line)", borderRadius: 12, padding: "12px 14px", marginBottom: 8, cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: "var(--color-label)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title || "(제목 없음)"}</span>
-                  {unread && <span style={{ background: "var(--color-destructive)", color: "#fff", fontSize: 10, fontWeight: 700, borderRadius: 10, padding: "1px 6px" }}>NEW</span>}
+                  <span style={{ fontSize: 15, fontWeight: 700, color: "var(--color-label)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title || "(제목 없음)"}</span>
+                  {unread && <span style={{ background: "var(--color-destructive)", color: "#fff", fontSize: 12, fontWeight: 700, borderRadius: 10, padding: "1px 6px" }}>NEW</span>}
                 </div>
-                <div style={{ fontSize: 12, color: "var(--color-label-mute)", display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 13.5, color: "var(--color-label-mute)", display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <span>{r.requesterName || "-"}</span>
                   <span>· {improveFmtTs(r.createdAt)}</span>
                   {shots > 0 && <span>· 📎 {shots}</span>}
@@ -7267,7 +7268,7 @@ function ImprovementCreateModal({ companyId, user, onClose }) {
               <div key={i} style={{ position: "relative" }}>
                 <img src={s.dataUrl} alt={s.name} style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 8, border: "1px solid var(--color-line)" }} />
                 <button onClick={() => setShots(prev => prev.filter((_, j) => j !== i))}
-                  style={{ position: "absolute", top: -6, right: -6, background: "var(--color-destructive)", color: "#fff", border: "none", borderRadius: "50%", width: 20, height: 20, cursor: "pointer", fontSize: 12, lineHeight: 1 }}>×</button>
+                  style={{ position: "absolute", top: -6, right: -6, background: "var(--color-destructive)", color: "#fff", border: "none", borderRadius: "50%", width: 20, height: 20, cursor: "pointer", fontSize: 13.5, lineHeight: 1 }}>×</button>
               </div>
             ))}
           </div>
@@ -7278,7 +7279,7 @@ function ImprovementCreateModal({ companyId, user, onClose }) {
             <input type="file" accept="image/*" multiple onChange={onPick} style={{ display: "none" }} />
           </label>
         )}
-        {err && <div style={{ background: "#FCE5E5", border: "1px solid #F6C9C9", color: "var(--color-destructive)", padding: "8px 12px", borderRadius: 8, fontSize: 12 }}>{err}</div>}
+        {err && <div style={{ background: "#FCE5E5", border: "1px solid #F6C9C9", color: "var(--color-destructive)", padding: "8px 12px", borderRadius: 8, fontSize: 13.5 }}>{err}</div>}
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
           <button style={{ ...S.closeBtn, flex: 1 }} onClick={onClose} disabled={saving}>취소</button>
           <button style={{ ...S.addBtn, flex: 1, opacity: saving ? 0.6 : 1 }} onClick={submit} disabled={saving}>{saving ? "등록 중..." : "등록"}</button>
@@ -7333,7 +7334,7 @@ function ImprovementDetailModal({ req, user, isSuperAdmin, companyLabel, onClose
           <div style={{ ...S.modalTitle, marginBottom: 0, flex: 1 }}>{req.title || "(제목 없음)"}</div>
           <ImproveStatusBadge status={req.status} />
         </div>
-        <div style={{ fontSize: 12, color: "var(--color-label-mute)", display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 13.5, color: "var(--color-label-mute)", display: "flex", gap: 8, flexWrap: "wrap" }}>
           <span>{req.requesterName || "-"}</span>
           <span>· {improveFmtTs(req.createdAt)}</span>
           {companyLabel && <span>· {companyLabel}</span>}
@@ -7345,7 +7346,7 @@ function ImprovementDetailModal({ req, user, isSuperAdmin, companyLabel, onClose
             style={{ color: "var(--color-label)", background: "var(--color-bg-soft)", border: "1px solid var(--color-line)", borderRadius: 10, padding: "12px 14px", marginTop: 8 }}
             dangerouslySetInnerHTML={{ __html: sanitizeContentHtml(req.content) }} />
         ) : (
-          <div style={{ whiteSpace: "pre-wrap", fontSize: 13, color: "var(--color-label)", background: "var(--color-bg-soft)", border: "1px solid var(--color-line)", borderRadius: 10, padding: "12px 14px", marginTop: 8 }}>
+          <div style={{ whiteSpace: "pre-wrap", fontSize: 14.5, color: "var(--color-label)", background: "var(--color-bg-soft)", border: "1px solid var(--color-line)", borderRadius: 10, padding: "12px 14px", marginTop: 8 }}>
             {req.content || "(내용 없음)"}
           </div>
         )}
@@ -7361,7 +7362,7 @@ function ImprovementDetailModal({ req, user, isSuperAdmin, companyLabel, onClose
         )}
 
         {req.resultNote && (
-          <div style={{ marginTop: 8, fontSize: 13, color: "#007A29", background: "#E6F7EB", border: "1px solid #B7E6C7", borderRadius: 10, padding: "10px 12px" }}>
+          <div style={{ marginTop: 8, fontSize: 14.5, color: "#007A29", background: "#E6F7EB", border: "1px solid #B7E6C7", borderRadius: 10, padding: "10px 12px" }}>
             <b>처리 결과</b> · {req.resultNote}
           </div>
         )}
@@ -7370,7 +7371,7 @@ function ImprovementDetailModal({ req, user, isSuperAdmin, companyLabel, onClose
         <div style={{ ...S.label, marginTop: 12 }}>처리 이력</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {hist.map((h, i) => (
-            <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12, padding: "6px 0", borderBottom: i < hist.length - 1 ? "1px solid var(--color-line-soft)" : "none" }}>
+            <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13.5, padding: "6px 0", borderBottom: i < hist.length - 1 ? "1px solid var(--color-line-soft)" : "none" }}>
               <span style={{ color: "var(--color-label-alt)", whiteSpace: "nowrap", minWidth: 78 }}>{improveFmtTs(h.at)}</span>
               <span style={{ flex: 1, color: "var(--color-label)" }}>
                 {h.statusTo && <ImproveStatusBadge status={h.statusTo} />}{" "}
@@ -7409,7 +7410,7 @@ function ImprovementDetailModal({ req, user, isSuperAdmin, companyLabel, onClose
           </div>
         )}
 
-        {err && <div style={{ background: "#FCE5E5", border: "1px solid #F6C9C9", color: "var(--color-destructive)", padding: "8px 12px", borderRadius: 8, fontSize: 12, marginTop: 8 }}>{err}</div>}
+        {err && <div style={{ background: "#FCE5E5", border: "1px solid #F6C9C9", color: "var(--color-destructive)", padding: "8px 12px", borderRadius: 8, fontSize: 13.5, marginTop: 8 }}>{err}</div>}
 
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
           <button style={{ ...S.delBtn, padding: "8px 14px" }} onClick={doDelete} disabled={busy}>삭제</button>
@@ -7422,7 +7423,7 @@ function ImprovementDetailModal({ req, user, isSuperAdmin, companyLabel, onClose
 }
 
 const S = {
-  wrap:{display:"flex",height:"100dvh",background:"var(--color-bg-soft)",fontFamily:"var(--font-base)",color:"var(--color-label)",position:"relative",overflow:"hidden",fontSize:13},
+  wrap:{display:"flex",height:"100dvh",background:"var(--color-bg-soft)",fontFamily:"var(--font-base)",color:"var(--color-label)",position:"relative",overflow:"hidden",fontSize:14.5},
   sidebar:{width:236,flexShrink:0,background:"var(--color-bg)",borderRight:"1px solid var(--color-line)",display:"flex",flexDirection:"column",minHeight:0,padding:"18px 14px"},
   // 모바일 오프캔버스 드로어(2026-08-26 · YDYOPS `shared/Sidebar.tsx` 와 같은 형태).
   // 🔴 화면 밖(translateX(-100%))에 **항상 마운트된 채로** 대기한다 — 조건부 언마운트로 만들면
@@ -7434,19 +7435,19 @@ const S = {
   navBackdrop:{position:"fixed",inset:0,background:"var(--color-overlay)",zIndex:55},
   logo:{display:"flex",alignItems:"baseline",gap:8,flexShrink:0,padding:"4px 8px 16px",marginBottom:10,borderBottom:"1px solid var(--color-line)"},
   logoText:{fontSize:20,fontWeight:800,fontFamily:"var(--font-brand)",letterSpacing:"-0.03em",color:"var(--color-primary)"},
-  logoSub:{fontSize:12,color:"var(--color-label-mute)"},
-  sideSection:{fontSize:11,fontWeight:700,letterSpacing:"0.04em",color:"var(--color-label-alt)",flexShrink:0,padding:"6px 12px 8px"},
+  logoSub:{fontSize:13.5,color:"var(--color-label-mute)"},
+  sideSection:{fontSize:12.5,fontWeight:700,letterSpacing:"0.04em",color:"var(--color-label-alt)",flexShrink:0,padding:"6px 12px 8px"},
   // flex:1+minHeight:0 = 남는 높이를 전부 차지하고 넘치면 자기 안에서 스크롤.
   // 🔴 minHeight:0 을 빼면 flex 기본 min-content 때문에 스크롤이 안 생기고 다시 잘린다.
   nav:{display:"flex",flexDirection:"column",gap:2,flex:1,minHeight:0,overflowY:"auto",overflowX:"hidden"},
   // whiteSpace:nowrap = 메뉴 이름은 절대 줄바꿈하지 않는다(2026-08-26) — 드로어가 80vw 라
   // 좁은 기기에서 "실시간 관제" 가 두 줄, 더 좁으면 글자당 한 줄로 쌓일 수 있다.
-  navItem:{display:"flex",alignItems:"center",gap:11,flexShrink:0,padding:"10px 12px",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:500,color:"var(--color-label-mute)",position:"relative",transition:"background .15s,color .15s",userSelect:"none",whiteSpace:"nowrap"},
+  navItem:{display:"flex",alignItems:"center",gap:11,flexShrink:0,padding:"8px 12px",borderRadius:10,cursor:"pointer",fontSize:16,fontWeight:600,color:"var(--color-label-mute)",position:"relative",transition:"background .15s,color .15s",userSelect:"none",whiteSpace:"nowrap"},
   navActive:{background:"var(--color-primary-soft)",color:"var(--color-primary-deep)",fontWeight:700},
   navAccent:{position:"absolute",left:3,top:"50%",transform:"translateY(-50%)",width:3,height:18,borderRadius:3,background:"var(--color-primary)"},
   navIcon:{flexShrink:0,display:"flex",opacity:.92},
-  sideFoot:{display:"flex",alignItems:"center",gap:7,flexShrink:0,padding:"10px 12px 8px",marginTop:8,borderTop:"1px solid var(--color-line)",fontSize:11,color:"var(--color-label-alt)"},
-  logoutBtn:{display:"flex",alignItems:"center",justifyContent:"center",gap:7,width:"100%",flexShrink:0,border:"1px solid var(--color-line)",borderRadius:10,padding:"10px 12px",color:"var(--color-label-mute)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"},
+  sideFoot:{display:"flex",alignItems:"center",gap:7,flexShrink:0,padding:"10px 12px 8px",marginTop:8,borderTop:"1px solid var(--color-line)",fontSize:12.5,color:"var(--color-label-alt)"},
+  logoutBtn:{display:"flex",alignItems:"center",justifyContent:"center",gap:7,width:"100%",flexShrink:0,border:"1px solid var(--color-line)",borderRadius:10,padding:"10px 12px",color:"var(--color-label-mute)",fontSize:14.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"},
   // 🔴 minWidth:0 이 **세로글씨의 근인**이었다(2026-08-26). flex 아이템의 기본값은
   //    min-width:auto = "내용보다 좁아지지 않는다" 라, 좁은 화면에서 이 열이 안 줄고
   //    안쪽 요소들이 대신 찌부러지면서 한글이 글자당 한 줄로 쌓였다.
@@ -7462,31 +7463,31 @@ const S = {
   vehicleCard:{margin:"8px 12px 0",background:"var(--color-bg-alt)",border:"1px solid var(--color-line)",borderRadius:10,padding:"12px 14px",cursor:"pointer"},
   vehicleTop:{display:"flex",alignItems:"center",gap:8,marginBottom:6},
   dot:{width:8,height:8,borderRadius:"50%",background:"var(--color-positive)",flexShrink:0},
-  vehicleName:{fontSize:13,fontWeight:700,color:"var(--color-label)"},
-  vehicleInfo:{fontSize:12,color:"var(--color-label-mute)",marginTop:2},
+  vehicleName:{fontSize:14.5,fontWeight:700,color:"var(--color-label)"},
+  vehicleInfo:{fontSize:13.5,color:"var(--color-label-mute)",marginTop:2},
   infoBox:{position:"absolute",top:20,right:20,background:"var(--color-bg)",border:"1px solid var(--color-line)",borderRadius:12,padding:20,minWidth:220,zIndex:10,boxShadow:"var(--shadow-float)"},
-  infoTitle:{fontSize:14,fontWeight:700,marginBottom:12,color:"var(--color-primary)"},
-  infoRow:{fontSize:13,color:"var(--color-label-mute)",marginBottom:6},
-  closeBtn:{marginTop:8,width:"100%",padding:"8px",background:"var(--color-bg-soft)",border:"1px solid var(--color-line)",borderRadius:8,color:"var(--color-label-mute)",cursor:"pointer",fontFamily:"inherit",fontSize:13},
+  infoTitle:{fontSize:15,fontWeight:700,marginBottom:12,color:"var(--color-primary)"},
+  infoRow:{fontSize:14.5,color:"var(--color-label-mute)",marginBottom:6},
+  closeBtn:{marginTop:8,width:"100%",padding:"8px",background:"var(--color-bg-soft)",border:"1px solid var(--color-line)",borderRadius:8,color:"var(--color-label-mute)",cursor:"pointer",fontFamily:"inherit",fontSize:14.5},
   panel:{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",background:"var(--color-bg-soft)"},
-  empty:{color:"var(--color-label-alt)",fontSize:13,textAlign:"center",padding:20},
+  empty:{color:"var(--color-label-alt)",fontSize:14.5,textAlign:"center",padding:20},
   tableWrap:{flex:1,overflowY:"auto",overflowX:"auto",padding:"0 0 24px",WebkitOverflowScrolling:"touch"},
   table:{width:"100%",minWidth:520,borderCollapse:"collapse"},
-  th:{textAlign:"left",padding:"10px 12px",fontSize:11,color:"var(--color-label-mute)",fontWeight:600,borderBottom:"1px solid var(--color-line)",whiteSpace:"nowrap",background:"var(--color-bg-alt)"},
-  td:{padding:"10px 12px",fontSize:13,borderBottom:"1px solid var(--color-line-soft)",whiteSpace:"nowrap"},
+  th:{textAlign:"left",padding:"10px 12px",fontSize:12.5,color:"var(--color-label-mute)",fontWeight:600,borderBottom:"1px solid var(--color-line)",whiteSpace:"nowrap",background:"var(--color-bg-alt)"},
+  td:{padding:"10px 12px",fontSize:14.5,borderBottom:"1px solid var(--color-line-soft)",whiteSpace:"nowrap"},
   tr:{background:"var(--color-bg)"},
-  timeBadge:{background:"var(--color-primary-soft)",color:"var(--color-primary-deep)",padding:"3px 10px",borderRadius:20,fontSize:13,fontWeight:700},
-  statusBadge:{padding:"3px 10px",borderRadius:20,fontSize:12,fontWeight:600},
-  addBtn:{background:"var(--color-primary)",border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0},
-  editBtn:{background:"var(--color-bg-soft)",border:"1px solid var(--color-line)",borderRadius:6,padding:"4px 9px",color:"var(--color-label-mute)",fontSize:11,fontWeight:600,cursor:"pointer",marginRight:4,fontFamily:"inherit",whiteSpace:"nowrap"},
-  delBtn:{background:"#FCE5E5",border:"1px solid #F6C9C9",borderRadius:6,padding:"4px 9px",color:"var(--color-destructive)",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"},
-  actBtn:{background:"#E6F7EB",border:"1px solid #B7E6C7",borderRadius:6,padding:"4px 9px",color:"#007A29",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"},
-  dateInput:{background:"var(--color-bg)",border:"1px solid var(--color-line)",borderRadius:8,padding:"7px 12px",color:"var(--color-label)",fontSize:13,outline:"none",fontFamily:"inherit"},
+  timeBadge:{background:"var(--color-primary-soft)",color:"var(--color-primary-deep)",padding:"3px 10px",borderRadius:20,fontSize:14.5,fontWeight:700},
+  statusBadge:{padding:"3px 10px",borderRadius:20,fontSize:13.5,fontWeight:600},
+  addBtn:{background:"var(--color-primary)",border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:13.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0},
+  editBtn:{background:"var(--color-bg-soft)",border:"1px solid var(--color-line)",borderRadius:6,padding:"4px 9px",color:"var(--color-label-mute)",fontSize:12.5,fontWeight:600,cursor:"pointer",marginRight:4,fontFamily:"inherit",whiteSpace:"nowrap"},
+  delBtn:{background:"#FCE5E5",border:"1px solid #F6C9C9",borderRadius:6,padding:"4px 9px",color:"var(--color-destructive)",fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"},
+  actBtn:{background:"#E6F7EB",border:"1px solid #B7E6C7",borderRadius:6,padding:"4px 9px",color:"#007A29",fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"},
+  dateInput:{background:"var(--color-bg)",border:"1px solid var(--color-line)",borderRadius:8,padding:"7px 12px",color:"var(--color-label)",fontSize:14.5,outline:"none",fontFamily:"inherit"},
   overlay:{position:"fixed",inset:0,background:"var(--color-overlay)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100},
   modal:{background:"var(--color-bg)",border:"1px solid var(--color-line)",borderRadius:16,padding:"22px 20px",width:"calc(100% - 32px)",maxWidth:420,display:"flex",flexDirection:"column",gap:8,maxHeight:"88dvh",overflowY:"auto",margin:"0 auto",boxShadow:"var(--shadow-strong)"},
   modalTitle:{fontSize:17,fontWeight:800,fontFamily:"var(--font-brand)",letterSpacing:"-0.02em",marginBottom:8,color:"var(--color-label)"},
-  label:{fontSize:12,fontWeight:600,color:"var(--color-label-mute)",marginTop:4},
-  input:{background:"var(--color-bg)",border:"1px solid var(--color-line)",borderRadius:8,padding:"10px 14px",color:"var(--color-label)",fontSize:14,outline:"none",fontFamily:"inherit",width:"100%",boxSizing:"border-box"},
+  label:{fontSize:13.5,fontWeight:600,color:"var(--color-label-mute)",marginTop:4},
+  input:{background:"var(--color-bg)",border:"1px solid var(--color-line)",borderRadius:8,padding:"10px 14px",color:"var(--color-label)",fontSize:15,outline:"none",fontFamily:"inherit",width:"100%",boxSizing:"border-box"},
 };
 
 // ═══════════════════════════════════════════════════════
@@ -7601,15 +7602,15 @@ function SleepCheckTab({ companyId, allowed }) {
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12, flexShrink: 0 }}>
         <h2 style={{ margin: 0, fontSize: 18 }}>🛏 빈 차 확인 현황</h2>
-        <input type="date" value={date} onChange={e => setDate(e.target.value)} style={{ ...S.input, width: "auto", padding: "8px 12px", fontSize: 13 }} />
+        <input type="date" value={date} onChange={e => setDate(e.target.value)} style={{ ...S.input, width: "auto", padding: "8px 12px", fontSize: 14.5 }} />
         <button style={S.editBtn} onClick={() => setDate(todayStr())}>오늘</button>
-        <span style={{ fontSize: 12, color: "var(--color-label-mute)" }}>
+        <span style={{ fontSize: 13.5, color: "var(--color-label-mute)" }}>
           확인 {counts.checked} · 미확인 {counts.late} · 대기 {counts.waiting} · 운행 전·중 {counts.running}
         </span>
       </div>
 
       {/* 대상 노선 안내 — 아직 안 정했으면 지금 보이는 게 추천이라는 걸 분명히 한다. */}
-      <div style={{ padding: "10px 12px", marginBottom: 12, borderRadius: 8, fontSize: 12, lineHeight: 1.6, flexShrink: 0,
+      <div style={{ padding: "10px 12px", marginBottom: 12, borderRadius: 8, fontSize: 13.5, lineHeight: 1.6, flexShrink: 0,
         background: pinned ? "var(--color-bg-soft)" : "#FFF4E5", color: pinned ? "var(--color-label-mute)" : "#8A4B00",
         border: `1px solid ${pinned ? "var(--color-line)" : "#F0C79A"}` }}>
         {pinned ? (
@@ -7647,11 +7648,11 @@ function SleepCheckTab({ companyId, allowed }) {
                 return (
                   <tr key={d.id}>
                     <td style={S.td}>
-                      <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: "var(--radius-pill)", background: st.bg, color: st.fg, whiteSpace: "nowrap" }}>
+                      <span style={{ fontSize: 12.5, fontWeight: 700, padding: "3px 9px", borderRadius: "var(--radius-pill)", background: st.bg, color: st.fg, whiteSpace: "nowrap" }}>
                         {st.label}
                       </span>
                       {waitedMs != null && isToday && (
-                        <div style={{ fontSize: 10.5, color: "var(--color-label-mute)", marginTop: 3 }}>
+                        <div style={{ fontSize: 12, color: "var(--color-label-mute)", marginTop: 3 }}>
                           종점 뒤 {formatWaited(waitedMs)}
                         </div>
                       )}
@@ -7660,7 +7661,7 @@ function SleepCheckTab({ companyId, allowed }) {
                       {d.routeName || d.routeId || "-"}
                       {!targetIds.has(d.routeId) && (
                         <span title="대상 노선은 아니지만 확인 기록이 있어 함께 보여드립니다"
-                          style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 700, padding: "2px 7px", borderRadius: "var(--radius-pill)", background: "var(--color-bg-soft)", color: "var(--color-label-mute)" }}>대상 외</span>
+                          style={{ marginLeft: 6, fontSize: 12, fontWeight: 700, padding: "2px 7px", borderRadius: "var(--radius-pill)", background: "var(--color-bg-soft)", color: "var(--color-label-mute)" }}>대상 외</span>
                       )}
                     </td>
                     <td style={S.td}>{d.vehicleNo || d.vehicleId || "-"}</td>
@@ -7673,12 +7674,12 @@ function SleepCheckTab({ companyId, allowed }) {
                     </td>
                     <td style={S.td}>
                       {via ? (
-                        <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: "var(--radius-pill)",
+                        <span style={{ fontSize: 12.5, fontWeight: 700, padding: "2px 8px", borderRadius: "var(--radius-pill)",
                           background: via === "NFC" ? "#E8F0FE" : "var(--color-bg-soft)",
                           color: via === "NFC" ? "var(--color-primary-deep)" : "var(--color-label-mute)" }}>{via}</span>
                       ) : "-"}
                     </td>
-                    <td style={{ ...S.td, color: "var(--color-cautionary)", fontSize: 11 }}>
+                    <td style={{ ...S.td, color: "var(--color-cautionary)", fontSize: 12.5 }}>
                       {audit && audit.suspicious ? sleepAuditLabel(audit.reasons) : ""}
                     </td>
                   </tr>
@@ -7689,7 +7690,7 @@ function SleepCheckTab({ companyId, allowed }) {
         </div>
       )}
 
-      <div style={{ marginTop: 14, fontSize: 11.5, color: "var(--color-label-mute)", lineHeight: 1.7 }}>
+      <div style={{ marginTop: 14, fontSize: 13, color: "var(--color-label-mute)", lineHeight: 1.7 }}>
         🔴 <b>인쇄한 QR 은 사진으로 복제됩니다</b> — 뒷좌석까지 가지 않아도 찍힐 수 있어, 아이들이 타는 노선에는 NFC 태그를 권합니다.
         <br/>확인 위치는 주소가 아니라 <b>기준점(차량 또는 종점)에서의 거리</b>입니다. 멀리서 찍혔거나 도착 직후 즉시 찍힌 건은 <b>점검</b> 칸에 표시됩니다.
       </div>
@@ -7754,17 +7755,17 @@ function NfcRejectTab({ companyId }) {
 
       <div style={S.statGrid}>
         <div>
-          <div style={{ fontSize: 11, color: "var(--color-label-mute)" }}>태깅 건수</div>
+          <div style={{ fontSize: 12.5, color: "var(--color-label-mute)" }}>태깅 건수</div>
           <div style={{ fontSize: 24, fontWeight: 800, color: "var(--color-destructive)" }}>{rows.length}</div>
         </div>
         <div>
-          <div style={{ fontSize: 11, color: "var(--color-label-mute)" }}>미등록 카드 수</div>
+          <div style={{ fontSize: 12.5, color: "var(--color-label-mute)" }}>미등록 카드 수</div>
           <div style={{ fontSize: 24, fontWeight: 800, color: "var(--color-label)" }}>{byUid.length}</div>
         </div>
       </div>
 
       <div style={S.tableWrap}>
-        <div style={{ padding: "10px 14px 4px", fontSize: 12, fontWeight: 700, color: "var(--color-label-mute)" }}>카드별 요약</div>
+        <div style={{ padding: "10px 14px 4px", fontSize: 13.5, fontWeight: 700, color: "var(--color-label-mute)" }}>카드별 요약</div>
         <table style={S.table}>
           <thead><tr>{["카드번호", "태깅 횟수", "노선", "차량", "마지막 태깅"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
           <tbody>
@@ -7796,7 +7797,7 @@ function NfcRejectTab({ companyId }) {
 
         {rows.length > 0 && (
           <>
-            <div style={{ padding: "18px 14px 4px", fontSize: 12, fontWeight: 700, color: "var(--color-label-mute)" }}>태깅 기록</div>
+            <div style={{ padding: "18px 14px 4px", fontSize: 13.5, fontWeight: 700, color: "var(--color-label-mute)" }}>태깅 기록</div>
             <table style={S.table}>
               <thead><tr>{["시각", "카드번호", "노선", "차량"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
               <tbody>
@@ -7813,7 +7814,7 @@ function NfcRejectTab({ companyId }) {
           </>
         )}
 
-        <div style={{ padding: "14px", fontSize: 11, color: "var(--color-label-alt)", lineHeight: 1.7 }}>
+        <div style={{ padding: "14px", fontSize: 12.5, color: "var(--color-label-alt)", lineHeight: 1.7 }}>
           미등록 카드는 <b>탑승 인원에 포함되지 않습니다</b>. 실제 이용자라면 협력사 포털의
           승객 정보에서 <b>NFC 카드번호</b>를 등록하면 다음 태깅부터 정상 처리됩니다.
         </div>
@@ -7902,15 +7903,15 @@ function EtaDiagnosticCard() {
     }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--color-label)" }}>🔍 ETA 진단 조회</div>
-          <div style={{ fontSize: 11, color: "var(--color-label-mute)", marginTop: 2 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--color-label)" }}>🔍 ETA 진단 조회</div>
+          <div style={{ fontSize: 12.5, color: "var(--color-label-mute)", marginTop: 2 }}>
             etaDiagnostics 컬렉션에서 진단 데이터를 회수해 텍스트로 노출 → 복사해 개발자에게 전달
           </div>
         </div>
       </div>
 
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-        <label style={{ fontSize: 12, color: "var(--color-label-mute)", fontWeight: 600 }}>날짜</label>
+        <label style={{ fontSize: 13.5, color: "var(--color-label-mute)", fontWeight: 600 }}>날짜</label>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
           style={{ ...S.input, width: 160, padding: "8px 12px" }} />
         <button onClick={fetchRuns} disabled={loadingRuns}
@@ -7921,7 +7922,7 @@ function EtaDiagnosticCard() {
 
       {runIds.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-          <label style={{ fontSize: 12, color: "var(--color-label-mute)", fontWeight: 600 }}>Run</label>
+          <label style={{ fontSize: 13.5, color: "var(--color-label-mute)", fontWeight: 600 }}>Run</label>
           <select value={selectedRunId} onChange={(e) => setSelectedRunId(e.target.value)}
             style={{ ...S.input, minWidth: 280, padding: "8px 12px" }}>
             <option value="">— 선택 ({runIds.length}개) —</option>
@@ -7935,7 +7936,7 @@ function EtaDiagnosticCard() {
       )}
 
       {errMsg && (
-        <div style={{ background: "#FCE5E5", border: "1px solid #F6C9C9", color: "var(--color-destructive)", padding: "8px 12px", borderRadius: 8, fontSize: 12 }}>
+        <div style={{ background: "#FCE5E5", border: "1px solid #F6C9C9", color: "var(--color-destructive)", padding: "8px 12px", borderRadius: 8, fontSize: 13.5 }}>
           {errMsg}
         </div>
       )}
@@ -7946,7 +7947,7 @@ function EtaDiagnosticCard() {
             <button onClick={copyAll} style={{ ...S.addBtn, background: "var(--color-positive)" }}>
               📋 전체 복사
             </button>
-            {copyMsg && <span style={{ fontSize: 12, color: "var(--color-positive)", fontWeight: 600 }}>{copyMsg}</span>}
+            {copyMsg && <span style={{ fontSize: 13.5, color: "var(--color-positive)", fontWeight: 600 }}>{copyMsg}</span>}
           </div>
           <textarea readOnly value={pointsJson}
             style={{
@@ -7957,7 +7958,7 @@ function EtaDiagnosticCard() {
               border: "1px solid var(--color-line)",
               borderRadius: 8,
               fontFamily: "Consolas, 'Courier New', monospace",
-              fontSize: 11,
+              fontSize: 12.5,
               lineHeight: 1.4,
               color: "var(--color-label)",
               background: "var(--color-bg-soft)",
@@ -8125,7 +8126,7 @@ function SuperCompanyTab({ companies, loading, selectedCompanyId, onSelectCompan
       <div style={S.panelHeader}>
         <div>
           <span style={{ fontSize:16, fontWeight:700, color:"var(--color-label)" }}>🌐 회사 관리 (슈퍼관리자)</span>
-          <div style={{ fontSize:12, color:"var(--color-label-mute)", marginTop:2 }}>
+          <div style={{ fontSize:13.5, color:"var(--color-label-mute)", marginTop:2 }}>
             SaaS 멀티테넌트 — 신규 회사 온보딩 + 활성/비활성 토글
           </div>
         </div>
@@ -8155,10 +8156,10 @@ function SuperCompanyTab({ companies, loading, selectedCompanyId, onSelectCompan
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                   <div>
                     <div style={{ fontSize:15, fontWeight:700, color:"var(--color-label)" }}>{c.name || c.id}</div>
-                    <div style={{ fontSize:11, color:"var(--color-label-mute)", marginTop:2 }}>{c.id}</div>
+                    <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginTop:2 }}>{c.id}</div>
                   </div>
                   <span style={{
-                    fontSize:11, fontWeight:700, padding:"3px 8px", borderRadius:20,
+                    fontSize:12.5, fontWeight:700, padding:"3px 8px", borderRadius:20,
                     background: c.active ? "#E6F7EB" : "#FCE5E5",
                     color: c.active ? "#007A29" : "var(--color-destructive)",
                   }}>
@@ -8166,7 +8167,7 @@ function SuperCompanyTab({ companies, loading, selectedCompanyId, onSelectCompan
                   </span>
                 </div>
                 {c.createdAt && (
-                  <div style={{ fontSize:11, color:"var(--color-label-alt)" }}>
+                  <div style={{ fontSize:12.5, color:"var(--color-label-alt)" }}>
                     생성: {new Date(c.createdAt).toLocaleString("ko-KR")}
                   </div>
                 )}
@@ -8175,7 +8176,7 @@ function SuperCompanyTab({ companies, loading, selectedCompanyId, onSelectCompan
                     disabled={!c.active || isSelected}
                     onClick={() => onSelectCompany(c.id)}
                     style={{
-                      flex:1, padding:"6px 0", borderRadius:6, fontSize:12, fontWeight:600, fontFamily:"inherit",
+                      flex:1, padding:"6px 0", borderRadius:6, fontSize:13.5, fontWeight:600, fontFamily:"inherit",
                       background: isSelected ? "var(--color-bg-alt)" : "var(--color-primary)",
                       color: isSelected ? "var(--color-label-mute)" : "#fff",
                       border:"none", cursor: (!c.active || isSelected) ? "default" : "pointer",
@@ -8195,14 +8196,14 @@ function SuperCompanyTab({ companies, loading, selectedCompanyId, onSelectCompan
                 <div style={{ display:"flex", gap:6, marginTop:2 }}>
                   <button
                     onClick={() => openOps("edit", c)}
-                    style={{ ...S.editBtn, marginRight:0, flex:1, fontSize:11 }}
+                    style={{ ...S.editBtn, marginRight:0, flex:1, fontSize:12.5 }}
                     title="회사명·관리자 정보 편집"
                   >
                     ✏️ 편집
                   </button>
                   <button
                     onClick={() => openOps("reset", c)}
-                    style={{ ...S.editBtn, marginRight:0, flex:1, fontSize:11 }}
+                    style={{ ...S.editBtn, marginRight:0, flex:1, fontSize:12.5 }}
                     title="관리자 비밀번호 초기화"
                   >
                     🔑 비번
@@ -8212,7 +8213,7 @@ function SuperCompanyTab({ companies, loading, selectedCompanyId, onSelectCompan
                     disabled={c.id === currentUserCompanyId}
                     title={c.id === currentUserCompanyId ? "자기 소속 회사는 삭제할 수 없습니다" : "회사·모든 데이터 영구 삭제"}
                     style={{
-                      ...S.editBtn, marginRight:0, flex:1, fontSize:11,
+                      ...S.editBtn, marginRight:0, flex:1, fontSize:12.5,
                       color: c.id === currentUserCompanyId ? "var(--color-label-mute)" : "var(--color-destructive)",
                       borderColor: c.id === currentUserCompanyId ? "var(--color-line)" : "var(--color-destructive)",
                       cursor: c.id === currentUserCompanyId ? "not-allowed" : "pointer",
@@ -8226,7 +8227,7 @@ function SuperCompanyTab({ companies, loading, selectedCompanyId, onSelectCompan
                 <button
                   onClick={() => toggleExpand(c.id)}
                   style={{
-                    ...S.editBtn, marginRight:0, marginTop:2, fontSize:11, fontWeight:600,
+                    ...S.editBtn, marginRight:0, marginTop:2, fontSize:12.5, fontWeight:600,
                     background:"var(--color-bg-soft)",
                   }}
                   title="이 회사의 담당자 관리자 목록"
@@ -8254,7 +8255,7 @@ function SuperCompanyTab({ companies, loading, selectedCompanyId, onSelectCompan
         <div style={S.overlay}>
           <form style={S.modal} onSubmit={submit}>
             <div style={S.modalTitle}>신규 회사 등록</div>
-            <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:6 }}>
+            <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginBottom:6 }}>
               회사 도큐먼트 + 관리자 Auth 계정 + users 도큐먼트 3건이 동시 생성됩니다.
             </div>
 
@@ -8267,7 +8268,7 @@ function SuperCompanyTab({ companies, loading, selectedCompanyId, onSelectCompan
               onChange={(e) => setForm({ ...form, companyName: e.target.value })} />
 
             <div style={{ height:1, background:"var(--color-line-soft)", margin:"8px 0" }} />
-            <div style={{ fontSize:12, fontWeight:700, color:"var(--color-label)" }}>관리자 계정</div>
+            <div style={{ fontSize:13.5, fontWeight:700, color:"var(--color-label)" }}>관리자 계정</div>
 
             <label style={S.label}>관리자 이름</label>
             <input style={S.input} placeholder="홍길동" value={form.adminName}
@@ -8286,13 +8287,13 @@ function SuperCompanyTab({ companies, loading, selectedCompanyId, onSelectCompan
               onChange={(e) => setForm({ ...form, adminPassword: e.target.value })} />
 
             {errMsg && (
-              <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6 }}>
+              <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:13.5, marginTop:6 }}>
                 {errMsg}
               </div>
             )}
 
             <div style={{ display:"flex", gap:8, marginTop:12 }}>
-              <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:13 }}
+              <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:14.5 }}
                 disabled={busy} onClick={() => setModalOpen(false)}>취소</button>
               <button type="submit" style={{ ...S.addBtn, flex:2, padding:"9px 0" }} disabled={busy}>
                 {busy ? "생성 중..." : "회사 생성"}
@@ -8373,20 +8374,20 @@ function AdminListSection({ company, cache, currentUserUid, onAdd, onEditProfile
       display:"flex", flexDirection:"column", gap:8,
     }}>
       {state.loading && (
-        <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center", padding:"6px 0" }}>
+        <div style={{ fontSize:13.5, color:"var(--color-label-mute)", textAlign:"center", padding:"6px 0" }}>
           관리자 목록 로딩 중...
         </div>
       )}
       {state.error && (
         <div style={{
           background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)",
-          padding:"6px 10px", borderRadius:6, fontSize:11,
+          padding:"6px 10px", borderRadius:6, fontSize:12.5,
         }}>
           {state.error}
         </div>
       )}
       {!state.loading && !state.error && admins.length === 0 && (
-        <div style={{ fontSize:12, color:"var(--color-label-mute)", textAlign:"center", padding:"6px 0" }}>
+        <div style={{ fontSize:13.5, color:"var(--color-label-mute)", textAlign:"center", padding:"6px 0" }}>
           등록된 관리자가 없습니다.
         </div>
       )}
@@ -8407,28 +8408,28 @@ function AdminListSection({ company, cache, currentUserUid, onAdd, onEditProfile
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
               <div style={{ fontSize:15, fontWeight:700, color:"var(--color-label)" }}>
                 {a.name || "(이름 없음)"}
-                {isSelf && <span style={{ marginLeft:6, fontSize:11, fontWeight:600, color:"var(--color-primary)" }}>(나)</span>}
+                {isSelf && <span style={{ marginLeft:6, fontSize:12.5, fontWeight:600, color:"var(--color-primary)" }}>(나)</span>}
               </div>
               <span style={{
-                fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:20,
+                fontSize:12.5, fontWeight:700, padding:"3px 10px", borderRadius:20,
                 background: badge.bg, color: badge.color, flexShrink:0, whiteSpace:"nowrap",
               }}>{badge.label}</span>
             </div>
             {/* 중단: 이메일 · 사번 */}
-            <div style={{ fontSize:12, color:"var(--color-label-mute)", wordBreak:"break-all" }}>
+            <div style={{ fontSize:13.5, color:"var(--color-label-mute)", wordBreak:"break-all" }}>
               {a.email || "(이메일 없음)"} <span style={{ color:"var(--color-line)" }}>·</span> 사번 {a.empNo || "-"}
             </div>
             {/* 하단: 관리 버튼(전체 라벨) */}
             <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
               <button onClick={() => onEditProfile(a)} title="이름·이메일·비밀번호 수정"
-                style={{ ...S.editBtn, marginRight:0, fontSize:12, padding:"6px 12px" }}>✏️ 정보수정</button>
+                style={{ ...S.editBtn, marginRight:0, fontSize:13.5, padding:"6px 12px" }}>✏️ 정보수정</button>
               <button onClick={() => onEditPerms(a)} disabled={isSelf}
                 title={isSelf ? "자기 자신의 권한은 변경할 수 없습니다" : "협력사 권한 변경"}
-                style={{ ...S.editBtn, marginRight:0, fontSize:12, padding:"6px 12px",
+                style={{ ...S.editBtn, marginRight:0, fontSize:13.5, padding:"6px 12px",
                   opacity: isSelf ? 0.4 : 1, cursor: isSelf ? "not-allowed" : "pointer" }}>🛡 권한 변경</button>
               <button onClick={() => onDeleteAdmin(a)} disabled={isSelf}
                 title={isSelf ? "자기 자신은 삭제할 수 없습니다" : "관리자 삭제"}
-                style={{ ...S.editBtn, marginRight:0, fontSize:12, padding:"6px 12px",
+                style={{ ...S.editBtn, marginRight:0, fontSize:13.5, padding:"6px 12px",
                   color: isSelf ? "var(--color-label-mute)" : "var(--color-destructive)",
                   borderColor: isSelf ? "var(--color-line)" : "var(--color-destructive)",
                   opacity: isSelf ? 0.4 : 1, cursor: isSelf ? "not-allowed" : "pointer" }}>🗑 삭제</button>
@@ -8440,7 +8441,7 @@ function AdminListSection({ company, cache, currentUserUid, onAdd, onEditProfile
         <button
           onClick={onAdd}
           style={{
-            ...S.editBtn, marginRight:0, marginTop:2, fontSize:11, fontWeight:700,
+            ...S.editBtn, marginRight:0, marginTop:2, fontSize:12.5, fontWeight:700,
             background:"var(--color-primary)", color:"#fff",
             border:"1px solid var(--color-primary)",
           }}
@@ -8478,19 +8479,19 @@ function PartnerPermissionPicker({ partnerCodes, value, onChange }) {
       padding:"10px 12px", display:"flex", flexDirection:"column", gap:6,
       maxHeight:200, overflowY:"auto",
     }}>
-      <label style={{ display:"flex", alignItems:"center", gap:8, fontSize:12, fontWeight:700, color:"var(--color-label)", cursor:"pointer" }}>
+      <label style={{ display:"flex", alignItems:"center", gap:8, fontSize:13.5, fontWeight:700, color:"var(--color-label)", cursor:"pointer" }}>
         <input type="checkbox" checked={isAll} onChange={toggleAll} />
         ⭐ 전체 권한 (*) — 본부/회사 전체 협력사 관리
       </label>
       <div style={{ height:1, background:"var(--color-line-soft)" }} />
       {partnerCodes.length === 0 && (
-        <div style={{ fontSize:11, color:"var(--color-label-mute)", padding:"4px 0", textAlign:"center" }}>
+        <div style={{ fontSize:12.5, color:"var(--color-label-mute)", padding:"4px 0", textAlign:"center" }}>
           이 회사에 등록된 협력사가 없습니다. 발급 후 권한을 부여하세요.
         </div>
       )}
       {partnerCodes.map(p => (
         <label key={p.code} style={{
-          display:"flex", alignItems:"center", gap:8, fontSize:12,
+          display:"flex", alignItems:"center", gap:8, fontSize:13.5,
           color: isAll ? "var(--color-label-mute)" : "var(--color-label)",
           cursor: isAll ? "not-allowed" : "pointer",
           opacity: isAll ? 0.5 : 1,
@@ -8504,14 +8505,14 @@ function PartnerPermissionPicker({ partnerCodes, value, onChange }) {
           <span style={{ flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
             {p.partnerName || "(이름 없음)"}{!p.active && <span style={{ color:"var(--color-label-mute)", marginLeft:4 }}>· 비활성</span>}
           </span>
-          <span style={{ fontSize:10, color:"var(--color-label-mute)", fontFamily:"monospace", flexShrink:0 }}>
+          <span style={{ fontSize:12, color:"var(--color-label-mute)", fontFamily:"monospace", flexShrink:0 }}>
             {p.code}
           </span>
         </label>
       ))}
       {/* 전체 해제 + 0개 선택 = 아무 협력사도 못 보는 상태 안내(저장은 유효하나 의도 확인). */}
       {!isAll && codeSet.size === 0 && partnerCodes.length > 0 && (
-        <div style={{ fontSize:11, color:"var(--color-destructive)", padding:"2px 0", lineHeight:1.45 }}>
+        <div style={{ fontSize:12.5, color:"var(--color-destructive)", padding:"2px 0", lineHeight:1.45 }}>
           ⚠ 선택한 협력사가 없습니다. 이대로 저장하면 이 관리자는 <b>아무 협력사도 볼 수 없습니다</b>. 담당 협력사를 선택하세요.
         </div>
       )}
@@ -8567,7 +8568,7 @@ function AddAdminModal({ company, partnerCodes, onClose, onDone }) {
     <div style={S.overlay}>
       <form style={S.modal} onSubmit={submit}>
         <div style={S.modalTitle}>👥 관리자 추가 — {company.name || company.id}</div>
-        <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:6 }}>
+        <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginBottom:6 }}>
           이 회사를 관리할 담당자 계정을 신규 생성합니다.
         </div>
 
@@ -8595,18 +8596,18 @@ function AddAdminModal({ company, partnerCodes, onClose, onDone }) {
         <PartnerPermissionPicker partnerCodes={partnerCodes} value={allowed} onChange={setAllowed} />
 
         {errMsg && (
-          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6, whiteSpace:"pre-wrap" }}>
+          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:13.5, marginTop:6, whiteSpace:"pre-wrap" }}>
             {errMsg}
           </div>
         )}
         {okMsg && (
-          <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6, whiteSpace:"pre-wrap" }}>
+          <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:13.5, marginTop:6, whiteSpace:"pre-wrap" }}>
             {okMsg}
           </div>
         )}
 
         <div style={{ display:"flex", gap:8, marginTop:12 }}>
-          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:13 }}
+          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:14.5 }}
             disabled={busy} onClick={onClose}>취소</button>
           <button type="submit" style={{ ...S.addBtn, flex:2, padding:"9px 0" }} disabled={busy}>
             {busy ? "추가 중..." : "관리자 추가"}
@@ -8686,7 +8687,7 @@ function EditAdminProfileModal({ company, admin, onClose, onDone }) {
     <div style={S.overlay}>
       <form style={S.modal} onSubmit={submit}>
         <div style={S.modalTitle}>✏️ 정보 수정 — {admin.name || admin.email}</div>
-        <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:6 }}>
+        <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginBottom:6 }}>
           소속: {company.name || company.id} · 사번: {admin.empNo || "?"}
         </div>
 
@@ -8697,7 +8698,7 @@ function EditAdminProfileModal({ company, admin, onClose, onDone }) {
         <label style={S.label}>이메일 (로그인 ID)</label>
         <input style={S.input} type="email" placeholder="admin@company.com" value={email}
           onChange={(e) => setEmail(e.target.value)} />
-        <div style={{ fontSize:11, color:"var(--color-cautionary, #B8860B)", marginTop:2 }}>
+        <div style={{ fontSize:12.5, color:"var(--color-cautionary, #B8860B)", marginTop:2 }}>
           ⚠ 이메일을 바꾸면 이 관리자의 로그인 ID가 변경됩니다.
         </div>
 
@@ -8711,18 +8712,18 @@ function EditAdminProfileModal({ company, admin, onClose, onDone }) {
           onChange={(e) => setPasswordConfirm(e.target.value)} />
 
         {errMsg && (
-          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6 }}>
+          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:13.5, marginTop:6 }}>
             {errMsg}
           </div>
         )}
         {okMsg && (
-          <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6, whiteSpace:"pre-wrap" }}>
+          <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:13.5, marginTop:6, whiteSpace:"pre-wrap" }}>
             {okMsg}
           </div>
         )}
 
         <div style={{ display:"flex", gap:8, marginTop:12 }}>
-          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:13 }}
+          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:14.5 }}
             disabled={busy} onClick={onClose}>취소</button>
           <button type="submit" style={{ ...S.addBtn, flex:2, padding:"9px 0" }} disabled={busy}>
             {busy ? "적용 중..." : "변경 적용"}
@@ -8766,7 +8767,7 @@ function EditAdminPermissionsModal({ company, admin, partnerCodes, onClose, onDo
     <div style={S.overlay}>
       <form style={S.modal} onSubmit={submit}>
         <div style={S.modalTitle}>🛡 권한 변경 — {admin.name || admin.email}</div>
-        <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:6 }}>
+        <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginBottom:6 }}>
           소속: {company.name || company.id} · 이메일: {admin.email || "?"}
         </div>
 
@@ -8774,18 +8775,18 @@ function EditAdminPermissionsModal({ company, admin, partnerCodes, onClose, onDo
         <PartnerPermissionPicker partnerCodes={partnerCodes} value={allowed} onChange={setAllowed} />
 
         {errMsg && (
-          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6 }}>
+          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:13.5, marginTop:6 }}>
             {errMsg}
           </div>
         )}
         {okMsg && (
-          <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6, whiteSpace:"pre-wrap" }}>
+          <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:13.5, marginTop:6, whiteSpace:"pre-wrap" }}>
             {okMsg}
           </div>
         )}
 
         <div style={{ display:"flex", gap:8, marginTop:12 }}>
-          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:13 }}
+          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:14.5 }}
             disabled={busy} onClick={onClose}>취소</button>
           <button type="submit" style={{ ...S.addBtn, flex:2, padding:"9px 0" }} disabled={busy}>
             {busy ? "변경 중..." : "권한 저장"}
@@ -8827,7 +8828,7 @@ function DeleteAdminModal({ company, admin, onClose, onDone }) {
         <div style={{ ...S.modalTitle, color:"var(--color-destructive)" }}>🗑 관리자 삭제 — {admin.name || admin.email}</div>
         <div style={{
           background:"#FCE5E5", border:"1px solid #F6C9C9", color:"#B00020",
-          padding:"10px 12px", borderRadius:8, fontSize:12, marginBottom:8, lineHeight:1.5,
+          padding:"10px 12px", borderRadius:8, fontSize:13.5, marginBottom:8, lineHeight:1.5,
         }}>
           ⚠️ <b>이 작업은 되돌릴 수 없습니다.</b><br/>
           이 관리자의 Firebase Auth 계정 + users 도큐먼트가 영구 삭제됩니다.<br/>
@@ -8835,24 +8836,24 @@ function DeleteAdminModal({ company, admin, onClose, onDone }) {
         </div>
 
         {errMsg && (
-          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6 }}>
+          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:13.5, marginTop:6 }}>
             {errMsg}
           </div>
         )}
         {okMsg && (
-          <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6, whiteSpace:"pre-wrap" }}>
+          <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:13.5, marginTop:6, whiteSpace:"pre-wrap" }}>
             {okMsg}
           </div>
         )}
 
         <div style={{ display:"flex", gap:8, marginTop:12 }}>
-          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:13 }}
+          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:14.5 }}
             disabled={busy} onClick={onClose}>취소</button>
           <button
             type="submit"
             disabled={busy}
             style={{
-              flex:2, padding:"9px 0", borderRadius:6, fontSize:13, fontWeight:700, fontFamily:"inherit",
+              flex:2, padding:"9px 0", borderRadius:6, fontSize:14.5, fontWeight:700, fontFamily:"inherit",
               border:"none",
               background: busy ? "var(--color-bg-alt)" : "var(--color-destructive)",
               color: busy ? "var(--color-label-mute)" : "#fff",
@@ -8940,7 +8941,7 @@ function EditCompanyModal({ company, onClose, onDone }) {
     <div style={S.overlay}>
       <form style={S.modal} onSubmit={submit}>
         <div style={S.modalTitle}>✏️ 회사 편집 — {company.name || company.id}</div>
-        <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:6 }}>
+        <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginBottom:6 }}>
           변경할 필드만 입력. 비어두면 그대로 유지.
         </div>
 
@@ -8949,7 +8950,7 @@ function EditCompanyModal({ company, onClose, onDone }) {
           onChange={(e) => setCompanyName(e.target.value)} />
 
         <div style={{ height:1, background:"var(--color-line-soft)", margin:"8px 0" }} />
-        <div style={{ fontSize:12, fontWeight:700, color:"var(--color-label)" }}>관리자 계정 (선택)</div>
+        <div style={{ fontSize:13.5, fontWeight:700, color:"var(--color-label)" }}>관리자 계정 (선택)</div>
 
         <label style={S.label}>관리자 이름 (변경 시 입력)</label>
         <input style={S.input} placeholder="비워두면 변경 안 함" value={adminName}
@@ -8964,18 +8965,18 @@ function EditCompanyModal({ company, onClose, onDone }) {
           onChange={(e) => setAdminPassword(e.target.value)} />
 
         {errMsg && (
-          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6, whiteSpace:"pre-wrap" }}>
+          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:13.5, marginTop:6, whiteSpace:"pre-wrap" }}>
             {errMsg}
           </div>
         )}
         {okMsg && (
-          <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6, whiteSpace:"pre-wrap" }}>
+          <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:13.5, marginTop:6, whiteSpace:"pre-wrap" }}>
             {okMsg}
           </div>
         )}
 
         <div style={{ display:"flex", gap:8, marginTop:12 }}>
-          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:13 }}
+          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:14.5 }}
             disabled={busy} onClick={onClose}>취소</button>
           <button type="submit" style={{ ...S.addBtn, flex:2, padding:"9px 0" }} disabled={busy}>
             {busy ? "변경 중..." : "변경 적용"}
@@ -9019,7 +9020,7 @@ function ResetPasswordModal({ company, onClose, onDone }) {
     <div style={S.overlay}>
       <form style={S.modal} onSubmit={submit}>
         <div style={S.modalTitle}>🔑 관리자 비밀번호 초기화 — {company.name || company.id}</div>
-        <div style={{ fontSize:11, color:"var(--color-label-mute)", marginBottom:6 }}>
+        <div style={{ fontSize:12.5, color:"var(--color-label-mute)", marginBottom:6 }}>
           회사 관리자(역할=admin)의 Firebase Auth 비밀번호를 즉시 변경합니다.
         </div>
 
@@ -9032,18 +9033,18 @@ function ResetPasswordModal({ company, onClose, onDone }) {
           onChange={(e) => setPwd2(e.target.value)} />
 
         {errMsg && (
-          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6 }}>
+          <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:13.5, marginTop:6 }}>
             {errMsg}
           </div>
         )}
         {okMsg && (
-          <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6, whiteSpace:"pre-wrap" }}>
+          <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:13.5, marginTop:6, whiteSpace:"pre-wrap" }}>
             {okMsg}
           </div>
         )}
 
         <div style={{ display:"flex", gap:8, marginTop:12 }}>
-          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:13 }}
+          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:14.5 }}
             disabled={busy} onClick={onClose}>취소</button>
           <button type="submit" style={{ ...S.addBtn, flex:2, padding:"9px 0" }} disabled={busy}>
             {busy ? "변경 중..." : "비밀번호 초기화"}
@@ -9098,7 +9099,7 @@ function DeleteCompanyModal({ company, isSelf, onClose, onDone }) {
         <div style={{ ...S.modalTitle, color:"var(--color-destructive)" }}>🗑 회사 영구 삭제 — {company.name || company.id}</div>
         <div style={{
           background:"#FCE5E5", border:"1px solid #F6C9C9", color:"#B00020",
-          padding:"10px 12px", borderRadius:8, fontSize:12, marginBottom:8, lineHeight:1.5,
+          padding:"10px 12px", borderRadius:8, fontSize:13.5, marginBottom:8, lineHeight:1.5,
         }}>
           ⚠️ <b>이 작업은 되돌릴 수 없습니다.</b><br/>
           회사·노선·기사·직원·차량·운행 이력·탑승 기록·공지·관리자 계정 등<br/>
@@ -9106,7 +9107,7 @@ function DeleteCompanyModal({ company, isSelf, onClose, onDone }) {
         </div>
 
         {isSelf ? (
-          <div style={{ background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", padding:"10px 12px", borderRadius:8, fontSize:12, color:"var(--color-label)" }}>
+          <div style={{ background:"var(--color-bg-soft)", border:"1px solid var(--color-line)", padding:"10px 12px", borderRadius:8, fontSize:13.5, color:"var(--color-label)" }}>
             자기 소속 회사는 삭제할 수 없습니다. (lockout 방지)
           </div>
         ) : (
@@ -9121,12 +9122,12 @@ function DeleteCompanyModal({ company, isSelf, onClose, onDone }) {
             />
 
             {errMsg && (
-              <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6 }}>
+              <div style={{ background:"#FCE5E5", border:"1px solid #F6C9C9", color:"var(--color-destructive)", padding:"8px 12px", borderRadius:8, fontSize:13.5, marginTop:6 }}>
                 {errMsg}
               </div>
             )}
             {okMsg && (
-              <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:12, marginTop:6, whiteSpace:"pre-wrap" }}>
+              <div style={{ background:"#E6F7EB", border:"1px solid #B7E5C5", color:"#007A29", padding:"8px 12px", borderRadius:8, fontSize:13.5, marginTop:6, whiteSpace:"pre-wrap" }}>
                 {okMsg}
               </div>
             )}
@@ -9134,13 +9135,13 @@ function DeleteCompanyModal({ company, isSelf, onClose, onDone }) {
         )}
 
         <div style={{ display:"flex", gap:8, marginTop:12 }}>
-          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:13 }}
+          <button type="button" style={{ ...S.editBtn, flex:1, padding:"9px 0", fontSize:14.5 }}
             disabled={busy} onClick={onClose}>취소</button>
           <button
             type="submit"
             disabled={busy || isSelf || !idMatched}
             style={{
-              flex:2, padding:"9px 0", borderRadius:6, fontSize:13, fontWeight:700, fontFamily:"inherit",
+              flex:2, padding:"9px 0", borderRadius:6, fontSize:14.5, fontWeight:700, fontFamily:"inherit",
               border:"none",
               background: (busy || isSelf || !idMatched) ? "var(--color-bg-alt)" : "var(--color-destructive)",
               color: (busy || isSelf || !idMatched) ? "var(--color-label-mute)" : "#fff",
