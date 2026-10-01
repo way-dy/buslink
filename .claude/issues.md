@@ -5,6 +5,9 @@
 
 ## 미해결 / 함정
 
+- `[미해결]` **채드윅 하교·방과후 ETA — 첫 구간(학교→첫 정류장) 계획 시간 과대(2026-10-01 실측 · 데이터 보정 대기)**: `scripts/inspect_eta_deviation.cjs`(GPS 궤적 보간 통과 시각 기준 · 출발지=떠난 시각). 첫 구간 |중앙| 7.2분·p90 17분 vs 그 뒤 2.0분·p90 5분 · 13노선 중 12곳이 계획보다 빠름(`[G1] 방과후` −22분). 엔진의 «빠른 방향 1 클램프» 때문에 예상이 못 당겨져 도착 직전 점프가 생긴다. 🔵 단말 서버 도착감지 누락 1%·기록 지연 p90 1.3분 = 원인 아님. 🔴 **«몇 분 도착» 숨김은 해결책이 아니다(way)** — 첫 정류장 offsetMin 을 10/15 전후 2주치 재측정 후 보정(prod 노선 데이터·승인 필요).
+- `[패턴]` **거래처 «홈 지도 크게»(`partnerCodes.homeMap.large`, 2026-10-01 prod `main.1773dd2c.js`)**: **부재=작게(현행)** — qrBoarding·routePathDisplay 와 반대 폴러리티. 🔴 지도 `minHeight` 를 올리지 말 것(360x640 에서 노선도 0px → 정류장 선택·QR 탑승 불가) — 노선도를 `homeRouteListBounds` 로 96~124px 묶는다. ⚠ `headless_check_home_qr_fold.cjs` 는 9/18 «미선택 QR 버튼 제거» 이후 전제가 낡아 꺼짐 상태에서도 실패한다(미수정).
+
 - `[패턴]` **노선별 태깅 가능 시간 게이트(2026-09-29 최우석 `3whpOuuC`, prod CF 3종 + `main.f426cbc5.js`)**: 같은 차량이 출근·퇴근을 둘 다 뛰면 앱에 남은 선택 노선(selectedRouteId)대로 저녁에도 출근 노선에 적재됐다. `routes.boardStart/boardEnd` 가 **둘 다 있을 때만** `boardStatic`·`boardNfc` 가 기록 전에 거부(판정 정본 `functions/boardWindow.js`). 🔴 **폴러리티가 표시 시간과 반대** — 표시 시간은 없으면 departTime 에서 파생하지만 태깅 시간은 **없으면 게이트 없음**(파생하면 배포 순간 전 노선이 막힌다). 🔴 회귀 가드: ⓐ 다른 노선으로 자동 적재 금지(안내만) ⓑ `recordSleepingCheck` 는 opts 없이 불러 옛 선택 규칙 유지 ⓒ 프리뷰 `resolveStaticBoarding` 은 선택 규칙만 공유·거부 안 함. ⚠ 실호출 미검증 · 배포 시점 창 설정 노선 0개.
 
 - `[패턴]` **🔴 대체공휴일 × `excludeHolidays` — 통근 거래처는 공휴일에도 다닌다 · `includeDates` 신설(2026-09-28 배시현 `ZKe91r2Y…`, 미배포)**: 9/28(추석 대체)에 dy001 일정 81개 전부 skip. `excludeDates` 에서 빼는 것으로는 공휴일을 못 연다 → 일정 `includeDates`(강제 운행일)가 공휴일 제외를 그 날만 푼다. 🔴 회귀 가드: ⓐ `shouldExpandOn`↔`shouldExpand` 한쪽만 고치지 말 것(`test_schedule_prune` 이 대조) ⓑ `excludeDates` 우선·요일/기간 밖은 안 연다 ⓒ 일정 편집 저장 payload 에서 `includeDates` 를 빼지 말 것(저장 직후 정리가 강제 운행일 배차를 지우자고 한다) ⓓ 일괄 「운행」이 공휴일을 여는 날은 **날짜를 확인창에 밝힌다**(연휴 전체로 걸면 추석 당일까지 열린다).
