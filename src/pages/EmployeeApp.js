@@ -41,6 +41,7 @@ import { resolveInquiryConfig, buildInquiryUrl } from "../lib/inquiry";
 import { resolveHomepageConfig, homepageDisplayHost } from "../lib/homepage";
 import { resolveQrBoardingConfig } from "../lib/qrBoarding";
 import { resolveRoutePathDisplayConfig } from "../lib/routePathDisplay";
+import { resolveHomeMapConfig, homeRouteListBounds } from "../lib/homeMapSize";
 import { resolveTagSoundConfig, applyTagSoundPolicy, clearTagSoundPolicy, unlockTagSound, playTagBeep, isTagSoundOn, setTagSoundOn, isTagSoundForced } from "../lib/tagSound";
 import { useExitConfirm } from "../lib/useExitConfirm";
 
@@ -499,6 +500,8 @@ export default function EmployeeApp() {
   const [qrBoardingOn, setQrBoardingOn] = useState(true);
   // 노선 경로(파란 선) 노출(2026-09-15). 초기값 true — QR 탑승과 같은 이유(원래 보이던 것이라 깜빡임 방지).
   const [routePathOn, setRoutePathOn] = useState(true);
+  // 홈 지도 크게(2026-10-01 채드윅 미팅). 초기값 false = 현행 — 켠 거래처만 조회 후 커진다.
+  const [homeMapLarge, setHomeMapLarge] = useState(false);
   useEffect(() => {
     let cancelled = false;
     // 🔴 로그인 **전에도** 거래처를 알 수 있으면 첫 화면부터 그 톤으로 연다(2026-08-27).
@@ -511,6 +514,7 @@ export default function EmployeeApp() {
       setBranding(null); setTheme(null); setInquiry(null); setHomepage(null);
       setQrBoardingOn(true); // 거래처를 모르면 현행(노출) — 숨김은 거래처가 명시적으로 켠 것만
       setRoutePathOn(true);
+      setHomeMapLarge(false);
       return;
     }
     fetchPartnerCodeData(pc).then(d => {
@@ -524,6 +528,7 @@ export default function EmployeeApp() {
       setHomepage(resolveHomepageConfig(d));
       setQrBoardingOn(resolveQrBoardingConfig(d).visible); // 부재·모르는 값 = 노출(회귀 0)
       setRoutePathOn(resolveRoutePathDisplayConfig(d).visible); // 부재·모르는 값 = 노출(회귀 0)
+      setHomeMapLarge(resolveHomeMapConfig(d).large); // 부재·모르는 값 = 현행(작게)
       // 태깅 소리 강제 여부(2026-08-25). 프롭으로 여러 겹 내려보내지 않는 이유 =
       // 거래처 문서를 읽는 곳이 여기 한 군데뿐이고, 브랜딩(applyPartnerBranding)이 이미 같은 패턴.
       applyTagSoundPolicy(resolveTagSoundConfig(d));
@@ -683,7 +688,7 @@ export default function EmployeeApp() {
         {/* 🔴 `onScanTab` 이 null 이면 홈 카드의 QR 버튼도 함께 사라진다 — 탭과 버튼을
             **한 값으로 묶어** 둔다. 따로 두면 한쪽만 고쳐 반쪽 상태가 된다. */}
         {tab === "home"     && (
-          <HomeTab companyId={companyId} session={session} branding={branding} theme={theme} showRoutePath={routePathOn} onScanTab={qrBoardingOn ? () => setTab("scan") : null} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />
+          <HomeTab companyId={companyId} session={session} branding={branding} theme={theme} showRoutePath={routePathOn} largeMap={homeMapLarge} onScanTab={qrBoardingOn ? () => setTab("scan") : null} onSessionUpdate={(s)=>{saveSession({...session,...s});setSession(p=>({...p,...s}));}} />
         )}
         {tab === "routes"   && <RoutesTab companyId={companyId} session={session} showRoutePath={routePathOn} onSessionUpdate={(s) => { saveSession({...session,...s}); setSession(p=>({...p,...s})); }} />}
         {tab === "notices"  && <NoticesTab notices={notices} unreadCount={unreadCount} />}
@@ -972,7 +977,7 @@ function FirstPinSetup({ companyId, session, onDone, onLogout, brand = { name: "
 // ════════════════════════════════════════════════════════
 // 홈 탭 — 내 노선 버스 위치 + ETA
 // ════════════════════════════════════════════════════════
-function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpdate, showRoutePath = true }) {
+function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpdate, showRoutePath = true, largeMap = false }) {
   // 상단 브랜드 밴드 색 — 거래처 색에서 파생하고 글자색은 휘도로 정한다(순수 함수).
   // 🔴 테마가 오면 밴드색을 primary 에서 파생하지 않는다 — 카카오 톤은 밴드(곤색)와
   //    CTA(파랑)가 서로 다른 색이라 파생으로 만들 수 없다(`partnerBranding.brandBand`).
@@ -1622,7 +1627,9 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
           스크롤을 지고 지도는 이 값에서 멈춘다.
           🔴 눈대중이 아니라 `headless_check_home_qr_fold.cjs`(QR 버튼 vs 탭바)와
              `headless_check_home_strip.cjs`(정류장 라벨 겹침·가림)가 픽셀로 잠근다 —
-             고정 %로 되돌리면 두 검사가 빨간불이 된다. */}
+             고정 %로 되돌리면 두 검사가 빨간불이 된다.
+          🔴 거래처 «지도 크게»(2026-10-01 채드윅)는 이 줄을 건드리지 않는다 — 아래 노선도 높이를
+             묶어 남는 칸을 지도가 가져가게 한다(지도 바닥값을 올리면 작은 폰에서 노선도가 0px). */}
       <div style={{ flex: '1 1 0', minHeight: 150, position: 'relative' }}>
         {/* onCreate relayout: 이 지도 컨테이너는 100dvh→flex:1→flex:1→flex:'0 0 55%' 체인.
             카카오 맵이 dvh/flex 확정 전 0px로 초기화되면 CSS와 달리 자동 복구 안 함(영구 흰화면).
@@ -1766,7 +1773,7 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
           스크롤해야 QR 탑승이 보였다** — 2026-08-28 최우석 신고가 그것이다.
           🔴 패널을 밖으로 빼도 잘리지 않는다: 지도가 `flex:'1 1 0'` 으로 남는 공간만
              먹으므로 패널·노선도가 먼저 자리를 잡는다(잘림 방지 목적은 그대로 지켜진다). */}
-      <div style={{ flex: '0 1 auto', minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+      <div style={{ flex: '0 1 auto', ...homeRouteListBounds(largeMap), overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
       {/* ── 노선 진척 스트립(단일) — 2026-08-05 회의 #4 ──────────────────────
           예전엔 여기에 ①4노드 요약 진척바(출발/현재/다음/도착)와 ②전 정류장 노선도
           스트립이 위아래로 쌓여 있었다. 노선도처럼 생긴 게 두 줄이라 헷갈리고,
