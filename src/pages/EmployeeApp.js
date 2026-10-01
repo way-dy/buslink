@@ -2663,7 +2663,10 @@ function RoutesTab({ companyId, session, onSessionUpdate, showRoutePath = true }
       {stopModal && (
         <div style={{ position:"fixed", inset:0, background:"var(--color-overlay)", zIndex:200, display:"flex", flexDirection:"column", justifyContent:"flex-end" }}
           onClick={() => setStopModal(null)}>
-          <div style={{ background:"var(--color-bg)", borderRadius:"20px 20px 0 0", width:"100%", maxHeight:"88dvh", display:"flex", flexDirection:"column", boxShadow:"var(--shadow-heavy)" }}
+          {/* 2026-10-02 배시현(학부모 문의) "실시간 지도가 작다 — 위로 더 키워 달라": 홈 대신 이 시트로
+              관제를 보는 분이 많다. 지도 보기일 때만 시트를 화면 거의 전체(94dvh)로 고정해 지도가 위로 늘어난다.
+              목록·거리뷰는 내용 높이 그대로(88dvh 상한). */}
+          <div style={{ background:"var(--color-bg)", borderRadius:"20px 20px 0 0", width:"100%", maxHeight: modalView==="map" ? "94dvh" : "88dvh", height: modalView==="map" ? "94dvh" : undefined, display:"flex", flexDirection:"column", boxShadow:"var(--shadow-heavy)" }}
             onClick={e => e.stopPropagation()}>
 
             {/* 핸들 + 헤더 */}
