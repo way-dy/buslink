@@ -5,6 +5,8 @@
 
 ## 미해결 / 함정
 
+- `[해결]` **기점(출발지)에 일찍 와 대기하면 승객앱이 «이미 지나침·조기도착» (2026-10-01 배시현 `Fc8Zs7TD` · `main.eacf1f1a.js`)**: 08-24 `departureBaseMs` 는 **체인 기준점**만 고쳤고 승객 화면은 기점에 실도착 시각·`passed` 판정을 그대로 보였다(정류장 반경을 살짝 넘은 주차 자리면 진행거리상 «지나침»). 정본 `src/lib/originStop.js` — 기점 + 계획 출발 전 = `departing`(«HH:MM 출발 · 출발지에서 대기 중»), 기점 시각은 «출발 계획시각». 🔴 회귀 가드: 기점에 **늦게 오는 중(지연)** 은 표시 유지 · approaching 카운트다운은 덮지 않는다 · 도착 기록·delaySec 불변(기사·관리자 화면은 사실 그대로). 적용 3곳(카드·지도 말풍선·노선 탭 목록) — `test_origin_stop.cjs` 가 사용처 수까지 잠근다. ⚠ `PassengerApp`(`/bus`)은 미적용(요청 범위 밖).
+
 - `[패턴]` **가독성 — 작은 글자 바닥값 일괄 상향(2026-10-01 way «DYOPS 처럼» · 승객앱 `main.28c9d28b.js` · 관리자 `main.1973d89f.js`)**: `scripts/bump_passenger_font_floor.cjs`(10→12 · 11→12.5 · 12→13.5 · 13→14.5 · 14→15 · `<CustomOverlayMap>` 안 제외 · 파일 머리 `/* font-floor-2026-10-01 */` 표식으로 재적용 차단). 승객앱 4파일 205곳 · AdminApp 478곳 · 사이드바 `navItem` 16px/600. 🔴 **새 화면 코드에 10~11px 를 다시 쓰지 말 것**(바닥 12). 🔴 표 칸 잘림은 `td maxWidth` 가 아니라 **안쪽 div 폭**으로 감는다(노선 관리 노선명). ⚠ 실화면 확인은 대시보드·노선·배차·운행 이력만 — 나머지 탭은 신고 시 개별 수정. ⚠ `headless_check_route_names`·`headless_check_stop_list_labels` 는 8/25 승객 인증 전환 뒤 **로그인에서 멈추는 낡은 하네스**(resumeToken 미주입 · prod 기준선도 같은 실패 · 미수정).
 
 - `[해결]` **ETA 느림 배율 폭주 — 긴 구간 초반 «20:00 도착»(2026-10-01 · `main.3d077316.js` · `fb07fd0`)**: `stopSchedule.js` 진척률 안분의 slowFactor 가 진행률 5% 대에서 2~5배로 튀어 남은 구간 전체에 곱해졌다(9/30 `[A] 방과후` 17:37 에 20:00 예상 · 실제 18:46). 수정 = `SLOW_FACTOR_MIN_PROGRESS=0.25` 전엔 1 · `SLOW_FACTOR_MAX=1.5`. 🔴 **회귀 가드**: 빠른 방향(<1) 허용 금지(재생에서 점프만 증가) · 상수를 바꾸려면 `scripts/replay_eta_fast_clamp.cjs`(정본 vm 재생 · legacy 대조군)로 하교·등교·타 거래처 3집합을 먼저 재라. 잔존: 타 거래처 p90 55분·이른 «곧 도착» 94건은 별도 원인.
