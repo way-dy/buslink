@@ -663,7 +663,8 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
               color: "var(--color-label, #171719)",
             }}
           >
-            {`«이미 설치됨» 이라고 나오면 앱이 이미 휴대폰에 있는 거예요. 화면을 위로 밀어 앱 목록에서 «${installedName}» 을 눌러 열어 주세요.`}
+            {/* 문구는 삼성 크롬 실제 화면 그대로(2026-10-01 대표님 폰: 앱 목록엔 없는데 크롬은 «앱이 이미 설치되어 있습니다 · 클릭하여 앱 열기»). */}
+            {`«앱이 이미 설치되어 있습니다» 가 나오면 그 줄을 눌러 바로 여시면 돼요. 앱 목록에 «${installedName}» 이 있으면 거기서 여셔도 됩니다.`}
           </div>
         )}
 
