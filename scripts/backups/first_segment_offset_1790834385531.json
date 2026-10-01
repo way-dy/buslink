@@ -1,0 +1,229 @@
+{
+ "at": "2026-10-01T05:59:45.223Z",
+ "routes": [
+  {
+   "routeId": "9kMewUsH3EGreKiVvwpZ",
+   "name": "[G1] 방과후하교 / Late Activity Bus",
+   "stops": [
+    {
+     "id": "qp0twwLbdIvsbf25La5K",
+     "offsetMin": 0
+    },
+    {
+     "id": "eAc7Gs9RBEL53sK6sGcx",
+     "offsetMin": 75
+    },
+    {
+     "id": "oJqg5tbAczDJyeluDwK9",
+     "offsetMin": 85
+    },
+    {
+     "id": "iNCAGGzM9UoqoXCnhCFW",
+     "offsetMin": 95
+    }
+   ]
+  },
+  {
+   "routeId": "3vHFk4Bbs1OZmX6gVzSD",
+   "name": "[H1-1] 하교 / Back Home",
+   "stops": [
+    {
+     "id": "UPfxaV1DNmuYTLOuVyu2",
+     "offsetMin": 0
+    },
+    {
+     "id": "hdJQPOEtfMr5hhYFkgHy",
+     "offsetMin": 70
+    },
+    {
+     "id": "b90f4scw8WJmsktsIAUt",
+     "offsetMin": 73
+    },
+    {
+     "id": "ARiiLE3pF0L9KQgePChW",
+     "offsetMin": 90
+    }
+   ]
+  },
+  {
+   "routeId": "CH2VvYjNTWmYqujQ9RpD",
+   "name": "[A] 하교 / Back Home",
+   "stops": [
+    {
+     "id": "UldH791Ylai2tWDF65sn",
+     "offsetMin": 0
+    },
+    {
+     "id": "taVOpUnNb8Y7K9DxVDbZ",
+     "offsetMin": 68
+    },
+    {
+     "id": "FxmgClSm6pZW7H27ZmOw",
+     "offsetMin": 70
+    }
+   ]
+  },
+  {
+   "routeId": "Y1y4GMzHx6nn8d4cttw0",
+   "name": "[H1] 방과후하교 / Late Activity Bus",
+   "stops": [
+    {
+     "id": "PfrSLi3VYZotPptjlbZK",
+     "offsetMin": 0
+    },
+    {
+     "id": "BzEh45pwfQexzS8EXASC",
+     "offsetMin": 75
+    },
+    {
+     "id": "8ANtLQq48q187fb0Im8Q",
+     "offsetMin": 85
+    },
+    {
+     "id": "FyWAGt0qhZRIHEG1JFSG",
+     "offsetMin": 95
+    },
+    {
+     "id": "vf7umr5EpcKMzLXr9WXq",
+     "offsetMin": 100
+    },
+    {
+     "id": "CFuA2fvtglhj961wooId",
+     "offsetMin": 115
+    }
+   ]
+  },
+  {
+   "routeId": "S7shJJIH9FtxrHt4u39X",
+   "name": "[B] 하교 / Back Home",
+   "stops": [
+    {
+     "id": "g5YbFbbEjTytHvYaOkoE",
+     "offsetMin": 0
+    },
+    {
+     "id": "QiJYkYa4yRLdSBQsjytG",
+     "offsetMin": 60
+    }
+   ]
+  },
+  {
+   "routeId": "vJs9FlgGzzInzlaAHYo9",
+   "name": "[A] 방과후하교 / Late Activity Bus",
+   "stops": [
+    {
+     "id": "lVU5NH4MwOyFSyiLKOpH",
+     "offsetMin": 0
+    },
+    {
+     "id": "bqx3hK1X7T7A0xFU4g7h",
+     "offsetMin": 70
+    },
+    {
+     "id": "2W0GmN4KpyBDfOnG9ZDe",
+     "offsetMin": 85
+    },
+    {
+     "id": "xbvi6GVfKApilLhi75Yf",
+     "offsetMin": 90
+    }
+   ]
+  },
+  {
+   "routeId": "RMe4wWmohcCLtCbkzPr1",
+   "name": "[S] 방과후하교 / Late Activity Bus",
+   "stops": [
+    {
+     "id": "wHvuqPdQhHGa63EN5bz9",
+     "offsetMin": 0
+    },
+    {
+     "id": "qYDwgbmnmAfVuQqHGqjQ",
+     "offsetMin": 60
+    },
+    {
+     "id": "uIBRiEuFj53hEJY46rUg",
+     "offsetMin": 65
+    },
+    {
+     "id": "DK5tB8mmxW59z81j0vsa",
+     "offsetMin": 70
+    }
+   ]
+  },
+  {
+   "routeId": "NVroRVCpmZ5bpI6m6t0I",
+   "name": "[P] 하교 / Back Home",
+   "stops": [
+    {
+     "id": "8WT6TR3nnlh1DgsceOmu",
+     "offsetMin": 0
+    },
+    {
+     "id": "PLBFyB2Q365LFOF3KxIW",
+     "offsetMin": 50
+    },
+    {
+     "id": "q5ITDbVQ8NK8tFcEbUyU",
+     "offsetMin": 55
+    },
+    {
+     "id": "jUZrR8lNwWuBSQDmIrVp",
+     "offsetMin": 60
+    },
+    {
+     "id": "hnJy9w1m1H8N8SEKK1Y0",
+     "offsetMin": 65
+    }
+   ]
+  },
+  {
+   "routeId": "WUtgWH3n6btyQyeJHBL7",
+   "name": "[S] 하교 / Back Home",
+   "stops": [
+    {
+     "id": "W1u0bwG3YnufOrR0GaB8",
+     "offsetMin": 0
+    },
+    {
+     "id": "Xg7i6SRG8HKqzGm0lA09",
+     "offsetMin": 50
+    },
+    {
+     "id": "b9EOzvOC0f7XFqLUCv16",
+     "offsetMin": 55
+    },
+    {
+     "id": "bI9jttEP3wEihm3b7Ypo",
+     "offsetMin": 60
+    }
+   ]
+  },
+  {
+   "routeId": "1ahBZdm8yamXdykPsm39",
+   "name": "[P] 방과후하교 / Late Activity Bus",
+   "stops": [
+    {
+     "id": "995pTPHZEAtwHo7OIKzH",
+     "offsetMin": 0
+    },
+    {
+     "id": "eqFpWat5LXEksxcgs1VS",
+     "offsetMin": 50
+    },
+    {
+     "id": "1r4hidH9EJwZ5UfQ9zYA",
+     "offsetMin": 60
+    },
+    {
+     "id": "ZJvyqCxzmFCqJ3LsbAaV",
+     "offsetMin": 70
+    },
+    {
+     "id": "CuR2w9PgKX62wJtl7Ng2",
+     "offsetMin": 80
+    }
+   ]
+  }
+ ]
+}
