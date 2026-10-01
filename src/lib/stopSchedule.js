@@ -59,6 +59,14 @@ const ARRIVING_BUFFER_SEC = 45;
 const ARRIVING_PROGRESS_THRESHOLD = 0.95;
 // 시작 직후 노이즈 구간(actualProgress ≤ 이 값)에선 진척률 채택 안 함.
 const PROGRESS_NOISE_FLOOR = 0.05;
+// 느림 배율(slowFactor) 가드(2026-10-01 채드윅 하교 «20:00 도착» 실측). 배율은 «흐른 시간 비율 ÷
+// 간 거리 비율» 인데, 긴 구간(학교→첫 정류장 50~75분) 초반엔 두 작은 수의 비라 2~5배로 튀고
+// 그 배율이 **남은 구간 전체**에 곱해져 예상이 1시간 넘게 밀렸다(출발이 몇 분 늦거나 교내·시내
+// 구간이 느린 것만으로). 재생 검증(scripts/replay_eta_fast_clamp.cjs · 채드윅 하교 39운행):
+//   다음 정류장 오차 p90 27.0→15.5분 · 3분+ 점프 718→239 · 등교·타 거래처도 같거나 개선.
+// 🔴 빠른 방향(배율<1) 허용은 같은 재생에서 점프만 늘어 기각 — 1 클램프는 유지.
+const SLOW_FACTOR_MIN_PROGRESS = 0.25; // 이만큼 가기 전엔 느림 배율을 안 믿는다(=1)
+const SLOW_FACTOR_MAX = 1.5;           // 배율 상한
 
 // "HH:MM" 문자열을 0~24*60 분으로. 형식 불량(빈값/NaN/범위 초과) 시 null.
 function parseHHMM(s) {
@@ -439,6 +447,7 @@ export function computeStopEstimates({
     //     actualProgress = (busProgress - stopProgress[i-1]) / segDist
     //     expectedProgressByTime = elapsedSinceSegmentStart / expectedTotalMs
     //     slowFactor = max(1, expectedProgressByTime / actualProgress)
+    //                  (2026-10-01: actualProgress < 0.25 면 1 · 상한 1.5 — SLOW_FACTOR_* 상수)
     //                  (빠른 방향은 1로 클램프 — 갑작스러운 "곧 도착" 점프 차단)
     //     remainingMs = (1 - actualProgress) * expectedTotalMs * slowFactor
     //     estMs = T_NOW + remainingMs
@@ -514,8 +523,9 @@ export function computeStopEstimates({
             const expectedProgressByTime = Math.min(1, elapsedMs / expectedTotalMs);
             // slowFactor = 시간/거리 비. >1=느림(교통체증), <1=빠름.
             // 빠른 방향은 1로 클램프 — 갑작스러운 "곧 도착" 점프 차단(사용자 호소 #3).
-            const slowFactor = (actualProgress > 0)
-              ? Math.max(1, expectedProgressByTime / actualProgress)
+            // 🔴 초반(< SLOW_FACTOR_MIN_PROGRESS)엔 1, 이후엔 SLOW_FACTOR_MAX 상한(위 상수 주석).
+            const slowFactor = (actualProgress >= SLOW_FACTOR_MIN_PROGRESS)
+              ? Math.min(SLOW_FACTOR_MAX, Math.max(1, expectedProgressByTime / actualProgress))
               : 1;
             const remainingMs = (1 - actualProgress) * expectedTotalMs * slowFactor;
             estMs = T_NOW + remainingMs;

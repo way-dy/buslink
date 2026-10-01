@@ -21,23 +21,30 @@ const PARTNER = new RegExp(process.argv[4] || "채드윅");
 const PASS_M = 150;
 
 // ── 엔진 로드(정본 + 개선안) ─────────────────────────────────────────────
-const CLAMP_OLD = "? Math.max(1, expectedProgressByTime / actualProgress)";
-const CLAMP_NEW = "? (actualProgress >= 0.2 ? Math.max(0.5, expectedProgressByTime / actualProgress) : Math.max(1, expectedProgressByTime / actualProgress))";
-function loadEngine(variant) {
+// 정본의 slowFactor 식(2026-10-01 반영분). 비교안은 이 식 전체를 바꿔 끼운다.
+const CLAMP_OLD = "(actualProgress >= SLOW_FACTOR_MIN_PROGRESS)\n              ? Math.min(SLOW_FACTOR_MAX, Math.max(1, expectedProgressByTime / actualProgress))\n              : 1";
+const CLAMP_NEW = "(actualProgress >= 0.2 ? Math.max(0.5, expectedProgressByTime / actualProgress) : Math.max(1, expectedProgressByTime / actualProgress))";
+function loadEngine(rep) {
   const rp = fs.readFileSync(path.join(ROOT, "src/lib/routeProgress.js"), "utf8").replace(/^export /gm, "");
   let ss = fs.readFileSync(path.join(ROOT, "src/lib/stopSchedule.js"), "utf8")
-    .replace(/^import .*$/gm, "").replace(/^export /gm, "");
-  if (variant === "new") {
+    .replace(/\r\n/g, "\n").replace(/^import .*$/gm, "").replace(/^export /gm, "");
+  if (rep) {
     if (!ss.includes(CLAMP_OLD)) throw new Error("slowFactor 줄을 소스에서 못 찾음 — 엔진이 바뀌었다");
-    ss = ss.replace(CLAMP_OLD, CLAMP_NEW);
-    if (ss.includes(CLAMP_OLD)) throw new Error("치환 실패");
+    ss = ss.replace(CLAMP_OLD, rep);
+    if (!ss.includes(rep)) throw new Error("치환 실패");
   }
   const ctx = { console, Date, Math, Number, isFinite, Array, Object, String };
   vm.createContext(ctx);
   vm.runInContext(rp + "\n" + ss + "\n;this.C=computeStopEstimates;", ctx);
   return ctx.C;
 }
-const ENGINES = { cur: loadEngine("cur"), new: loadEngine("new") };
+// 비교안 — slowFactor 한 줄만 바꾼다. cur = 정본 그대로.
+const VARIANTS = {
+  cur: null, // 정본 = 진행 25% 전 1 · 상한 1.5 (2026-10-01 채택)
+  legacy: "(actualProgress > 0) ? Math.max(1, expectedProgressByTime / actualProgress) : 1", // 2026-05-29~09-30
+  fastOK: CLAMP_NEW, // 빠른 방향 허용(기각 — 점프만 는다)
+};
+const ENGINES = Object.fromEntries(Object.entries(VARIANTS).map(([k, rep]) => [k, loadEngine(rep)]));
 
 // ── 데이터 ───────────────────────────────────────────────────────────
 const admin = require(path.join(ROOT, "functions", "node_modules", "firebase-admin"));
@@ -116,7 +123,7 @@ const m = (sec) => (sec == null ? "—" : `${(sec / 60).toFixed(1)}분`);
       const routePath = (Array.isArray(route.routePath) ? route.routePath.map(toLL) : []).filter((p) => p && isFinite(p.lat) && isFinite(p.lng));
       if (routePath.length >= 2) routesWithPath++;
       runs++;
-      const prevPred = { cur: {}, new: {} };
+      const prevPred = Object.fromEntries(Object.keys(ENGINES).map((k) => [k, {}]));
       for (const fx of pts) {
         if (fx.ms < truth[0] - 60e3 || fx.ms > lastTruth) continue; // 출발 직전 ~ 마지막 통과
         const arrivals = Object.fromEntries(Object.entries(rec).filter(([, ms]) => ms <= fx.ms));
@@ -131,6 +138,11 @@ const m = (sec) => (sec == null ? "—" : `${(sec / 60).toFixed(1)}분`);
             let est = Date.parse(`${date}T${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:30+09:00`);
             const err = (est - t) / 1000;
             S[k].all.push(Math.abs(err));
+            if (k === "cur" && Math.abs(err) > 600) (S.cur.bad ||= []).push({
+              err, at: new Date(fx.ms).toTimeString().slice(0, 5), date, route: route.name.slice(0, 16), stop: (stops[i].name || "").slice(0, 14), i,
+              status: e.status, source: e.source, est: e.estimatedAt, truth: new Date(t).toTimeString().slice(0, 5),
+              known: Object.keys(arrivals).length, lastTruthPassed: truth.filter((x) => x != null && x <= fx.ms).length,
+            });
             if (e.status === "next") { S[k].next.push(Math.abs(err)); (i === 1 ? S[k].nextFirst : S[k].nextRest).push(Math.abs(err)); }
             if (est <= fx.ms + 90e3 && t - fx.ms > 180e3) S[k].early++;
             const pp = prevPred[k][e.stopId];
@@ -144,10 +156,17 @@ const m = (sec) => (sec == null ? "—" : `${(sec / 60).toFixed(1)}분`);
   console.log(`재생: 운행 ${runs}회 · 엔진 호출 ${calls}회 · routePath 보유 운행 ${routesWithPath}회`);
   const row = (k) => {
     const s = S[k];
-    return `${k === "cur" ? "현행  " : "개선안"} | 다음정류장 |오차| 중앙 ${m(q(s.next, .5))} p90 ${m(q(s.next, .9))} (첫구간 중앙 ${m(q(s.nextFirst, .5))} · 그뒤 ${m(q(s.nextRest, .5))})`
+    return `${k.padEnd(11)} | 다음정류장 |오차| 중앙 ${m(q(s.next, .5))} p90 ${m(q(s.next, .9))} (첫구간 중앙 ${m(q(s.nextFirst, .5))} · 그뒤 ${m(q(s.nextRest, .5))})`
       + ` | 전체 미통과 중앙 ${m(q(s.all, .5))} p90 ${m(q(s.all, .9))} | 3분+ 점프 ${s.jumps} | 이른 곧도착 ${s.early} | 표본 ${s.all.length}`;
   };
-  console.log(row("cur"));
-  console.log(row("new"));
+  for (const k of Object.keys(ENGINES)) console.log(row(k));
+  const bad = S.cur.bad || [];
+  if (bad.length) {
+    console.log(`\n[현행] 10분 넘게 틀린 순간 ${bad.length}건 — 유형별`);
+    const by = {};
+    for (const b of bad) { const key = `${b.err > 0 ? "늦게" : "이르게"} · ${b.status} · source=${b.source} · 기록${b.known < b.lastTruthPassed ? "<" : ">="}실통과`; (by[key] ||= []).push(b); }
+    for (const [k, a] of Object.entries(by).sort((x, y) => y[1].length - x[1].length))
+      console.log(`  ${String(a.length).padStart(4)}  ${k}  예: ${a[0].date} ${a[0].at} ${a[0].route} #${a[0].i} ${a[0].stop} 예상 ${a[0].est} 실제 ${a[0].truth} (기록 ${a[0].known}/실통과 ${a[0].lastTruthPassed})`);
+  }
   process.exit(0);
 })();
