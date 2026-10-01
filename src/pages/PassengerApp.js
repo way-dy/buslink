@@ -7,7 +7,7 @@ import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { computeRouteWindow, isWithinRouteWindow, normalizeWindowOpts, nowMinutesKST } from "../lib/routeWindow";
 import { calcETA } from "../lib/gps";
 import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom, advanceProgress } from "../lib/routeProgress";
-import { computeStopEstimates, formatDelayLabel, formatPassengerEta, describeEtaSource } from "../lib/stopSchedule";
+import { computeStopEstimates, formatDelayLabel, formatPassengerEta } from "../lib/stopSchedule";
 import { useSmoothedEta } from "../lib/useSmoothedEta";
 import { useWakeTick } from "../lib/useWakeTick";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
@@ -338,7 +338,7 @@ export default function PassengerApp() {
                   background: r.type === "출근" ? "var(--color-primary-soft)" : "#FFF1E0",
                   color: r.type === "출근" ? "var(--color-primary-deep)" : "#B95300",
                 }}>{r.type || "노선"}</span>
-                <span style={S.routeItemName}>{r.name || r.id}</span>
+                <span style={S.routeItemName}>{r.name || "이름 없는 노선"}</span>
               </div>
               <div style={S.routeItemMeta}>
                 {r.departTime && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon name="clock" size={11} stroke={2} />{r.departTime}</span>}
@@ -416,7 +416,7 @@ export default function PassengerApp() {
   const myPassengerLabel = (eta !== null && smoothedMyEtaSec != null)
     ? formatPassengerEta(smoothedMyEtaSec)
     : null;
-  const myStopEst = myStop ? estByStopId[myStop.id] : null;
+  // (2026-10-01) myStopEst 는 데이터 출처 꼬리표(«GPS 추정») 표시에만 쓰여 그 표시와 함께 걷었다.
   // 마지막 정류장 = 도착지(=회사, 탑승자 없음). 이 정류장 선택 시에만
   // ETA 카드 문구를 "목적지 도착" 류로 대체(표시 문자열만 분기, eta 로직 불변).
   const isDestStop = stops.length >= 2 && myStopIdx === stops.length - 1;
@@ -525,7 +525,7 @@ export default function PassengerApp() {
                   }}>
                   <span style={{ display: 'inline-flex', color: 'var(--color-primary)' }}><Icon name="bus" size={20} stroke={2} /></span>
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: selected?.id === b.id ? "#fff" : "var(--color-label)" }}>{b.vehicleNo || b.id}</div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: selected?.id === b.id ? "#fff" : "var(--color-label)" }}>{b.vehicleNo || "차량"}</div>
                     <div style={{ fontSize: 11, fontWeight: 600, color: selected?.id === b.id ? "rgba(255,255,255,0.85)" : "var(--color-label-mute)" }}>{b.speed ?? 0} km/h</div>
                   </div>
                 </div>
@@ -663,11 +663,8 @@ export default function PassengerApp() {
               </span>
               {myPassengerLabel.precise && myPassengerLabel.bucket !== 'time' && (
                 <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-label-mute)" }}>
+                  {/* 데이터 출처 꼬리표(«GPS 추정»·«계획+지연»)는 승객에게 뜻이 없어 걷었다(2026-10-01 개발 용어 정리) */}
                   {myPassengerLabel.precise} 예상
-                  {myStopEst && (() => {
-                    const src = describeEtaSource(myStopEst.source);
-                    return src ? <> · <span style={{ color: "var(--color-label-alt)" }}>{src}</span></> : null;
-                  })()}
                 </span>
               )}
             </div>
@@ -808,8 +805,8 @@ export default function PassengerApp() {
                     <div style={S.busCardTop}>
                       <div style={{ ...S.busIcon, color: 'var(--color-primary)' }}><Icon name="bus" size={19} stroke={2} /></div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={S.busName}>{b.vehicleNo || b.id}</div>
-                        <div style={S.busRoute}>{b.routeName || b.routeId || "노선 미지정"}</div>
+                        <div style={S.busName}>{b.vehicleNo || "차량"}</div>
+                        <div style={S.busRoute}>{b.routeName || "노선 미지정"}</div>
                       </div>
                       <div style={S.busSpeed}>
                         <div style={S.speedNum}>{b.speed ?? 0}</div>

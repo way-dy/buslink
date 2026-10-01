@@ -8,6 +8,7 @@ import { BusLinkLogo, Icon } from "../components/ui";
 import BoardedSeal from "../components/BoardedSeal";
 import { fetchPartnerCodeData, applyPartnerTheme, brandOf } from "../lib/partnerBranding";
 import { applyAppManifest } from "../lib/pwaManifest";
+import { friendlyError } from "../lib/friendlyError";
 
 function getParam(key) {
   return new URLSearchParams(window.location.search).get(key);
@@ -178,7 +179,8 @@ export default function BoardingApp() {
       if (remembered && /본인 확인|등록되지 않은|비활성화|다시 로그인|보안 정책/.test(e.message || "")) {
         clearRemembered(); setRemembered(null); setEmpNo(""); setPin("");
       }
-      setErrMsg(e.message);
+      console.warn("[탑승] 실패:", e?.message || e);
+      setErrMsg(friendlyError(e));
       setStep(STEPS.ERROR);
     }
   };

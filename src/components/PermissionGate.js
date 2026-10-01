@@ -18,7 +18,10 @@ import { Icon } from "./ui";
 //      ③ 압축(한 줄)은 아직 안 물어본 상태에만 적용하고, 그때도 **행동 버튼을 유지**한다.
 //    ⚠ 설치 안내는 여기서 하지 않는다 — `InstallPrompt` 로 일원화(스누즈·iOS Safari 커버).
 //       예전엔 둘 다 카드를 띄워 홈 상단에 회색 카드가 두 장 쌓였다.
-export default function PermissionGate({ containerStyle }) {
+// variant: "default"(기사앱 등 현행 — 파란 알약 + «허용») | "soft"(승객앱 홈 B안 2026-10-01 — 회색 둥근 한 줄 + «켜기»).
+//   🔴 soft 는 **압축 한 줄의 겉모습·문구만** 바꾼다. 차단 카드·노출 조건·버튼 동작은 같다.
+export default function PermissionGate({ containerStyle, variant = "default" }) {
+  const soft = variant === "soft";
   const {
     perm, notifBad, geoBad, needsBanner, anyDenied,
     requestNotif, requestGeo,
@@ -39,6 +42,10 @@ export default function PermissionGate({ containerStyle }) {
   const items = [];
   if (notifBad) items.push(perm.notif === "denied" ? "알림(차단됨)" : "알림");
   if (geoBad) items.push(perm.geo === "denied" ? "위치(차단됨)" : "위치");
+  // soft 한 줄 문구 — «권한» 같은 말 대신 «켜면 무엇이 좋아지는지»로(승객 화면 개발 용어 정리 2026-10-01).
+  const softText = notifBad && geoBad ? "알림·위치를 켜 주세요. 도착 전에 알려드려요"
+    : notifBad ? "알림을 켜면 도착 전에 알려드려요"
+    : "위치 사용을 켜 주세요";
 
   return (
     <>
@@ -78,7 +85,28 @@ export default function PermissionGate({ containerStyle }) {
       )}
 
       {/* ③ 아직 안 물어본 상태 — 한 줄로. 🔴 버튼은 남긴다(여기서 허용을 받는다). */}
-      {compact && (
+      {compact && (soft ? (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10,
+          minHeight: 44, padding: "0 4px 0 14px", margin: "0 0 4px",
+          background: "#F3F4F6", borderRadius: 12,
+        }}>
+          <div style={{ flexShrink: 0, color: "#4B5563", display: "inline-flex" }}>
+            <Icon name="bell" size={20} stroke={1.8} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: "#374151", lineHeight: 1.35, wordBreak: "keep-all" }}>
+            {softText}
+          </div>
+          <button onClick={handleBannerClick}
+            style={{
+              flexShrink: 0, height: 44, padding: "0 12px", border: "none", background: "transparent",
+              cursor: "pointer", fontFamily: "inherit", fontSize: 15, fontWeight: 700,
+              color: "var(--color-primary)",
+            }}>
+            켜기
+          </button>
+        </div>
+      ) : (
         <div style={{
           display: "flex", alignItems: "center", gap: 9,
           padding: "7px 12px", margin: "0 0 4px",
@@ -102,7 +130,7 @@ export default function PermissionGate({ containerStyle }) {
             허용
           </button>
         </div>
-      )}
+      ))}
       </div>
       )}
 

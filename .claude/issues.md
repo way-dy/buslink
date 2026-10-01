@@ -5,6 +5,8 @@
 
 ## 미해결 / 함정
 
+- `[패턴]` **승객 홈 B안 시트 — 지도 위 겹침은 카카오 로고를 들어 올린 뒤에만(2026-10-01 · 프리뷰 `b-design`)**: 흰 시트가 지도 하단 16px(`HOME_SHEET_OVERLAP`)를 덮는다. 🔴 카카오 로고·축척은 지도 div 하단에 붙어 있어 그대로 덮으면 **약관 위반** → `liftMapCredits`(DriverApp `liftCredits` 와 같은 `a[href*="map.kakao.com"]` 탐색)가 그 상자에 `marginBottom` 을 주고 성공했을 때만 `creditsLifted=true` 로 겹친다(실패 = 겹침 0). 회귀 가드: 겹침을 상수로 늘리면 들어 올림도 같은 상수 · 시트 `minHeight:0` 제거 금지(지도가 150 밑으로 눌린다) · 버스 마커 래퍼 `translateY(-4px)` 와 펄스 span 분리 유지(`test_progress_marker`). 승객 화면 오류는 `friendlyError`(한국어 서버 안내만 통과) — 화면에 `e.message` 직출력 재도입 금지. 운영자 알림 진단은 설정 탭 `?debug=1`.
+
 - `[해결]` **기점(출발지)에 일찍 와 대기하면 승객앱이 «이미 지나침·조기도착» (2026-10-01 배시현 `Fc8Zs7TD` · `main.eacf1f1a.js`)**: 08-24 `departureBaseMs` 는 **체인 기준점**만 고쳤고 승객 화면은 기점에 실도착 시각·`passed` 판정을 그대로 보였다(정류장 반경을 살짝 넘은 주차 자리면 진행거리상 «지나침»). 정본 `src/lib/originStop.js` — 기점 + 계획 출발 전 = `departing`(«HH:MM 출발 · 출발지에서 대기 중»), 기점 시각은 «출발 계획시각». 🔴 회귀 가드: 기점에 **늦게 오는 중(지연)** 은 표시 유지 · approaching 카운트다운은 덮지 않는다 · 도착 기록·delaySec 불변(기사·관리자 화면은 사실 그대로). 적용 3곳(카드·지도 말풍선·노선 탭 목록) — `test_origin_stop.cjs` 가 사용처 수까지 잠근다. ⚠ `PassengerApp`(`/bus`)은 미적용(요청 범위 밖).
 
 - `[패턴]` **가독성 — 작은 글자 바닥값 일괄 상향(2026-10-01 way «DYOPS 처럼» · 승객앱 `main.28c9d28b.js` · 관리자 `main.1973d89f.js`)**: `scripts/bump_passenger_font_floor.cjs`(10→12 · 11→12.5 · 12→13.5 · 13→14.5 · 14→15 · `<CustomOverlayMap>` 안 제외 · 파일 머리 `/* font-floor-2026-10-01 */` 표식으로 재적용 차단). 승객앱 4파일 205곳 · AdminApp 478곳 · 사이드바 `navItem` 16px/600. 🔴 **새 화면 코드에 10~11px 를 다시 쓰지 말 것**(바닥 12). 🔴 표 칸 잘림은 `td maxWidth` 가 아니라 **안쪽 div 폭**으로 감는다(노선 관리 노선명). ⚠ 실화면 확인은 대시보드·노선·배차·운행 이력만 — 나머지 탭은 신고 시 개별 수정. ⚠ `headless_check_route_names`·`headless_check_stop_list_labels` 는 8/25 승객 인증 전환 뒤 **로그인에서 멈추는 낡은 하네스**(resumeToken 미주입 · prod 기준선도 같은 실패 · 미수정).
