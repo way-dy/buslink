@@ -1,3 +1,4 @@
+/* font-floor-2026-10-01 */
 // src/components/PermissionGate.js — 권한 경고 배너 + 차단 안내 모달 + PWA 설치 버튼
 // ---------------------------------------------------------------------------
 // callcenter driver.html 권한 배너/모달/PWA 패턴의 React 재구현(plain HTML 복사 아님).
@@ -57,10 +58,10 @@ export default function PermissionGate({ containerStyle }) {
             <Icon name="bell" size={20} stroke={1.9} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--color-destructive)" }}>
+            <div style={{ fontSize: 14.5, fontWeight: 800, color: "var(--color-destructive)" }}>
               {items.join(" · ")} 권한 필요
             </div>
-            <div style={{ fontSize: 11, color: "var(--color-label-mute)", marginTop: 2, lineHeight: 1.45 }}>
+            <div style={{ fontSize: 12.5, color: "var(--color-label-mute)", marginTop: 2, lineHeight: 1.45 }}>
               권한이 차단되어 도착 알림·실시간 위치가 동작하지 않습니다. 설정에서 허용해주세요.
             </div>
           </div>
@@ -68,7 +69,7 @@ export default function PermissionGate({ containerStyle }) {
             style={{
               flexShrink: 0, height: 32, padding: "0 13px", borderRadius: "var(--radius-8)",
               border: "none", cursor: "pointer", fontFamily: "inherit",
-              fontSize: 12, fontWeight: 700, color: "#fff",
+              fontSize: 13.5, fontWeight: 700, color: "#fff",
               background: "var(--color-destructive)",
             }}>
             설정 방법
@@ -88,14 +89,14 @@ export default function PermissionGate({ containerStyle }) {
           <div style={{ flexShrink: 0, color: "var(--color-primary-deep)", display: "inline-flex" }}>
             <Icon name="bell" size={15} stroke={2} />
           </div>
-          <div style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 700, color: "var(--color-primary-deep)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 700, color: "var(--color-primary-deep)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             도착 알림을 받으려면 {items.join(" · ")} 권한이 필요합니다
           </div>
           <button onClick={handleBannerClick}
             style={{
               flexShrink: 0, height: 26, padding: "0 12px", borderRadius: "var(--radius-pill)",
               border: "none", cursor: "pointer", fontFamily: "inherit",
-              fontSize: 11.5, fontWeight: 700, color: "#fff",
+              fontSize: 13, fontWeight: 700, color: "#fff",
               background: "var(--color-primary)",
             }}>
             허용
@@ -122,25 +123,25 @@ export default function PermissionGate({ containerStyle }) {
             <h3 style={{ margin: "0 0 6px", fontSize: 16, fontWeight: 800, color: "var(--color-label)" }}>
               권한 허용 방법
             </h3>
-            <p style={{ margin: "0 0 14px", fontSize: 12, color: "var(--color-label-mute)", lineHeight: 1.5 }}>
+            <p style={{ margin: "0 0 14px", fontSize: 13.5, color: "var(--color-label-mute)", lineHeight: 1.5 }}>
               이전에 권한을 차단하셨거나, 브라우저가 자동으로 차단했습니다.<br />
               아래 절차로 직접 허용해주세요.
             </p>
 
-            <h4 style={{ margin: "0 0 6px", fontSize: 13, fontWeight: 700, color: "var(--color-primary-deep)" }}>
+            <h4 style={{ margin: "0 0 6px", fontSize: 14.5, fontWeight: 700, color: "var(--color-primary-deep)" }}>
               안드로이드 (Chrome / 삼성 인터넷)
             </h4>
-            <ol style={{ margin: "0 0 14px", paddingLeft: 18, fontSize: 12, color: "var(--color-label)", lineHeight: 1.7 }}>
+            <ol style={{ margin: "0 0 14px", paddingLeft: 18, fontSize: 13.5, color: "var(--color-label)", lineHeight: 1.7 }}>
               <li>주소창 좌측 <b>자물쇠</b> 또는 <b>ⓘ</b> 아이콘 탭</li>
               <li><b>권한</b> → <b>알림 / 위치</b> 항목을 <b>허용</b>으로 변경</li>
               <li>또는 <b>설정 → 앱 → Chrome → 권한</b>에서 변경</li>
               <li>변경 후 이 화면 새로고침</li>
             </ol>
 
-            <h4 style={{ margin: "0 0 6px", fontSize: 13, fontWeight: 700, color: "var(--color-primary-deep)" }}>
+            <h4 style={{ margin: "0 0 6px", fontSize: 14.5, fontWeight: 700, color: "var(--color-primary-deep)" }}>
               아이폰 (Safari)
             </h4>
-            <ol style={{ margin: "0 0 16px", paddingLeft: 18, fontSize: 12, color: "var(--color-label)", lineHeight: 1.7 }}>
+            <ol style={{ margin: "0 0 16px", paddingLeft: 18, fontSize: 13.5, color: "var(--color-label)", lineHeight: 1.7 }}>
               <li><b>설정 앱</b> → <b>Safari</b> 진입</li>
               <li><b>위치 / 알림</b> 항목을 <b>허용</b>으로 변경</li>
               <li>또는 <b>설정 → 개인정보 → 위치 → Safari 웹사이트</b></li>
@@ -152,7 +153,7 @@ export default function PermissionGate({ containerStyle }) {
                 style={{
                   flex: 1, padding: "10px", borderRadius: "var(--radius-8)",
                   border: "1px solid var(--color-line)", cursor: "pointer",
-                  fontFamily: "inherit", fontSize: 13, fontWeight: 600,
+                  fontFamily: "inherit", fontSize: 14.5, fontWeight: 600,
                   color: "var(--color-label-mute)", background: "var(--color-bg-soft)",
                 }}>
                 닫기
@@ -161,7 +162,7 @@ export default function PermissionGate({ containerStyle }) {
                 style={{
                   flex: 1, padding: "10px", borderRadius: "var(--radius-8)",
                   border: "none", cursor: "pointer",
-                  fontFamily: "inherit", fontSize: 13, fontWeight: 700,
+                  fontFamily: "inherit", fontSize: 14.5, fontWeight: 700,
                   color: "#fff", background: "var(--color-primary)",
                 }}>
                 다시 시도

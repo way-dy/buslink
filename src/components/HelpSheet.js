@@ -1,3 +1,4 @@
+/* font-floor-2026-10-01 */
 import React, { useState } from "react";
 
 /**
@@ -138,7 +139,7 @@ export default function HelpSheet({ tab, onClose }) {
               style={{
                 background: "var(--color-bg-soft)", border: "1px solid var(--color-line)",
                 borderRadius: "var(--radius-8)", padding: "6px 12px", color: "var(--color-label-mute)",
-                cursor: "pointer", fontFamily: "inherit", fontSize: 12, flexShrink: 0,
+                cursor: "pointer", fontFamily: "inherit", fontSize: 13.5, flexShrink: 0,
               }}
             >
               닫기
@@ -155,7 +156,7 @@ export default function HelpSheet({ tab, onClose }) {
                   <div
                     style={{
                       width: 22, height: 22, borderRadius: "50%", flexShrink: 0, marginTop: 1,
-                      background: "var(--color-primary)", color: "#fff", fontSize: 11, fontWeight: 700,
+                      background: "var(--color-primary)", color: "#fff", fontSize: 12.5, fontWeight: 700,
                       display: "flex", alignItems: "center", justifyContent: "center",
                     }}
                   >
@@ -163,7 +164,7 @@ export default function HelpSheet({ tab, onClose }) {
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--color-label)", marginBottom: 2 }}>{t}</div>
-                    <div style={{ fontSize: 12.5, color: "var(--color-label-mute)", lineHeight: 1.55, wordBreak: "keep-all" }}>{d}</div>
+                    <div style={{ fontSize: 14, color: "var(--color-label-mute)", lineHeight: 1.55, wordBreak: "keep-all" }}>{d}</div>
                   </div>
                 </div>
               ))}
@@ -171,7 +172,7 @@ export default function HelpSheet({ tab, onClose }) {
           )}
 
           {/* ── 문제 해결 ── */}
-          <div style={{ fontSize: 13, fontWeight: 800, color: "var(--color-label)", marginBottom: 9 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 800, color: "var(--color-label)", marginBottom: 9 }}>
             이럴 땐 어떻게 하나요?
           </div>
           {TROUBLE.map((t) => {
@@ -188,7 +189,7 @@ export default function HelpSheet({ tab, onClose }) {
                   onClick={() => setOpenQ(open ? null : t.q)}
                   style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 12px", cursor: "pointer" }}
                 >
-                  <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--color-label)", wordBreak: "keep-all" }}>
+                  <div style={{ flex: 1, minWidth: 0, fontSize: 14.5, fontWeight: 700, color: "var(--color-label)", wordBreak: "keep-all" }}>
                     {t.q}
                   </div>
                   <span
@@ -205,7 +206,7 @@ export default function HelpSheet({ tab, onClose }) {
                     {t.a.map((line, i) => (
                       <li
                         key={i}
-                        style={{ fontSize: 12.5, color: "var(--color-label-mute)", lineHeight: 1.6, marginBottom: 5, wordBreak: "keep-all" }}
+                        style={{ fontSize: 14, color: "var(--color-label-mute)", lineHeight: 1.6, marginBottom: 5, wordBreak: "keep-all" }}
                       >
                         {withBold(line, `${t.q}-${i}`)}
                       </li>
@@ -216,7 +217,7 @@ export default function HelpSheet({ tab, onClose }) {
             );
           })}
 
-          <div style={{ marginTop: 14, fontSize: 11.5, color: "var(--color-label-alt)", lineHeight: 1.6, wordBreak: "keep-all" }}>
+          <div style={{ marginTop: 14, fontSize: 13, color: "var(--color-label-alt)", lineHeight: 1.6, wordBreak: "keep-all" }}>
             여기서 해결되지 않으면 회사 담당자 또는 셔틀버스 운영사에 문의해 주세요.
           </div>
         </div>

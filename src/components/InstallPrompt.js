@@ -1,3 +1,4 @@
+/* font-floor-2026-10-01 */
 // src/components/InstallPrompt.js
 // ---------------------------------------------------------------------------
 // 설치형 앱(PWA) 설치 유도 팝업. 순수 프레젠테이션 + 브라우저 API 만 사용.
@@ -198,7 +199,7 @@ function SafariToolbarHint() {
         position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)",
         display: "flex", flexDirection: "column", alignItems: "center",
       }}>
-        <span style={{ fontSize: 11, fontWeight: 800, color: "#0066FF", whiteSpace: "nowrap" }}>여기를 탭</span>
+        <span style={{ fontSize: 12.5, fontWeight: 800, color: "#0066FF", whiteSpace: "nowrap" }}>여기를 탭</span>
         <svg width="14" height="12" viewBox="0 0 14 12" fill="none" aria-hidden="true">
           <path d="M7 12 1 3h12L7 12Z" fill="#0066FF" />
         </svg>
@@ -233,12 +234,12 @@ function StepRow({ n, glyph, children }) {
     <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
       <span style={{
         flexShrink: 0, width: 24, height: 24, borderRadius: "50%",
-        background: "#0066FF", color: "#fff", fontSize: 13, fontWeight: 800,
+        background: "#0066FF", color: "#fff", fontSize: 14.5, fontWeight: 800,
         display: "flex", alignItems: "center", justifyContent: "center",
       }}>
         {n}
       </span>
-      <div style={{ flex: 1, minWidth: 0, fontSize: 13, lineHeight: 1.55, paddingTop: 2,
+      <div style={{ flex: 1, minWidth: 0, fontSize: 14.5, lineHeight: 1.55, paddingTop: 2,
         color: "var(--color-label, #171719)" }}>
         {children}
       </div>
@@ -289,7 +290,7 @@ export function InstallGuide({ platform = "auto", onInstall, inline = false, bra
           </StepRow>
         </div>
         <div style={{
-          marginTop: 12, fontSize: 11, lineHeight: 1.5,
+          marginTop: 12, fontSize: 12.5, lineHeight: 1.5,
           color: "var(--color-label-alt, rgba(55,53,47,0.45))",
         }}>
           ※ Chrome 등 다른 브라우저에서는 설치 메뉴가 보이지 않을 수 있어요. <b>Safari</b>로 열어 주세요.
@@ -578,7 +579,7 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
             </div>
             <div
               style={{
-                fontSize: 13,
+                fontSize: 14.5,
                 lineHeight: 1.5,
                 color: "var(--color-label-mute, rgba(46,47,51,0.62))",
               }}
@@ -599,7 +600,7 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
               borderRadius: 8,
               width: 28,
               height: 28,
-              fontSize: 14,
+              fontSize: 15,
               lineHeight: 1,
               color: "var(--color-label-mute, rgba(46,47,51,0.62))",
               cursor: "pointer",
@@ -627,7 +628,7 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
               padding: "10px 12px",
               borderRadius: 10,
               background: "var(--color-bg-soft, #f2f2f3)",
-              fontSize: 13,
+              fontSize: 14.5,
               lineHeight: 1.55,
               color: "var(--color-label, #171719)",
             }}
@@ -655,7 +656,7 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
                 background: "none",
                 border: "none",
                 padding: "6px 2px",
-                fontSize: 12.5,
+                fontSize: 14,
                 color: "var(--color-label-mute, rgba(46,47,51,0.62))",
                 textDecoration: "underline",
                 cursor: "pointer",
