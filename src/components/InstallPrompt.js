@@ -649,6 +649,24 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
           </div>
         )}
 
+        {/* 이미 깔린 폰은 크롬이 설치를 막는다(«이미 설치됨»). getInstalledRelatedApps 가
+            못 잡는 기기가 실제로 있다(2026-10-01 대표님 폰) — 감지에 기대지 않고 안내문에 늘 적어 둔다. */}
+        {mode === "android-manual" && (
+          <div
+            style={{
+              marginTop: 10,
+              padding: "10px 12px",
+              borderRadius: 10,
+              background: "var(--color-bg-soft, #f2f2f3)",
+              fontSize: 14,
+              lineHeight: 1.55,
+              color: "var(--color-label, #171719)",
+            }}
+          >
+            {`«이미 설치됨» 이라고 나오면 앱이 이미 휴대폰에 있는 거예요. 화면을 위로 밀어 앱 목록에서 «${installedName}» 을 눌러 열어 주세요.`}
+          </div>
+        )}
+
         {/* 인앱 브라우저인데 탈출 버튼을 만들 수 없는 환경(주로 iOS) — 손으로 하는 법만 알려 준다.
             🔴 여기에 버튼을 만들면 눌러도 아무 일도 안 일어나는 «먹통 버튼» 이 된다. */}
         {escapeGuide && escapeGuide.manualHint && (
