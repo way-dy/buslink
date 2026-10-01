@@ -2341,6 +2341,7 @@ function RoutesTab({ companyId, session, onSessionUpdate, showRoutePath = true }
   const [modalStops, setModalStops] = useState([]);
   const [modalBuses, setModalBuses] = useState([]);      // 해당 노선 실시간 버스
   const [modalView, setModalView] = useState("list"); // 바텀시트 보기: list | map | rv(거리뷰)
+  const [modalBusPick, setModalBusPick] = useState(null); // 실시간 지도에서 탭해 차량번호를 펼친 버스 id
   const [rvOpenStopId, setRvOpenStopId] = useState(null); // 거리뷰 아코디언: 펼친 정류장(한 번에 하나)
   const [rvErrStopId, setRvErrStopId] = useState(null);   // 펼친 정류장에 파노라마 없을 때 그 id
   const [modalCenter, setModalCenter] = useState({ lat: 37.3894, lng: 126.9522 });
@@ -2826,14 +2827,18 @@ function RoutesTab({ companyId, session, onSessionUpdate, showRoutePath = true }
                   {/* 실시간 버스 마커 — #4 노선 라인 정렬(yAnchor 0.5) */}
                   {modalBuses.map(b => b.lat && b.lng && (
                     <CustomOverlayMap key={b.id} position={{ lat:b.lat, lng:b.lng }} yAnchor={0.5}>
-                      {/* 2026-08-18 배시현 요청 "아이콘이 너무 크다" — 바텀시트 지도는 화면의 절반이라
-                          예전 크기(테두리 2px·패딩 5/11·글자 11/10)면 지도를 덮었다. 정보는 그대로 두고
-                          치수만 줄인다(차량이 2대 이상인 노선에서 번호가 유일한 구분자라 뺄 수 없다). */}
-                      <div style={{ background:"var(--color-bg)", border:"1.5px solid var(--color-primary)", borderRadius:"var(--radius-pill)", padding:"2px 7px", display:"flex", alignItems:"center", gap:4, boxShadow:"var(--shadow-emphasize)" }}>
-                        <span style={{ display:"inline-flex", color:"var(--color-primary)" }}><Icon name="bus" size={11} stroke={2} /></span>
-                        <div style={{ lineHeight:1.2 }}>
-                          <div style={{ fontSize:9.5, fontWeight:800, color:"var(--color-primary)" }}>{b.vehicleNo||b.vehicleId}</div>
-                          <div style={{ fontSize:8.5, color:"var(--color-label-mute)" }}>{b.speed??0} km/h</div>
+                      {/* 2026-08-18 배시현 "아이콘이 너무 크다" → 치수 축소.
+                          2026-10-02 같은 분 "차량번호가 아닌 작은 차량 아이콘으로" → 기본은 원형 버스 아이콘만.
+                          번호는 2대 이상 노선의 유일한 구분자라 없애지 않고, 아이콘을 탭하면 위에 펼친다. */}
+                      <div onClick={() => setModalBusPick(p => p === b.id ? null : b.id)}
+                        style={{ position:"relative", cursor:"pointer" }}>
+                        {modalBusPick === b.id && (
+                          <div style={{ position:"absolute", bottom:"calc(100% + 4px)", left:"50%", transform:"translateX(-50%)", background:"var(--color-bg)", border:"1px solid var(--color-primary)", borderRadius:"var(--radius-pill)", padding:"2px 7px", whiteSpace:"nowrap", boxShadow:"var(--shadow-float)", fontSize:9.5, fontWeight:800, color:"var(--color-primary)" }}>
+                            {b.vehicleNo||b.vehicleId} · {b.speed??0}km/h
+                          </div>
+                        )}
+                        <div style={{ width:22, height:22, borderRadius:"50%", background:"var(--color-primary)", border:"2px solid #fff", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", boxShadow:"var(--shadow-emphasize)" }}>
+                          <Icon name="bus" size={12} stroke={2.2} />
                         </div>
                       </div>
                     </CustomOverlayMap>
