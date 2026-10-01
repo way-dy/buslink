@@ -578,6 +578,8 @@ export default function EmployeeApp() {
   const inquiryOn = !!(inquiry && inquiry.enabled);
   const homepageOn = !!(homepage && homepage.enabled);
   const visibleTabs = useMemo(() => visibleTabsFor(inquiryOn, homepageOn), [inquiryOn, homepageOn]);
+  // 지도 크게 + 홈 탭 = 위·아래 크롬 압축(2026-10-01). 부재=false=현행.
+  const compactChrome = homeMapLarge && tab === "home";
   useEffect(() => {
     // 홈페이지가 켜지면 문의 탭은 사라진다 — 문의 탭에 있던 사람도 홈으로 되돌린다.
     if (tab === "inquiry" && (!inquiryOn || homepageOn)) setTab("home");
@@ -718,11 +720,12 @@ export default function EmployeeApp() {
 
       {helpOpen && <HelpSheet tab={tab} onClose={() => setHelpOpen(false)} />}
 
+      {/* 🔴 지도 크게 + 홈 탭일 때만 탭바를 낮춘다(라벨은 유지 — 어르신이 아이콘만으론 못 고른다). */}
       <div style={S.tabBar}>
         {visibleTabs.map(t => (
           <button key={t.id}
             onClick={() => { setTab(t.id); if (t.id === "notices") markNoticesRead(); }}
-            style={{ ...S.tabBtn, color: tab === t.id ? "var(--color-primary)" : "var(--color-label-mute)" }}>
+            style={{ ...S.tabBtn, ...(compactChrome ? { padding: "4px 0", gap: 0 } : null), color: tab === t.id ? "var(--color-primary)" : "var(--color-label-mute)" }}>
             {/* 선택 탭 = 채움 아이콘 + 브랜드 톤 알약(2026-08-05 way "감각적인 것으로").
                 알약색은 `--color-accent-soft`(2026-08-27 테마 확장) — tokens.css 기본값이
                 `var(--color-primary-soft)` 라 테마를 안 쓰는 거래처는 **예전과 같은 색**이고,
@@ -730,11 +733,11 @@ export default function EmployeeApp() {
                 🔴 비선택은 라인 유지 — 전부 채우면 무엇이 선택인지 안 읽힌다. */}
             <span style={{
               position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center",
-              width: 34, height: 30, borderRadius: 11,
+              width: 34, height: compactChrome ? 26 : 30, borderRadius: 11,
               background: tab === t.id ? "var(--color-accent-soft)" : "transparent",
               transition: "background .15s ease",
             }}>
-              <Icon name={t.icon} size={21} solid={tab === t.id} />
+              <Icon name={t.icon} size={compactChrome ? 19 : 21} solid={tab === t.id} />
               {/* 안 읽음 공지 배지 — 공지 탭에만, 안 읽음 1건 이상일 때 */}
               {t.id === "notices" && unreadCount > 0 && (
                 <span style={{
@@ -747,7 +750,7 @@ export default function EmployeeApp() {
                 </span>
               )}
             </span>
-            <span style={{ fontSize: 10.5, fontWeight: tab === t.id ? 800 : 600, letterSpacing: "-0.02em" }}>{t.label}</span>
+            <span style={{ fontSize: compactChrome ? 10 : 10.5, fontWeight: tab === t.id ? 800 : 600, letterSpacing: "-0.02em" }}>{t.label}</span>
           </button>
         ))}
       </div>
@@ -1492,6 +1495,30 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
              (채드윅=남색 글자) 밴드 위에 그냥 얹으면 어느 고객사에선 사라진다.
           🔴 글자색은 하드코딩하지 않고 밴드 휘도로 정한다(`brandBand`) — 밝은 브랜드색
              거래처에서 흰 글씨가 안 읽히는 사고 방지. */}
+      {/* 🔴 «지도 크게»(2026-10-01 way «윗메뉴 아랫메뉴 완전 최적화») — 밴드를 한 덩어리로 접는다:
+          노선명(2줄 상한 유지 — 잘림 금지 규칙) + 운행 상태·갱신 한 줄 + 아이콘 버튼 2개.
+          로고·이름·구분 배지·노선 칩은 뺀다(노선 바꾸기는 «노선 변경» 하나로 충분). 부재=아래 현행 밴드. */}
+      {largeMap ? (
+      <div data-compact-band style={{ background: band.bg, padding: '8px 10px 8px 14px', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 800, color: band.fg, letterSpacing: '-0.02em', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'keep-all', overflowWrap: 'anywhere', lineHeight: 1.3 }}>
+            {activeRoute ? activeRoute.name : '노선을 선택하세요'}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2, fontSize: 10.5, fontWeight: 700, color: band.fgMute }}>
+            <StatusDot tone={buses.length > 0 ? 'positive' : 'neutral'} size={6} pulse={buses.length > 0} />
+            <span>{buses.length > 0 ? `${buses.length}대 운행중` : '운행 없음'}{lastUpdate ? ` · ${timeSince(lastUpdate)} 갱신` : ''}</span>
+          </div>
+        </div>
+        <button aria-label="노선 변경" onClick={() => { setRouteQuery(''); setRoutePicker(true); }}
+          style={{ flexShrink: 0, width: 34, height: 34, borderRadius: '50%', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: band.bg }}>
+          <Icon name="repeat" size={15} stroke={2.1} />
+        </button>
+        <button aria-label="새로고침" onClick={handleRefresh} disabled={refreshing}
+          style={{ flexShrink: 0, width: 34, height: 34, borderRadius: '50%', border: `1px solid ${band.chipLine}`, cursor: refreshing ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: band.chipBg, color: band.fg, opacity: refreshing ? 0.6 : 1 }}>
+          <span style={{ display: 'inline-flex', animation: refreshing ? 'blspin 0.8s linear infinite' : 'none' }}><Icon name="refresh" size={15} stroke={2.1} /></span>
+        </button>
+      </div>
+      ) : (
       <div style={{ background: band.bg, padding: '12px 14px 13px', flexShrink: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, minHeight: 26 }}>
           {branding?.logo ? (
@@ -1573,6 +1600,7 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
           </div>
         )}
       </div>
+      )}
 
       {/* 권한 안내 — 브랜드 밴드 **바로 아래**, 지도 위(2026-08-10).
           🔴 스크롤 밖으로 밀리면 안 되는 메시지라 지도보다 위, `flexShrink:0` 자리에 둔다.
@@ -1804,7 +1832,7 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
         }
 
         return (
-          <div style={{ background: 'var(--color-bg)', borderTop: '1px solid var(--color-line)', borderBottom: '1px solid var(--color-line)', flexShrink: 0, padding: '10px 0 12px' }}>
+          <div style={{ background: 'var(--color-bg)', borderTop: '1px solid var(--color-line)', borderBottom: '1px solid var(--color-line)', flexShrink: 0, padding: largeMap ? '6px 0 4px' : '10px 0 12px' }}>
             {stops.length === 0 ? (
               <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--color-label-alt)', padding: '4px 0' }}>
                 {activeRoute ? '정류장 정보가 없습니다' : '노선을 선택해주세요'}
@@ -1815,11 +1843,14 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
                     정류장을 고르는 행동과 QR 탑승이 이어져 있다는 걸 노선도 바로 위에서 말해 준다.
                     🔴 QR 탑승을 끈 거래처에서는 **문구를 지우지 않고 바꾼다**(2026-09-04) — 없는 버튼을
                        가리키면 안 되지만, 내 정류장 지정은 도착 안내·임박 알림의 전제라 유도는 남겨야 한다. */}
-                <div style={{ padding: '0 16px 8px', fontSize: 12.5, fontWeight: 700, color: 'var(--color-primary-deep)', wordBreak: 'keep-all', lineHeight: 1.4 }}>
+                {/* 지도 크게(2026-10-01): 내 정류장을 **이미 고른 뒤**에만 숨긴다 — 고르기 전엔 이 유도가 필요하다. */}
+                {!(largeMap && myStopIdx != null) && (
+                <div style={{ padding: largeMap ? '0 16px 4px' : '0 16px 8px', fontSize: largeMap ? 12 : 12.5, fontWeight: 700, color: 'var(--color-primary-deep)', wordBreak: 'keep-all', lineHeight: 1.4 }}>
                   {onScanTab
                     ? '탑승하실 정류장을 선택하시면 QR탑승 하실 수 있습니다.'
                     : '탑승하실 정류장을 선택하시면 도착 시간을 안내해 드립니다.'}
                 </div>
+                )}
                 {/* 가로 스크롤 — 정류장이 많으면 넘치므로 스크롤(스크롤바는 숨김·모바일 친화) */}
                 <div data-route-strip ref={stripRef} style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: 4 }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', paddingLeft: 16, paddingRight: 16, minWidth: 'max-content', gap: 0 }}>
@@ -1989,7 +2020,7 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
           패널이 스크롤 안에 있을 땐 둘이 만날 일이 드물었지만, 이제 패널이 늘 화면
           맨 아래에 있어 **버튼끼리 겹친다**(2026-08-28 실측: QR 탑승·정류장 변경 둘 다).
           겹침은 headless_check_home_qr_fold.cjs 가 픽셀로 잠근다 — 14px 로 되돌리지 말 것. */}
-      <div style={{ background: 'var(--color-bg)', flexShrink: 0, padding: '12px 58px 12px 14px', borderTop: '1px solid var(--color-line)' }}>
+      <div style={{ background: 'var(--color-bg)', flexShrink: 0, padding: largeMap ? '7px 58px 7px 12px' : '12px 58px 12px 14px', borderTop: '1px solid var(--color-line)' }}>
         {myStop ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -2000,7 +2031,7 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
                 /* 운행 종료(2026-07-16) — "이미 지나침"/지연 잔존 대신 중립 회색 표기.
                    카드의 다른 요소(QR 탑승·정류장 변경 버튼)는 보존. */
                 <>
-                  <div style={{ fontSize: 24, fontWeight: 900, color: 'var(--color-label-mute)', lineHeight: 1.1 }}>
+                  <div style={{ fontSize: largeMap ? 20 : 24, fontWeight: 900, color: 'var(--color-label-mute)', lineHeight: 1.1 }}>
                     운행 종료
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--color-label-alt)', marginTop: 3, fontWeight: 600 }}>
@@ -2009,7 +2040,7 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
                 </>
               ) : (
               <>
-              <div style={{ fontSize: 24, fontWeight: 900, color: etaDisplayColor, lineHeight: 1.1 }}>
+              <div style={{ fontSize: largeMap ? 20 : 24, fontWeight: 900, color: etaDisplayColor, lineHeight: 1.1 }}>
                 {etaStatus.type === 'passed'
                   ? (isDestStop ? '목적지 도착 완료' : '이미 지나침')
                   : etaStatus.type === 'arriving'
@@ -2021,7 +2052,7 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
                       : '버스 대기 중'}
               </div>
               {/* 보조 작은 글씨 — 도착 예상 시각(HH:MM) + 데이터 소스 */}
-              {etaStatus.type === 'approaching' && passengerLabel && passengerLabel.precise && passengerLabel.bucket !== 'time' && (
+              {!largeMap && etaStatus.type === 'approaching' && passengerLabel && passengerLabel.precise && passengerLabel.bucket !== 'time' && (
                 <div style={{ fontSize: 11, color: 'var(--color-label-mute)', marginTop: 2, fontWeight: 600 }}>
                   {passengerLabel.precise} 예상
                   {myStopEst && (() => {
@@ -2046,7 +2077,7 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
                   목적지로 이동 중
                 </div>
               )}
-              {mainBus && etaStatus.type === 'approaching' && (
+              {!largeMap && mainBus && etaStatus.type === 'approaching' && (
                 <div style={{ fontSize: 10, color: 'var(--color-label-mute)', marginTop: 2 }}>
                   {mainBus.vehicleNo} · {mainBus.speed ?? 0} km/h
                 </div>
@@ -2075,7 +2106,7 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
               {/* QR 탑승을 끈 거래처는 이 버튼이 없다(2026-09-04) — `정류장 변경` 은 남는다. */}
               {onScanTab && (
               <button onClick={onScanTab}
-                style={{ background: 'var(--color-primary)', border: 'none', borderRadius: 'var(--radius-12)', padding: '10px 16px', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', boxShadow: 'var(--shadow-strong)' }}>
+                style={{ background: 'var(--color-primary)', border: 'none', borderRadius: 'var(--radius-12)', padding: largeMap ? '8px 14px' : '10px 16px', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', boxShadow: 'var(--shadow-strong)' }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}><Icon name="qr" size={14} stroke={2} /> QR 탑승</span>
               </button>
               )}
