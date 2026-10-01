@@ -15,6 +15,7 @@ import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom, toLatLng
 import { computeStopEstimates, formatDelayLabel, formatPassengerEta, describeEtaSource } from "../lib/stopSchedule";
 import { useSmoothedEta } from "../lib/useSmoothedEta";
 import { computeRunEnded } from "../lib/runStatus";
+import { isHoldingAtOrigin, originTimeLabel } from "../lib/originStop";
 import { useOneRouteStopArrivals } from "../lib/useRouteStopArrivals";
 import { useWakeTick } from "../lib/useWakeTick";
 import { checkAndReload } from "../lib/appUpdate";
@@ -1327,7 +1328,7 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
   //   - `etaSec`(초): useSmoothedEta + formatPassengerEta 입력. 부드러운 카운트다운.
   // myStopEst(stopSchedule plan+delay GPS 30:70 가중)가 있으면 그것을 정본으로 우선 —
   // 한 화면에서 카드/리스트가 다른 시각을 가리키는 불일치 제거(승객 신뢰도).
-  const etaStatus = (() => {
+  const rawEtaStatus = (() => {
     if (!mainBus || myStopIdx === null) return { type: 'waiting' };        // 버스 없음
     // myStopEst의 estimatedAt → etaSec 보조 우선(plan+delay+GPS 30:70 안정).
     let estSec = null;
@@ -1366,6 +1367,14 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
     }
     return { type: 'arriving', etaSec: 0 };                                           // 동일 정류장
   })();
+  // 🔴 기점(내 정류장 = 첫 정류장)에서 계획 출발 시각 전이면 «이미 지나침/곧 도착» 대신 «출발 대기»
+  //    (2026-10-01 배시현 `Fc8Zs7TD` — 하교 버스가 학교에 22분 일찍 와 대기하는데 «이미 지나침·
+  //    다음 버스를 기다리세요»가 떴다). 아직 기점에 오는 중(approaching)이면 기존 카운트다운 그대로.
+  const originPlannedAt = myStopEst?.plannedAt || (myStopIdx === 0 ? activeRoute?.departTime : null);
+  const etaStatus = mainBus && (rawEtaStatus.type === 'passed' || rawEtaStatus.type === 'arriving')
+      && isHoldingAtOrigin({ idx: myStopIdx, plannedAt: originPlannedAt })
+    ? { type: 'departing', etaSec: null }
+    : rawEtaStatus;
 
   // 부드러운 카운트다운(EMA + rate-limit) — 'approaching'만 적용.
   // 'arriving'/'passed'/'waiting'은 텍스트 분기이므로 EMA 무관.
@@ -1712,7 +1721,12 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
             // offsetMin 미설정(status='unplanned')이면 timeLabel=null → 이름만 표시(폴백).
             const est = estByStopId[s.id];
             let timeLabel = null, timeColor = null;
-            if (est) {
+            const originLab = originTimeLabel(i, est);
+            if (originLab) {
+              // 기점은 «도착 HH:MM»(일찍 와 대기한 시각) 대신 출발 계획시각(2026-10-01 `Fc8Zs7TD`)
+              timeLabel = `${originLab.prefix} ${originLab.time}`;
+              timeColor = emphasize ? 'rgba(255,255,255,0.92)' : 'var(--color-label-mute)';
+            } else if (est) {
               if (est.status === 'arrived' && est.estimatedAt) {
                 timeLabel = `도착 ${est.estimatedAt}`;
                 timeColor = emphasize ? 'rgba(255,255,255,0.92)' : 'var(--color-positive)';
@@ -2042,7 +2056,9 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
               ) : (
               <>
               <div style={{ fontSize: largeMap ? 20 : 24, fontWeight: 900, color: etaDisplayColor, lineHeight: 1.1 }}>
-                {etaStatus.type === 'passed'
+                {etaStatus.type === 'departing'
+                  ? `${originPlannedAt} 출발`
+                  : etaStatus.type === 'passed'
                   ? (isDestStop ? '목적지 도착 완료' : '이미 지나침')
                   : etaStatus.type === 'arriving'
                     ? (isDestStop ? '목적지 도착' : '곧 도착!')
@@ -2063,6 +2079,11 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
                 </div>
               )}
               {/* 부가 정보 */}
+              {etaStatus.type === 'departing' && (
+                <div style={{ fontSize: 12.5, color: 'var(--color-label-mute)', marginTop: 3, fontWeight: 600 }}>
+                  출발지에서 대기 중입니다
+                </div>
+              )}
               {etaStatus.type === 'passed' && !isDestStop && (
                 <div style={{ fontSize: 12.5, color: 'var(--color-cautionary)', marginTop: 3, fontWeight: 600 }}>
                   다음 버스를 기다려주세요
@@ -2084,7 +2105,12 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
                 </div>
               )}
               {/* 계획 진입시각 · 예상 · 지연(있을 때만, 폴백/미설정이면 미노출) */}
-              {myStopEst && myStopEst.plannedAt && (
+              {myStopEst && myStopEst.plannedAt && originTimeLabel(myStopIdx, myStopEst) ? (
+                /* 기점은 도착·조기도착 대신 출발 계획시각만(2026-10-01 `Fc8Zs7TD`) */
+                <div style={{ fontSize: 12, color: 'var(--color-label-mute)', marginTop: 3, fontWeight: 600 }}>
+                  출발 {myStopEst.plannedAt}
+                </div>
+              ) : myStopEst && myStopEst.plannedAt && (
                 <div style={{ fontSize: 12, color: 'var(--color-label-mute)', marginTop: 3, fontWeight: 600 }}>
                   계획 {myStopEst.plannedAt}
                   {myStopEst.estimatedAt && myStopEst.estimatedAt !== myStopEst.plannedAt && (
@@ -2701,6 +2727,15 @@ function RoutesTab({ companyId, session, onSessionUpdate, showRoutePath = true }
                               : lab.tone === 'warn' ? 'var(--color-cautionary)'
                               : 'var(--color-positive)';
                             const arrived = e.status === 'arrived';
+                            const originLab = originTimeLabel(i, e);
+                            if (originLab) {
+                              // 기점은 도착 시각 대신 출발 계획시각만(2026-10-01 `Fc8Zs7TD`)
+                              return (
+                                <div style={{ fontSize:12.5, marginTop:2, fontWeight:600, color:"var(--color-label-mute)" }}>
+                                  {originLab.prefix} <span style={{ color:'var(--color-primary-deep)', fontWeight:700 }}>{originLab.time}</span>
+                                </div>
+                              );
+                            }
                             return (
                               <div style={{ fontSize:12.5, marginTop:2, fontWeight:600, color:"var(--color-label-mute)" }}>
                                 {arrived ? "도착 " : e.plannedAt ? "계획 " : "예상 "}
