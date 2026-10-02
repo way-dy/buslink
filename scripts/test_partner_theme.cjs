@@ -293,7 +293,7 @@ function loadModule(doc) {
   ok("🔴 brandName 기본값이 null 이다(«준 경우에만» 계약)",
     /InstallPrompt\(\{ brandName = null, iconHref = null\s*[,}]/.test(promptSrc));
   ok("?install=1 로 스누즈를 건너뛸 수 있다",
-    promptSrc.includes("isForcedByUrl") && promptSrc.includes("!forced && isSnoozed()"));
+    promptSrc.includes("isForcedByUrl") && promptSrc.includes("forced ? false : isSnoozed()"));
   ok("🔴 standalone 은 강제 노출로도 안 뚫는다", /if \(isStandalone\(\)\) return;/.test(promptSrc));
   const empSrc = fs.readFileSync(path.join(ROOT, "src/pages/EmployeeApp.js"), "utf8");
   ok("🔴 승객앱이 팝업에 appName 을 넘긴다(워드마크 아님)",

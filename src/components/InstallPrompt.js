@@ -141,7 +141,10 @@ function isSnoozed() {
       return false;
     }
     // «이미 설치했어요» 자가신고 — 30일 침묵 후 다시 물어본다(위 SELF_REPORT_DAYS 주석 참조).
-    if (selfReportedAt && Date.now() - selfReportedAt < SELF_REPORT_DAYS * DAY_MS) return true;
+    // 🔴 단, 크롬이 설치 신호(BIP)를 주면 «안 깔려 있음» 이 확실하다 — 자가신고보다 크롬을 믿는다.
+    //    2026-10-02 대표님 폰: 다른 앱이 자리를 차지해 «이미 설치됨» 이던 때 누른 자가신고가 남아,
+    //    그 앱을 지운 뒤 BIP 가 0.5초 만에 오는데도 팝업이 30일간 막혀 있었다(adb+CDP 실측).
+    if (selfReportedAt && Date.now() - selfReportedAt < SELF_REPORT_DAYS * DAY_MS) return "self";
     if (!dismissedAt) return false;
     // 🔴 새 정책에서는 「나중에」가 **날짜로 남지 않는다**(이번 방문 표식은 위 sessionStorage).
     //    남긴 dismissedAt 은 옛 정책으로 되돌릴 때 그대로 쓰인다.
@@ -369,7 +372,10 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
     // 이미 설치됨 / 최근 닫음이면 아무것도 하지 않음
     // 🔴 standalone 은 강제 노출로도 뚫지 않는다(이미 설치된 앱 안에서 설치를 권하게 된다).
     if (isStandalone()) return;
-    if (!forced && isSnoozed()) return;
+    const snoozed = forced ? false : isSnoozed();
+    // 자가신고 침묵(«self»)은 BIP 가 오면 풀린다 — 아래 onBIP 만 달고 수동 안내 타이머는 돌리지 않는다.
+    const selfOnly = snoozed === "self";
+    if (snoozed && !selfOnly) return;
 
     // 🔴 인앱 브라우저(카톡·네이버 등)에서는 설치가 **원천 불가능**하다 — beforeinstallprompt 가
     //    발생하지 않고 「홈 화면에 추가」 메뉴도 없다. 그래서 아래 BIP 리스너·타이머를 아예 달지
@@ -380,6 +386,7 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
       typeof navigator !== "undefined" ? navigator.userAgent : ""
     );
     if (env0.inApp) {
+      if (selfOnly) return;
       setMode("inapp");
       return;
     }
@@ -418,7 +425,7 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
     // iOS Safari 는 beforeinstallprompt 가 없으므로 약간의 지연 후 안내 노출
     // (혹시 늦게 발생할 beforeinstallprompt 와 충돌 방지)
     let iosTimer = null;
-    if (isIosSafari()) {
+    if (isIosSafari() && !selfOnly) {
       iosTimer = setTimeout(() => {
         if (mounted) {
           setMode((prev) => (prev === "android" ? prev : "ios"));
@@ -435,7 +442,7 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
     //    getInstalledRelatedApps(매니페스트 related_applications 와 짝)로 «이미 있음» 을 가려
     //    «앱 목록에서 여세요»(android-installed)로 보낸다. API 가 없거나 실패하면 종전 그대로.
     let androidTimer = null;
-    if (isAndroidPwaCapable()) {
+    if (isAndroidPwaCapable() && !selfOnly) {
       androidTimer = setTimeout(async () => {
         const installed = await hasInstalledSelf();
         if (mounted) {
@@ -449,7 +456,7 @@ export default function InstallPrompt({ brandName = null, iconHref = null, escap
     // 강제 노출인데 iOS Safari 도 안드로이드 크롬도 아니면 위 두 타이머가 안 돌아 «눌렀는데 아무 일도
     // 안 일어난다» 가 된다 → 기기에 맞는 안내라도 띄운다(설치 버튼은 어차피 BIP 가 있을 때만 뜬다).
     let forcedTimer = null;
-    if (forced && !isIosSafari() && !isAndroidPwaCapable()) {
+    if (forced && !selfOnly && !isIosSafari() && !isAndroidPwaCapable()) {
       forcedTimer = setTimeout(() => {
         if (mounted) setMode((prev) => prev || (isIos() ? "ios" : "android-manual"));
       }, 1500);
