@@ -9,6 +9,8 @@
 > - [ ] 외부 링크(카카오톡 문의 등)는 앱 밖(Safari/카톡)으로 — 앱엔 뒤로 가기가 없다 · 키보드 위 «⌃⌄✓» 막대 숨김
 > - [ ] 앱 아이콘 = B 모노그램 승객(#0066FF) 1024 (`public/icons/` 의 승객 1024 PNG) · 시작 화면
 > - [ ] **4.2(웹 감싸기) 반려 대비 네이티브 기능**: 네이티브 푸시(FCM+APNs 키 — WKWebView 안에선 현행 웹 푸시가 안 돈다) · 오프라인 안내 화면
+> - [ ] **APNs 키(대기 중)**: 팀 키 한도(4개)가 다 차 있었다 → 2026-10-04 way 결정으로 `BusinDriver`(WRF7LT9HYV, 2018) Revoke(목록에서 빠진 것 확인). 남은 키 buslink dr `U33R4K9HCQ` · buslink cs `96MJDUSNQC` · BusinCust `FZFZ73UFV8` — **셋 다 .p8 파일 행방 불명**(이 PC 검색 0건). 새 키 «동영관광 공용 푸시»(Team Scoped · Sandbox & Production)를 등록하려 하면 **폐기 직후라 아직 한도 메시지가 뜬다** = 반영 지연으로 보고 대기. 하루 지나도 안 되면 Environment **Production 전용**으로 등록(스토어·TestFlight 정상, Xcode 직설치 시험만 알림 불가). 🔴 키는 앱 수와 무관(Team Scoped = 팀 전 앱 공용) → **이번 .p8 은 회사 드라이브에 보관하고 이후 모든 앱이 재사용**. 등록되면 Key ID → buslink-prod Firebase(iOS 앱 등록 후) 클라우드 메시징에 업로드. 우리 Firebase 11개 프로젝트에 iOS 앱 0개(확인) — 기존 키들은 Firebase 미사용.
+> - [ ] 웹 쪽(이 저장소) `src/lib/notifications.js`: 네이티브면 `window.Capacitor.Plugins.FirebaseMessaging` 토큰 → 같은 `companies/{c}/fcmTokens/{empNo}` 에 저장. **서버 무변경**(발송 CF 가 이미 `apns` 블록 포함 sendEachForMulticast). Mac 쪽 플러그인 설치 후 착수.
 > - [ ] 개인정보처리방침 URL · 심사용 BusLink 거래처 테스트 계정 · App Store Connect 권한(Admin/App Manager) 확인
 > - [ ] 아카이브 → TestFlight(내부) → 심사 제출 — **업로드는 way 확인 후**
 > - [ ] (후순위) 구글 플레이 — 조직 계정이면 12명·14일 테스트 면제
