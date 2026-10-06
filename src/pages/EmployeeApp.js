@@ -651,7 +651,8 @@ export default function EmployeeApp() {
       {/* ── 공지 배너 — 본문 영역 탭 시 공지함으로 이동(읽음 처리) ── */}
       {activeNotice && (
         <div ref={noticeBarRef} style={{
-          position: "fixed", top: 0, left: 0, right: 0, zIndex: 999,
+          // top: 앱(Capacitor)에서만 상태바 높이, 웹은 env()=0 이라 예전과 같다(lib/nativeApp.js).
+          position: "fixed", top: "env(safe-area-inset-top, 0px)", left: 0, right: 0, zIndex: 999,
           background: activeNotice.type === "emergency" ? "var(--color-destructive)" : "var(--color-primary)",
           padding: "10px 14px",
           display: "flex", alignItems: "flex-start", gap: 10,
@@ -4122,7 +4123,9 @@ function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate, 
 
 // ─── 스타일 (라이트 — tokens.css 변수 기반, 리디자인 6단계) ──────────
 const S = {
-  appWrap: { display: "flex", flexDirection: "column", height: "100dvh", maxHeight: "100dvh", background: "var(--color-bg-alt)", fontFamily: "var(--font-base)", color: "var(--color-label)", overflow: "hidden" },
+  // paddingTop: 앱(Capacitor, viewport-fit=cover)에서만 상태바만큼 비킨다 — 웹은 env()=0(lib/nativeApp.js).
+  // 하단 홈 막대는 tabBar 의 paddingBottom 이 이미 맡는다.
+  appWrap: { display: "flex", flexDirection: "column", height: "100dvh", maxHeight: "100dvh", paddingTop: "env(safe-area-inset-top, 0px)", background: "var(--color-bg-alt)", fontFamily: "var(--font-base)", color: "var(--color-label)", overflow: "hidden" },
   // position:relative = 도움말 버튼(?)의 배치 기준. 이 상자는 스크롤하지 않으므로
   // (안쪽 탭이 각자 스크롤한다) 절대배치 자식이 탭바 바로 위에 고정된다.
   // 🔴 탭바 높이를 px 로 빼서 fixed 로 두지 말 것 — 기기·안전영역마다 어긋난다.

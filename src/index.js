@@ -9,6 +9,10 @@ import './styles/tokens.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
 import { resolveAppIcons } from './lib/appIcons';
+import { applyNativeViewport } from './lib/nativeApp';
+
+// 네이티브 앱(Capacitor) 안에서만 안전 영역 확보 — 웹에서는 아무것도 안 한다(nativeApp.js).
+if (typeof document !== "undefined") applyNativeViewport();
 
 // ── 앱별 아이콘·매니페스트 조기 확정 (favicon·apple-touch·manifest) ──────────
 // 호스트명(서브도메인) 우선 + 경로 폴백으로 현재 앱을 판별해, React render·BIP(설치)

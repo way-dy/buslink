@@ -30,6 +30,7 @@ import { Btn } from "./ui";
 import { resolveAppIcons } from "../lib/appIcons";
 import { withEulReul } from "../lib/josa";
 import { detectBrowserEnv, buildEscapeGuide } from "../lib/inAppBrowser";
+import { isNativeApp } from "../lib/nativeApp";
 
 const LS_KEY = "buslink_pwa_prompt";
 // 이번 «방문» 표식. sessionStorage 라 탭을 닫았다 다시 열면 사라진다 = 다음 방문에 또 뜬다.
@@ -68,7 +69,8 @@ function isStandalone() {
   try {
     return (
       window.matchMedia("(display-mode: standalone)").matches ||
-      window.navigator.standalone === true
+      window.navigator.standalone === true ||
+      isNativeApp() // 스토어 앱 안 = 이미 설치된 것(설치를 권할 이유가 없다)
     );
   } catch {
     return false;
