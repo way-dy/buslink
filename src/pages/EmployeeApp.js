@@ -3311,25 +3311,23 @@ function ScanTabDriverQR({ companyId, session }) {
   // iOS 앱(Capacitor) 안에서는 네이티브 스캐너 — WKWebView 의 getUserMedia 는 첫 실행 때
   // 권한 팝업 없이 오래 멈춘다(2026-10-06 실기기). 🔴 플러그인이 있는 앱 빌드에서만 탄다 —
   // 브라우저·PWA·플러그인 없는 옛 앱은 아래 jsQR 경로 그대로.
+  // 플러그인 = 공식 `@capacitor/barcode-scanner`(이름 `CapacitorBarcodeScanner`). 권한 팝업·전체 화면
+  // 카메라·읽으면 닫기를 플러그인이 스스로 한다. hint 0 = QR 코드.
   const startNativeScan = async (gen) => {
     try {
-      const granted = (r) => r && (r.camera === "granted" || r.camera === "limited");
-      if (!granted(await nativeCall("BarcodeScanner", "checkPermissions"))) {
-        if (!granted(await nativeCall("BarcodeScanner", "requestPermissions"))) {
-          const denied = new Error("camera denied"); denied.name = "NotAllowedError"; throw denied;
-        }
-      }
-      setScanStatus("QR코드를 화면에 맞춰주세요");
-      const res = await nativeCall("BarcodeScanner", "scan", { formats: ["QR_CODE"] });
+      const res = await nativeCall("CapacitorBarcodeScanner", "scanBarcode", {
+        hint: 0, scanInstructions: "QR 코드를 화면 안에 맞춰 주세요",
+      });
       if (gen !== scanGenRef.current) return;
-      const raw = res && res.barcodes && res.barcodes[0] && res.barcodes[0].rawValue;
+      const raw = res && res.ScanResult;
       if (!raw) { setStep("ready"); setScanStatus(""); return; } // 닫기 = 취소
       handleTokenScanned(raw);
     } catch (e) {
       if (gen !== scanGenRef.current) return;
-      if (/cancel/i.test(String(e && e.message))) { setStep("ready"); setScanStatus(""); return; }
+      const msg = String((e && (e.message || e.code)) || "");
+      if (/cancel/i.test(msg)) { setStep("ready"); setScanStatus(""); return; }
       setErrMsg(
-        e.name === "NotAllowedError"
+        /permission|denied|access|권한/i.test(msg)
           ? "카메라 사용을 허용해 주세요.\n아이폰 설정 → BusLink 승객 → 카메라 켜기"
           : "카메라를 열 수 없어요.\n" + friendlyError(e, "앱을 다시 실행한 뒤 시도해 주세요")
       );
@@ -3340,7 +3338,7 @@ function ScanTabDriverQR({ companyId, session }) {
   const startScan = async () => {
     setErrMsg("");
     const gen = ++scanGenRef.current; // 이 호출의 세대(위 StrictMode 주석 참조)
-    if (hasNativePlugin("BarcodeScanner")) { await startNativeScan(gen); return; }
+    if (hasNativePlugin("CapacitorBarcodeScanner")) { await startNativeScan(gen); return; }
     try {
       // 1. 카메라 권한 요청
       const stream = await navigator.mediaDevices.getUserMedia({
