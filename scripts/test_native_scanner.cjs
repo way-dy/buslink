@@ -76,6 +76,25 @@ console.log("[3] 플러그인 있는 앱 — 네이티브 호출");
   const clipLines = css.split("\n").filter((l) => /overflow-x:\s*(hidden|clip)/.test(l) && /^\s*html/.test(l));
   ok(clipLines.length > 0 && clipLines.every((l) => /html\.native-app/.test(l)), "html/body 가로 잘라내기는 앱(native-app)에서만");
 
+  console.log("[6] 확대 금지 — 앱에서만(좌우 끌림의 원인 = 입력칸 자동 확대)");
+  {
+    const mk = (native) => {
+      const meta = { content: "width=device-width,initial-scale=1", setAttribute(k, v) { this.content = v; } };
+      const ctx = { window: native ? { Capacitor: { isNativePlatform: () => true } } : {},
+        document: { querySelector: () => meta, documentElement: { classList: { add() {} } } }, module: { exports: {} } };
+      vm.createContext(ctx);
+      const names = [...libSrc.matchAll(/^export function (\w+)/gm)].map((x) => x[1]);
+      vm.runInContext(libSrc.replace(/^export function/gm, "function") + "\n" + names.map((n) => `module.exports.${n} = ${n};`).join("\n"), ctx);
+      ctx.module.exports.applyNativeViewport();
+      ctx.module.exports.applyNativeViewport(); // 두 번 불러도 한 번만 붙는다
+      return meta.content;
+    };
+    const app = mk(true), web = mk(false);
+    ok(/maximum-scale=1/.test(app) && /user-scalable=no/.test(app), "앱: maximum-scale=1 · user-scalable=no");
+    ok((app.match(/maximum-scale/g) || []).length === 1, "앱: 중복으로 붙지 않는다");
+    ok(web === "width=device-width,initial-scale=1", "웹: viewport 그대로(확대 허용 유지)");
+  }
+
   console.log(fail ? `\n❌ ${fail} fail / ${pass} pass` : `\n✅ 전부 통과 — ${pass} pass / 0 fail`);
   process.exit(fail ? 1 : 0);
 })();

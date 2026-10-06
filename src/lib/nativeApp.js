@@ -22,6 +22,13 @@ export function applyNativeViewport() {
   if (meta && !/viewport-fit/.test(meta.content)) {
     meta.setAttribute("content", meta.content + ", viewport-fit=cover");
   }
+  // 🔴 확대 금지(앱 안에서만) — 로그인 입력칸 글자가 16px 미만이라 iOS 가 누르는 순간 화면을
+  // 확대하고, 로그인 뒤에도 그대로 남아 **좌우로 끌리며 오른쪽(공지 ✕·QR 탑승·?)이 잘렸다**
+  // (2026-10-06 빌드 3 실기기 · 넘치는 요소는 0개로 실측 — 원인은 넘침이 아니라 확대였다).
+  // WKWebView 는 앱에서 이 제한을 지킨다(ignoresViewportScaleLimits 기본 false). 웹은 손대지 않는다.
+  if (meta && !/maximum-scale/.test(meta.content)) {
+    meta.setAttribute("content", meta.content + ", maximum-scale=1, user-scalable=no");
+  }
   document.documentElement.classList.add("native-app");
 }
 
