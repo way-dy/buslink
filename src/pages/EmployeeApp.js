@@ -555,6 +555,19 @@ export default function EmployeeApp() {
     });
   }, [brand.custom, brand.name, brand.favicon, brand.apple, brand.manifest]);
 
+  // 배너 자동 접기(2026-10-06 way «공지 나오면 지도가 너무 작다») — 새 공지는 본문 2줄
+  // 미리보기(2026-08-07 배시현 요청)로 먼저 보여 주고 6초 뒤 한 줄로 접는다. 접힌 줄을
+  // 누르면 예전처럼 공지함. 🔴 키는 `id` — 공지 구독은 스냅샷마다 새 객체를 넣으므로
+  // 객체로 걸면 갱신마다 다시 펼쳐진다. 높이는 아래 실측(ResizeObserver)이 따라간다.
+  const [noticeCollapsed, setNoticeCollapsed] = useState(false);
+  const activeNoticeId = activeNotice ? activeNotice.id : null;
+  useEffect(() => {
+    if (!activeNoticeId) return undefined;
+    setNoticeCollapsed(false);
+    const t = setTimeout(() => setNoticeCollapsed(true), 6000);
+    return () => clearTimeout(t);
+  }, [activeNoticeId]);
+
   // 배너 높이 실측 — 공지가 바뀌거나(문구 길이 변동) 화면이 회전해도 따라간다.
   useEffect(() => {
     if (!activeNotice) return undefined;
@@ -654,17 +667,18 @@ export default function EmployeeApp() {
           // top: 앱(Capacitor)에서만 상태바 높이, 웹은 env()=0 이라 예전과 같다(lib/nativeApp.js).
           position: "fixed", top: "env(safe-area-inset-top, 0px)", left: 0, right: 0, zIndex: 999,
           background: activeNotice.type === "emergency" ? "var(--color-destructive)" : "var(--color-primary)",
-          padding: "10px 14px",
-          display: "flex", alignItems: "flex-start", gap: 10,
+          padding: noticeCollapsed ? "7px 14px" : "10px 14px",
+          display: "flex", alignItems: noticeCollapsed ? "center" : "flex-start", gap: 10,
           boxShadow: "var(--shadow-strong)",
         }}>
           <div onClick={() => { setTab("notices"); markNoticesRead(); }}
             style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
-            {/* 제목도 2줄까지만 — 영문 병기 공지는 제목만으로도 화면을 밀어낸다 */}
-            <div style={{ fontSize: 13.5, fontWeight: 800, color: "#fff", marginBottom: 2,
-              display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "keep-all" }}>
-              {activeNotice.type === "emergency" ? "긴급 공지" : "공지"} · {activeNotice.title}
+            {/* 제목도 2줄까지만 — 영문 병기 공지는 제목만으로도 화면을 밀어낸다. 접히면 1줄. */}
+            <div style={{ fontSize: 13.5, fontWeight: 800, color: "#fff", marginBottom: noticeCollapsed ? 0 : 2,
+              display: "-webkit-box", WebkitLineClamp: noticeCollapsed ? 1 : 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "keep-all" }}>
+              {activeNotice.type === "emergency" ? "긴급 공지" : "공지"} · {activeNotice.title}{noticeCollapsed ? " ›" : ""}
             </div>
+            {!noticeCollapsed && (<>
             {/* 본문 2줄 미리보기(2026-08-07 배시현 개선요청) — 전문은 탭해서 공지함에서 본다.
                 🔴 배너는 `position:fixed` 라 길어지면 아래 화면을 그대로 덮는다. */}
             <div style={{ fontSize: 12.5, color: "rgba(255,255,255,.88)", lineHeight: 1.4,
@@ -674,6 +688,7 @@ export default function EmployeeApp() {
             <div style={{ fontSize: 12, color: "rgba(255,255,255,.7)", marginTop: 3, fontWeight: 600 }}>
               탭하면 전체 공지 보기 →
             </div>
+            </>)}
           </div>
           <button onClick={() => setActiveNotice(null)}
             style={{ background: "rgba(255,255,255,.25)", border: "none", borderRadius: 6,
