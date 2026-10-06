@@ -3280,6 +3280,7 @@ function ScanTabDriverQR({ companyId, session }) {
   const [result, setResult] = useState(null);   // 탑승 결과 { routeName, vehicleNo, staticQr }
   const [alreadyBoarded, setAlreadyBoarded] = useState(false); // 고정 QR 재스캔(당일 중복) 여부
   const [errMsg, setErrMsg] = useState("");
+  const [errCode, setErrCode] = useState(""); // 네이티브 스캐너 오류 코드(앱 안에서만 채워진다)
   const [scanStatus, setScanStatus] = useState("");
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -3313,10 +3314,13 @@ function ScanTabDriverQR({ companyId, session }) {
   // 브라우저·PWA·플러그인 없는 옛 앱은 아래 jsQR 경로 그대로.
   // 플러그인 = 공식 `@capacitor/barcode-scanner`(이름 `CapacitorBarcodeScanner`). 권한 팝업·전체 화면
   // 카메라·읽으면 닫기를 플러그인이 스스로 한다. hint 0 = QR 코드.
+  // 🔴 iOS 는 6개 값을 다 줘야 한다 — 둘만 주면 «Scanning parameters are invalid»(OS-PLUG-BARC-0008,
+  //    빌드 3 실기기). cameraDirection 1 = 후면 · scanOrientation 1 = 세로.
   const startNativeScan = async (gen) => {
     try {
       const res = await nativeCall("CapacitorBarcodeScanner", "scanBarcode", {
         hint: 0, scanInstructions: "QR 코드를 화면 안에 맞춰 주세요",
+        scanButton: false, scanText: " ", cameraDirection: 1, scanOrientation: 1,
       });
       if (gen !== scanGenRef.current) return;
       const raw = res && res.ScanResult;
@@ -3326,9 +3330,11 @@ function ScanTabDriverQR({ companyId, session }) {
       if (gen !== scanGenRef.current) return;
       const msg = String((e && (e.message || e.code)) || "");
       if (/cancel/i.test(msg)) { setStep("ready"); setScanStatus(""); return; }
+      // 오류 코드(OS-PLUG-BARC-…)는 작게 함께 — 승객이 캡처해 보내면 원인을 바로 안다.
+      setErrCode(e && e.code ? String(e.code) : "");
       setErrMsg(
         /permission|denied|access|권한/i.test(msg)
-          ? "카메라 사용을 허용해 주세요.\n아이폰 설정 → BusLink 승객 → 카메라 켜기"
+          ? "카메라 사용을 허용해 주세요.\n아이폰 설정 → BusLink 탑승 → 카메라 켜기"
           : "카메라를 열 수 없어요.\n" + friendlyError(e, "앱을 다시 실행한 뒤 시도해 주세요")
       );
       setStep("error");
@@ -3336,7 +3342,7 @@ function ScanTabDriverQR({ companyId, session }) {
   };
 
   const startScan = async () => {
-    setErrMsg("");
+    setErrMsg(""); setErrCode("");
     const gen = ++scanGenRef.current; // 이 호출의 세대(위 StrictMode 주석 참조)
     if (hasNativePlugin("CapacitorBarcodeScanner")) { await startNativeScan(gen); return; }
     try {
@@ -3469,7 +3475,7 @@ function ScanTabDriverQR({ companyId, session }) {
   const reset = () => {
     stopStream();
     setStep("ready"); setResult(null); setAlreadyBoarded(false);
-    setErrMsg(""); setScanStatus("");
+    setErrMsg(""); setErrCode(""); setScanStatus("");
   };
 
   // 오류 화면의 "다시 시도" — 사용자 제스처가 있으므로 ready 를 거치지 않고 곧바로
@@ -3574,6 +3580,7 @@ function ScanTabDriverQR({ companyId, session }) {
             <div style={{ width:72, height:72, borderRadius:"50%", background:"var(--color-atomic-red-90)", border:"2px solid var(--color-destructive)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:32, color:"var(--color-destructive)" }}>✕</div>
             <div style={{ fontSize:18, fontWeight:800, color:"var(--color-destructive)" }}>오류</div>
             <div style={{ fontSize:14.5, color:"var(--color-label-mute)", textAlign:"center", whiteSpace:"pre-line", lineHeight:1.6 }}>{errMsg}</div>
+            {errCode && <div style={{ fontSize:12, color:"var(--color-label-mute)", opacity:.7 }}>오류 코드 {errCode}</div>}
             <button style={{ ...S.btn, maxWidth:280 }} onClick={retry}>다시 시도</button>
           </>
         )}

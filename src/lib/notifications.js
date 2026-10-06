@@ -1,11 +1,18 @@
 import { db, getMessagingInstance } from "../firebase";
 import { doc, getDoc, setDoc, addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { hasNativePlugin, nativeCall } from "./nativeApp";
 
 const VAPID_KEY = process.env.REACT_APP_VAPID_KEY || "";
 
 // partnerCode 인자: 호출부(EmployeeApp)에서 session.partnerCode 전달. 미제공 시 passengers/{empNo}.partnerCode 자동 조회.
 // 둘 다 없으면 null → 공지 발송 시 "전체 협력사" 대상에만 포함.
 export async function initNotifications({ companyId, empNo, partnerCode }) {
+  // iOS 앱(Capacitor) 안 — WKWebView 엔 웹 푸시가 없다. 앱 플러그인으로 FCM 토큰을 받아
+  // **같은 문서**에 저장한다(발송 CF 가 이미 apns 블록을 실어 보낸다 → 서버 무변경).
+  // 🔴 브라우저·PWA 는 hasNativePlugin 이 false 라 아래 기존 경로 그대로.
+  if (hasNativePlugin("FirebaseMessaging")) {
+    return initNativePush({ companyId, empNo, partnerCode });
+  }
   if (!("Notification" in window) || !("serviceWorker" in navigator)) {
     return { supported: false };
   }
@@ -77,6 +84,38 @@ export async function initNotifications({ companyId, empNo, partnerCode }) {
   } catch (e) {
     console.error("[FCM] 토큰 발급 오류:", e.message);
     return { granted: true, token: null, error: e.message };
+  }
+}
+
+// 앱 푸시 토큰 저장. 알림을 거부해도 앱은 그대로 쓴다(오류를 던지지 않는다).
+let nativeTokenListenerOn = false;
+async function initNativePush({ companyId, empNo, partnerCode }) {
+  const save = async (token) => {
+    if (!token) return;
+    await setDoc(
+      doc(db, "companies", companyId, "fcmTokens", empNo),
+      { token, empNo, companyId, partnerCode: partnerCode || null, platform: "ios", updatedAt: serverTimestamp() },
+      { merge: true }
+    );
+  };
+  try {
+    const perm = await nativeCall("FirebaseMessaging", "requestPermissions");
+    if (!perm || perm.receive !== "granted") return { supported: true, granted: false };
+    const res = await nativeCall("FirebaseMessaging", "getToken");
+    const token = res && res.token;
+    await save(token);
+    // 토큰이 바뀌면(앱 재설치·APNs 갱신) 같은 문서를 다시 쓴다. 로그인마다 리스너가 쌓이지 않게 1회만.
+    if (!nativeTokenListenerOn) {
+      const FM = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseMessaging;
+      if (FM && typeof FM.addListener === "function") {
+        nativeTokenListenerOn = true;
+        FM.addListener("tokenReceived", (e) => { save(e && e.token).catch(() => {}); });
+      }
+    }
+    return { supported: true, granted: true, token };
+  } catch (e) {
+    console.warn("[FCM] 앱 푸시 토큰 등록 실패(무시):", e && e.message);
+    return { supported: true, granted: true, token: null, error: e && e.message };
   }
 }
 

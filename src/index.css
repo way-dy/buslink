@@ -94,3 +94,9 @@ code {
    노이즈 방지 위해 숨김(자연스러운 모바일 UX, 2026-05-21 Issue #1). */
 [data-stop-list] { scrollbar-width: none; }
 [data-stop-list]::-webkit-scrollbar { display: none; }
+
+/* iOS 앱(Capacitor) 안에서만 — 화면을 좌우로 끌면 페이지 전체가 옆으로 밀려 오른쪽(공지 ✕·QR 탑승·?)이
+   잘렸다(2026-10-06 빌드 3 실기기). `native-app` 클래스는 lib/nativeApp.js 가 앱 안에서만 붙인다 →
+   브라우저·PWA 화면은 그대로. clip 은 hidden 과 달리 스크롤 컨테이너를 만들지 않아 sticky 가 안 깨진다. */
+html.native-app, html.native-app body { overflow-x: hidden; overscroll-behavior: none; }
+@supports (overflow: clip) { html.native-app, html.native-app body { overflow-x: clip; } }

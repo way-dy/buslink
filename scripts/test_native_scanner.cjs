@@ -63,6 +63,19 @@ console.log("[3] 플러그인 있는 앱 — 네이티브 호출");
   ok(/gen !== scanGenRef\.current/.test(block.slice(block.indexOf("startNativeScan"))), "네이티브 경로도 세대 가드를 쓴다");
   ok(/cancel/i.test(block) && /setStep\("ready"\)/.test(block), "닫기(취소)는 오류가 아니라 준비 화면으로");
 
+  ok(["hint", "scanInstructions", "scanButton", "scanText", "cameraDirection", "scanOrientation"].every((k) => new RegExp(k + ":").test(block)),
+    "iOS 스캐너에 6개 값을 모두 보낸다(빠지면 OS-PLUG-BARC-0008)");
+  ok(/BusLink 탑승/.test(block) && !/BusLink 승객 →/.test(block), "권한 안내가 앱 이름 «BusLink 탑승» 을 가리킨다");
+
+  console.log("[5] 앱 푸시 토큰 · 좌우 밀림 CSS — 웹은 그대로");
+  const notiSrc = fs.readFileSync(path.join(root, "src/lib/notifications.js"), "utf8");
+  ok(/if \(hasNativePlugin\("FirebaseMessaging"\)\)/.test(notiSrc), "앱 푸시는 플러그인 판정으로 게이트된다");
+  ok(notiSrc.indexOf('hasNativePlugin("FirebaseMessaging")') < notiSrc.indexOf("Notification.requestPermission"), "네이티브 분기가 웹 푸시 경로보다 먼저");
+  ok(/fcmTokens/.test(notiSrc.slice(notiSrc.indexOf("async function initNativePush"))), "앱 토큰도 같은 fcmTokens 문서에 저장");
+  const css = fs.readFileSync(path.join(root, "src/index.css"), "utf8");
+  const clipLines = css.split("\n").filter((l) => /overflow-x:\s*(hidden|clip)/.test(l) && /^\s*html/.test(l));
+  ok(clipLines.length > 0 && clipLines.every((l) => /html\.native-app/.test(l)), "html/body 가로 잘라내기는 앱(native-app)에서만");
+
   console.log(fail ? `\n❌ ${fail} fail / ${pass} pass` : `\n✅ 전부 통과 — ${pass} pass / 0 fail`);
   process.exit(fail ? 1 : 0);
 })();
