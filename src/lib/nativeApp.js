@@ -24,3 +24,26 @@ export function applyNativeViewport() {
   }
   document.documentElement.classList.add("native-app");
 }
+
+// ─── 네이티브 플러그인 호출 (2026-10-06) ───────────────────────────────────────
+// 원격 모드라 웹 번들에 `@capacitor/core` 가 없다 — 앱이 주입한 브리지(`window.Capacitor`)만
+// 쓴다. 플러그인 설치 여부는 **앱 빌드**가 정하므로(웹 배포가 아니다) 반드시 먼저 물어 본다:
+// 옛 앱(플러그인 없음)이 새 웹을 받아도 기존 경로로 떨어져야 한다.
+export function hasNativePlugin(name) {
+  if (!isNativeApp()) return false;
+  try {
+    const cap = window.Capacitor;
+    if (typeof cap.isPluginAvailable === "function" && cap.isPluginAvailable(name)) return true;
+    return Array.isArray(cap.PluginHeaders) && cap.PluginHeaders.some((h) => h && h.name === name);
+  } catch {
+    return false;
+  }
+}
+
+export function nativeCall(plugin, method, options = {}) {
+  const cap = window.Capacitor;
+  if (cap && typeof cap.nativePromise === "function") return cap.nativePromise(plugin, method, options);
+  const p = cap && cap.Plugins && cap.Plugins[plugin];
+  if (p && typeof p[method] === "function") return p[method](options);
+  return Promise.reject(new Error(`네이티브 기능을 쓸 수 없습니다 (${plugin}.${method})`));
+}
