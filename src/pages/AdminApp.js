@@ -15,6 +15,8 @@ import { compareRoutes, seatUsage } from "../lib/routeOrder";
 import {
   PRUNE_LOOKAHEAD_DAYS, todayKST, upcomingDates, selectPrunableDispatches, selectUpdatableDispatches,
 } from "../lib/dispatchSchedule";
+// 노선 출발시각 변경 → 일정·앞으로의 배차 함께 맞추기(2026-10-07 way)
+import { selectRouteTimeSync, ROUTE_TIME_SYNC_DAYS } from "../lib/routeTimeSync";
 // 거래처 통합 운행일 설정(2026-09-04) — 여러 일정의 excludeDates 를 한 번에 계산(쓰기는 호출부)
 import {
   BULK_MODES, BULK_MODE_LABELS, BULK_MAX_DAYS,
@@ -1924,6 +1926,19 @@ function DispatchTab({ companyId, vehicles, drivers, allowed, currentUserUid }) 
             placeholder="차량 선택 (검색)" />
           <label style={S.label}>출발시간 *</label>
           <input style={S.input} type="time" value={form.departTime} onChange={e=>setForm({...form,departTime:e.target.value})} />
+          {/* 배차 시각은 그날 하루 몫이다(2026-10-07 way) — 노선 시각과 다르게 넣으면 승객앱 시간표는
+              그대로라는 걸 저장 전에 알려 준다. 매일 바꿀 거면 노선 관리에서 바꾸면 일정·배차가 따라온다. */}
+          {(() => {
+            const rt = routes.find(r => r.id === form.routeId)?.departTime || "";
+            if (!form.routeId || !rt || !form.departTime || rt === form.departTime) return null;
+            return (
+              <div data-testid="dispatch-time-oneday-hint" style={{ marginTop:6, padding:"8px 10px", borderRadius:8, fontSize:13, lineHeight:1.5,
+                background:"var(--color-bg)", border:"1px solid var(--color-cautionary)", color:"var(--color-label)" }}>
+                이 날 배차만 <b>{form.departTime}</b> 로 바뀝니다(노선 시각 {rt}).<br/>
+                승객앱 시간표와 매일 배차까지 바꾸시려면 <b>노선 관리</b>에서 출발시각을 수정하세요 — 배차 일정·앞으로의 배차도 함께 바꿀 수 있습니다.
+              </div>
+            );
+          })()}
           <div style={{display:"flex",gap:8,marginTop:8}}>
             <button style={{...S.addBtn,flex:1}} onClick={handleSave} disabled={loading}>{loading?"저장 중...":"저장"}</button>
             <button style={{...S.closeBtn,flex:1}} onClick={()=>setShowForm(false)}>취소</button>
@@ -2841,6 +2856,57 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
     setShowForm(true);
   };
 
+  // 노선 출발시각 변경 → 그 시각을 따르던 배차 일정·앞으로의 배차도 함께 옮긴다(2026-10-07 way
+  // "배차관리에서 시간을 바꾸면 노선과 연동이 안 돼 각각 수정해야 한다"). 판정은 @lib/routeTimeSync.js.
+  // 🔴 다른 시각의 회차·지난 배차·운행 기록 있는 배차는 그대로 둔다. 바꾸는 필드는 departTime 하나.
+  const syncRouteTime = async (routeId, oldTime, newTime) => {
+    const today = todayKST();
+    const schedSnap = await getDocs(query(
+      collection(db, "companies", companyId, "dispatchSchedules"), where("routeId", "==", routeId)));
+    const schedules = schedSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const dispatchesByDay = {};
+    await Promise.all(upcomingDates(today, ROUTE_TIME_SYNC_DAYS).map(async (day) => {
+      const snap = await getDocs(query(
+        collection(db, "companies", companyId, "dispatches", day, "list"), where("routeId", "==", routeId)));
+      if (!snap.empty) dispatchesByDay[day] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }));
+    const plan = selectRouteTimeSync({ routeId, oldTime, newTime, schedules, dispatchesByDay, today });
+    if (plan.schedules.length === 0 && plan.dispatches.length === 0) return;
+
+    const lines = [];
+    if (plan.schedules.length > 0) lines.push(`· 배차 일정 ${plan.schedules.length}건`);
+    if (plan.dispatches.length > 0) {
+      const ds = plan.dispatches.map(d => d.day.slice(5).replace("-", "/"));
+      const shown = [...new Set(ds)];
+      lines.push(`· 앞으로의 배차 ${plan.dispatches.length}건 (${shown.slice(0, 6).join(", ")}${shown.length > 6 ? " …" : ""})`);
+    }
+    const otherTimes = [...new Set(plan.keptOtherTime.map(k => k.departTime).filter(Boolean))].sort();
+    const notes = [
+      otherTimes.length > 0 ? `다른 시각(${otherTimes.slice(0, 4).join(", ")}${otherTimes.length > 4 ? " …" : ""})으로 잡힌 회차` : "",
+      plan.keptWithTrace.length > 0 ? `이미 운행 기록이 있는 배차 ${plan.keptWithTrace.length}건` : "",
+    ].filter(Boolean).join(" · ");
+    if (!window.confirm(
+      `출발시각을 ${oldTime} → ${newTime} 로 바꿨습니다.\n${oldTime} 에 잡혀 있던 아래 항목도 ${newTime} 로 같이 바꿀까요?\n\n${lines.join("\n")}` +
+      (notes ? `\n\n※ ${notes}은 그대로 둡니다.` : "") +
+      `\n\n바꾸지 않으면 기사앱·관제에는 예전 시각(${oldTime})이 그대로 나옵니다.`
+    )) return;
+
+    const updatedAt = new Date().toISOString();
+    let done = 0;
+    const total = plan.schedules.length + plan.dispatches.length;
+    for (const s of plan.schedules) {
+      try { await updateDoc(doc(db, "companies", companyId, "dispatchSchedules", s.id), { departTime: newTime, updatedAt }); done++; }
+      catch (e) { /* 개별 실패는 아래 합계로 알린다 */ }
+    }
+    for (const d of plan.dispatches) {
+      try { await updateDoc(doc(db, "companies", companyId, "dispatches", d.day, "list", d.id), { departTime: newTime }); done++; }
+      catch (e) { /* 개별 실패는 아래 합계로 알린다 */ }
+    }
+    alert(done === total
+      ? `배차 일정·배차 ${done}건의 출발시각을 ${newTime} 로 바꿨습니다.`
+      : `${done}/${total}건만 바꿨습니다. 남은 건은 배차 일정·배차 관리 탭에서 확인해주세요.`);
+  };
+
   const handleSave = async () => {
     if (!form.name || !form.departTime) return alert("노선명과 출발시간은 필수입니다");
     setLoading(true);
@@ -2861,6 +2927,12 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
     try {
       if (editItem) {
         await updateDoc(doc(db, "companies", companyId, "routes", editItem.id), data);
+        // 출발시각을 바꿨으면 그 시각을 따르던 일정·배차도 함께(확인 후). 저장은 이미 끝났으므로
+        // 여기서 나는 오류가 노선 저장을 되돌리지 않게 분리해 잡는다.
+        if ((editItem.departTime || "") !== data.departTime) {
+          try { await syncRouteTime(editItem.id, editItem.departTime || "", data.departTime); }
+          catch (e) { alert("노선은 저장했지만 배차 시각을 맞추지 못했습니다: " + e.message + "\n배차 일정·배차 관리에서 확인해주세요."); }
+        }
       } else {
         data.createdAt = new Date().toISOString();
         data.createdBy = currentUserUid || null; // 제한 admin 이 거래처 미지정 노선 등록해도 본인은 항상 열람(2026-06-16).
