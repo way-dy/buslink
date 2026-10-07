@@ -18,7 +18,8 @@
 > - [ ] **메뉴 버퍼링** — 탭 전환마다 HomeTab 언마운트(지도·구독 재생성). way 에게 Safari 동일 여부 비교 요청 중 → 둘 다 느리면 홈 유지(display 숨김), 앱만 느리면 Mac 쪽 캐시
 > - [ ] 앱이 출렁이면 Mac 쪽 `capacitor.config.json` `ios.scrollEnabled:false`
 > - [x] **개인정보 처리방침·지원 페이지 prod 배포(2026-10-07)**: `https://p.buslink.co.kr/privacy` · `/support`(정적 `public/privacy.html`·`support.html` + firebase.json rewrite 2줄). 책임자 = 직책 «대표이사» + 담당 «BusLink 운영 담당» + `dy@dongyeongtour.co.kr`(way A안 · 성명은 dyops 에도 «CEO» 표기뿐이라 미기재 — 시행령 31조 «성명 또는 부서»로 충족). 🔴 수집 항목·권한을 늘리면 privacy.html 도 함께. ⚠ 위치 권한은 서버 저장 없이 지도 표시용으로 적었다 — 심사 5.1.1 에서 «왜 위치가 필요한가» 질문 가능.
-> - [ ] 심사용 BusLink 거래처 테스트 계정 · App Store Connect 에 위 두 URL 등록 · 권한(Admin/App Manager) 확인
+> - [x] App Store Connect(앱 «BusLink 탑승» Apple ID 6818952591)에 두 URL 등록(2026-10-07): 개인정보 처리방침 URL = «앱이 수집하는 개인정보» 화면(앱 정보가 아니다) · 지원 URL = «1.0 제출 준비 중» 버전 화면. ⏳ 같은 화면의 «앱이 수집하는 개인정보 → 시작하기»(데이터 수집 설문) 미작성. ⚠ 계정에 옛 «버스링크 승객»(배포 중) 앱이 따로 있다 — 이름·설명이 겹치지 않게.
+> - [ ] 심사용 BusLink 거래처 테스트 계정 · 권한(Admin/App Manager) 확인
 > - [ ] 아카이브 → TestFlight(내부) → 심사 제출 — **업로드는 way 확인 후**
 > - [ ] (후순위) 구글 플레이 — 조직 계정이면 12명·14일 테스트 면제
 
