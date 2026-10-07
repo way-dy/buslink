@@ -11,7 +11,7 @@ import {
 } from "firebase/firestore";
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { calcETA } from "../lib/gps";
-import { hasNativePlugin, nativeCall } from "../lib/nativeApp";
+import { hasNativePlugin, nativeCall, isNativeApp } from "../lib/nativeApp";
 import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom, toLatLngPath, advanceProgress } from "../lib/routeProgress";
 import { computeStopEstimates, formatDelayLabel, formatPassengerEta } from "../lib/stopSchedule";
 import { useSmoothedEta } from "../lib/useSmoothedEta";
@@ -3837,6 +3837,18 @@ function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate, 
   // 운영 진단·복구 인프라 — "공지가 안 와요" 호소 시 사용자가 본인 권한·토큰 자가 점검·재발급.
   // 토큰 invalid → 자동 삭제 → fcmTokens 0건 자연흐름의 사용자측 회복 통로.
   const [permState, setPermState] = useState(() => (typeof Notification !== "undefined" ? Notification.permission : "default"));
+  // iOS 앱 안에는 웹 Notification 이 없다 — 앱 플러그인의 권한(receive)을 같은 값 체계로 읽는다.
+  // 🔴 안 읽으면 허용한 사람에게도 «알림이 아직 연결되지 않았어요» 가 뜬다(심사관이 보는 화면이다).
+  const appPush = hasNativePlugin("FirebaseMessaging");
+  const readAppPerm = useCallback(async () => {
+    if (!appPush) return;
+    try {
+      const r = await nativeCall("FirebaseMessaging", "checkPermissions");
+      const v = r && r.receive;
+      setPermState(v === "granted" ? "granted" : v === "denied" ? "denied" : "default");
+    } catch { /* 못 읽으면 그대로 둔다 */ }
+  }, [appPush]);
+  useEffect(() => { readAppPerm(); }, [readAppPerm]);
   const [tokenDoc, setTokenDoc] = useState(null); // { token, updatedAt } | null | undefined(로딩)
   const [diagLoading, setDiagLoading] = useState(false);
   const [diagResult, setDiagResult] = useState(null); // { ok, text }
@@ -3889,9 +3901,12 @@ function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate, 
         companyId, empNo: session.empNo, partnerCode: session.partnerCode || null,
       });
       // 권한 거부
-      if (typeof Notification !== "undefined") setPermState(Notification.permission);
+      if (appPush) await readAppPerm();
+      else if (typeof Notification !== "undefined") setPermState(Notification.permission);
       if (r?.granted === false) {
-        setDiagResult({ ok:false, text:"알림이 꺼져 있어요. 주소창 왼쪽 자물쇠 아이콘 → 알림 → 허용으로 바꾼 뒤 다시 눌러 주세요.", detail:"granted=false" });
+        setDiagResult({ ok:false, text: appPush
+          ? "알림이 꺼져 있어요. 아이폰 설정 → BusLink 탑승 → 알림을 켠 뒤 다시 눌러 주세요."
+          : "알림이 꺼져 있어요. 주소창 왼쪽 자물쇠 아이콘 → 알림 → 허용으로 바꾼 뒤 다시 눌러 주세요.", detail:"granted=false" });
       } else if (!r?.token) {
         console.warn("[알림 진단] 토큰 발급 실패:", r?.error);
         setDiagResult({ ok:false, text:"알림 연결에 실패했어요. 잠시 후 다시 시도해 주세요.", detail:"token 없음" + (r?.error ? " · " + r.error : "") });
@@ -4025,7 +4040,7 @@ function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate, 
           const box = notifyState === "on"
             ? { bg: "#E6F7EB", border: "#A7E2BB", fg: "#007A29", title: "알림을 받을 수 있어요", desc: "공지와 도착 알림이 이 휴대폰으로 옵니다." }
             : notifyState === "off"
-              ? { bg: "#FCE5E5", border: "#F6C9C9", fg: "#A81818", title: "알림이 꺼져 있어요", desc: "휴대폰(브라우저) 설정에서 알림을 허용해 주세요." }
+              ? { bg: "#FCE5E5", border: "#F6C9C9", fg: "#A81818", title: "알림이 꺼져 있어요", desc: appPush ? "아이폰 설정 → BusLink 탑승 → 알림을 켜 주세요." : "휴대폰(브라우저) 설정에서 알림을 허용해 주세요." }
               : { bg: "var(--color-bg-soft)", border: "var(--color-line)", fg: "var(--color-label)", title: "알림이 아직 연결되지 않았어요", desc: "아래 버튼을 누르고 «허용»을 선택해 주세요." };
           const btnLabel = diagLoading ? "연결 중..."
             : notifyState === "on" ? "알림이 안 오면 다시 연결하기"
@@ -4040,7 +4055,7 @@ function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate, 
               <div style={{ padding: "11px 12px", borderRadius: "var(--radius-12)", background: box.bg, border: `1px solid ${box.border}` }}>
                 <div style={{ fontSize: 14.5, fontWeight: 700, color: box.fg }}>{box.title}</div>
                 <div style={{ fontSize: 13, color: "var(--color-label-mute)", marginTop: 2, lineHeight: 1.45, wordBreak: "keep-all" }}>{box.desc}</div>
-                {notifyState === "off" && (
+                {notifyState === "off" && !appPush && (
                   <div style={{ fontSize: 13, color: "var(--color-label-mute)", marginTop: 6, lineHeight: 1.55, wordBreak: "keep-all" }}>
                     주소창 왼쪽 <b>자물쇠 아이콘</b> → <b>알림</b> → <b>허용</b>으로 바꾼 뒤 아래 버튼을 눌러 주세요.
                   </div>
@@ -4110,7 +4125,9 @@ function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate, 
           </div>
         )}
 
-        {/* 📲 앱 설치하기 (작업C, 2026-05-22) — 3일 스누즈와 무관한 상시 설치 진입점 */}
+        {/* 📲 앱 설치하기 (작업C, 2026-05-22) — 3일 스누즈와 무관한 상시 설치 진입점.
+            🔴 iOS 앱 안에서는 감춘다(이미 앱이다 — 앱 안에서 «홈 화면에 추가» 를 권하면 심사·사용자 모두 혼란). */}
+        {!isNativeApp() && (
         <div style={{ background: "var(--color-bg)", borderRadius: "var(--radius-16)", overflow: "hidden", border: "1px solid var(--color-line)", boxShadow: "var(--shadow-emphasize)" }}>
           <button onClick={() => setShowInstallGuide(p => !p)}
             style={{ width: "100%", padding: "14px 18px", background: "transparent", border: "none", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", fontFamily: "inherit", color: "var(--color-label)" }}>
@@ -4128,6 +4145,7 @@ function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate, 
             </div>
           )}
         </div>
+        )}
 
         {/* PIN 변경 — 공용 계정(pinLocked)은 항목 자체를 감추고 안내만 표시(2026-07-21) */}
         {pinLocked ? (

@@ -76,6 +76,10 @@ console.log("[3] 플러그인 있는 앱 — 네이티브 호출");
   const clipLines = css.split("\n").filter((l) => /overflow-x:\s*(hidden|clip)/.test(l) && /^\s*html/.test(l));
   ok(clipLines.length > 0 && clipLines.every((l) => /html\.native-app/.test(l)), "html/body 가로 잘라내기는 앱(native-app)에서만");
 
+  console.log("[5b] 설정 탭 — 앱 안 표시");
+  ok(/hasNativePlugin\("FirebaseMessaging"\)[\s\S]{0,400}nativeCall\("FirebaseMessaging", "checkPermissions"\)/.test(appSrc), "앱 알림 상태를 플러그인 권한(receive)으로 읽는다");
+  ok(/\{!isNativeApp\(\) && \(\s*<div[^>]*>\s*<button onClick=\{\(\) => setShowInstallGuide/.test(appSrc), "앱 안에서는 «앱 설치하기» 카드를 감춘다");
+
   console.log("[6] 확대 금지 — 앱에서만(좌우 끌림의 원인 = 입력칸 자동 확대)");
   {
     const mk = (native) => {

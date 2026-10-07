@@ -19,7 +19,9 @@
 > - [ ] 앱이 출렁이면 Mac 쪽 `capacitor.config.json` `ios.scrollEnabled:false`
 > - [x] **개인정보 처리방침·지원 페이지 prod 배포(2026-10-07)**: `https://p.buslink.co.kr/privacy` · `/support`(정적 `public/privacy.html`·`support.html` + firebase.json rewrite 2줄). 책임자 = 직책 «대표이사» + 담당 «BusLink 운영 담당» + `dy@dongyeongtour.co.kr`(way A안 · 성명은 dyops 에도 «CEO» 표기뿐이라 미기재 — 시행령 31조 «성명 또는 부서»로 충족). 🔴 수집 항목·권한을 늘리면 privacy.html 도 함께. ⚠ 위치 권한은 서버 저장 없이 지도 표시용으로 적었다 — 심사 5.1.1 에서 «왜 위치가 필요한가» 질문 가능.
 > - [x] App Store Connect(앱 «BusLink 탑승» Apple ID 6818952591)에 두 URL 등록(2026-10-07): 개인정보 처리방침 URL = «앱이 수집하는 개인정보» 화면(앱 정보가 아니다) · 지원 URL = «1.0 제출 준비 중» 버전 화면. ⏳ 같은 화면의 «앱이 수집하는 개인정보 → 시작하기»(데이터 수집 설문) 미작성. ⚠ 계정에 옛 «버스링크 승객»(배포 중) 앱이 따로 있다 — 이름·설명이 겹치지 않게.
-> - [ ] 심사용 BusLink 거래처 테스트 계정 · 권한(Admin/App Manager) 확인
+> - [x] **심사용 데모 거래처 생성(2026-10-07 way 승인)** = `scripts/seed_review_partner.cjs` — 거래처 «BusLink 데모»(`DY001-BUSLINKDEMO-2026-REVW`·테마 없음) · 노선 2(가상 «A/B 정류장·회사 정문») · 공지 2(fcmQueue 없음) · 승객 `APPREVIEW`(pinLocked). PIN 은 저장소에 없다(way 에게만 전달 · ASC «앱 심사 정보»에 입력). 🔴 **지우지 말 것** — 업데이트 심사마다 같은 계정. 실승객 16,931명 전원 거래처 지정이라 데모 노선은 실승객 화면에 안 뜬다.
+> - [x] **스토어 스크린샷 6.9"(1320×2868) 4장** = `docs/store/screenshots-6.9/` — 데모 계정·앱 모드·권한 허용 상태로 캡처(실고객 정보 0). 함께 고친 것(앱 안에서만): 설정 «휴대폰 알림» 이 플러그인 권한을 읽음 · «앱 설치하기» 카드 숨김.
+> - [ ] App Store Connect «앱이 수집하는 개인정보» 설문 · 앱 설명·키워드 · 앱 심사 정보(계정) · 스크린샷 업로드
 > - [ ] 아카이브 → TestFlight(내부) → 심사 제출 — **업로드는 way 확인 후**
 > - [ ] (후순위) 구글 플레이 — 조직 계정이면 12명·14일 테스트 면제
 
