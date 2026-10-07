@@ -17,7 +17,8 @@
 > - [ ] **QR 첫 실행 멈춤**(WKWebView getUserMedia 2단 권한) — ✅ 웹 쪽 선배포(`main.054e3da9.js`): `ScanTabDriverQR.startScan` 이 `hasNativePlugin("CapacitorBarcodeScanner")`(공식 `@capacitor/barcode-scanner` 3.1.2 · 브리지 `PluginHeaders`/`isPluginAvailable`) 일 때만 `nativeCall`(`Capacitor.nativePromise`) 로 `scanBarcode({hint:0})`→`ScanResult`(권한 팝업은 플러그인이 띄움 · 2차 `main.fee2e5cc.js`) · 닫기=준비 화면 · 그 외(브라우저·PWA·플러그인 없는 앱)는 jsQR 그대로. 가드 `scripts/test_native_scanner.cjs`(13단언 · 게이트 61/61). ⏳ **Mac 쪽 플러그인 설치·커밋 완료(ML Kit 대신 공식 플러그인) → TestFlight 빌드 3 업로드 후 실기기 QR 확인**(빌드 2 엔 스캐너 없음)(설치 전엔 자동으로 옛 경로라 무해)
 > - [ ] **메뉴 버퍼링** — 탭 전환마다 HomeTab 언마운트(지도·구독 재생성). way 에게 Safari 동일 여부 비교 요청 중 → 둘 다 느리면 홈 유지(display 숨김), 앱만 느리면 Mac 쪽 캐시
 > - [ ] 앱이 출렁이면 Mac 쪽 `capacitor.config.json` `ios.scrollEnabled:false`
-> - [ ] 개인정보처리방침 URL · 심사용 BusLink 거래처 테스트 계정 · App Store Connect 권한(Admin/App Manager) 확인
+> - [x] **개인정보 처리방침·지원 페이지 prod 배포(2026-10-07)**: `https://p.buslink.co.kr/privacy` · `/support`(정적 `public/privacy.html`·`support.html` + firebase.json rewrite 2줄). 책임자 = 직책 «대표이사» + 담당 «BusLink 운영 담당» + `dy@dongyeongtour.co.kr`(way A안 · 성명은 dyops 에도 «CEO» 표기뿐이라 미기재 — 시행령 31조 «성명 또는 부서»로 충족). 🔴 수집 항목·권한을 늘리면 privacy.html 도 함께. ⚠ 위치 권한은 서버 저장 없이 지도 표시용으로 적었다 — 심사 5.1.1 에서 «왜 위치가 필요한가» 질문 가능.
+> - [ ] 심사용 BusLink 거래처 테스트 계정 · App Store Connect 에 위 두 URL 등록 · 권한(Admin/App Manager) 확인
 > - [ ] 아카이브 → TestFlight(내부) → 심사 제출 — **업로드는 way 확인 후**
 > - [ ] (후순위) 구글 플레이 — 조직 계정이면 12명·14일 테스트 면제
 

@@ -7,6 +7,8 @@
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
       { "source": "/kakao", "destination": "/kakao.html" },
+      { "source": "/privacy", "destination": "/privacy.html" },
+      { "source": "/support", "destination": "/support.html" },
       { "source": "**", "destination": "/index.html" }
     ],
     "headers": [
