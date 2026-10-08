@@ -13,7 +13,7 @@ import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { calcETA } from "../lib/gps";
 import { hasNativePlugin, nativeCall, isNativeApp, appSettingsPath } from "../lib/nativeApp";
 import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom, toLatLngPath, advanceProgress } from "../lib/routeProgress";
-import { computeStopEstimates, formatDelayLabel, formatPassengerEta } from "../lib/stopSchedule";
+import { computeStopEstimates, formatDelayLabel, formatPassengerEta, alignLabelTime } from "../lib/stopSchedule";
 import { useSmoothedEta } from "../lib/useSmoothedEta";
 import { computeRunEnded } from "../lib/runStatus";
 import { isHoldingAtOrigin, originTimeLabel } from "../lib/originStop";
@@ -1407,8 +1407,9 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
     etaStatus.type === 'approaching' ? etaStatus.etaSec : null,
     { resetKey: `${activeRouteId || ''}:${myStop?.id || ''}` } // 내 정류장을 바꾸면 앞 정류장 시각을 끌고 오지 않는다
   );
+  // 큰 글씨 시각 = 아래 «예상» 줄과 같은 값(alignLabelTime) · «N분 후»만 부드럽게.
   const passengerLabel = (etaStatus.type === 'approaching')
-    ? formatPassengerEta(smoothedEtaSec)
+    ? alignLabelTime(formatPassengerEta(smoothedEtaSec), myStopEst)
     : null;
 
   // 표시용 색상 — 2026-05-21: smoothedEtaSec 기반(분 단위)으로 깜빡임 흡수.

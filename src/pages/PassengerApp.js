@@ -7,7 +7,7 @@ import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { computeRouteWindow, isWithinRouteWindow, normalizeWindowOpts, nowMinutesKST } from "../lib/routeWindow";
 import { calcETA } from "../lib/gps";
 import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom, advanceProgress } from "../lib/routeProgress";
-import { computeStopEstimates, formatDelayLabel, formatPassengerEta } from "../lib/stopSchedule";
+import { computeStopEstimates, formatDelayLabel, formatPassengerEta, alignLabelTime } from "../lib/stopSchedule";
 import { useSmoothedEta } from "../lib/useSmoothedEta";
 import { useWakeTick } from "../lib/useWakeTick";
 import { useOnlineRecover } from "../lib/useOnlineRecover";
@@ -413,8 +413,9 @@ export default function PassengerApp() {
 
   const eta = getMyETA();
   const myStop = myStopIdx !== null ? stops[myStopIdx] : null;
+  // 시각은 정류장 «예상» 시각(목록·지도와 같은 값) · «N분 후»만 부드럽게.
   const myPassengerLabel = (eta !== null && smoothedMyEtaSec != null)
-    ? formatPassengerEta(smoothedMyEtaSec)
+    ? alignLabelTime(formatPassengerEta(smoothedMyEtaSec), myStop ? estByStopId[myStop.id] : null)
     : null;
   // (2026-10-01) myStopEst 는 데이터 출처 꼬리표(«GPS 추정») 표시에만 쓰여 그 표시와 함께 걷었다.
   // 마지막 정류장 = 도착지(=회사, 탑승자 없음). 이 정류장 선택 시에만

@@ -84,5 +84,33 @@ console.log("\n[4] 호출부 배선");
   ok("승객앱(/bus)도 노선+내 정류장을 키로 준다", /useSmoothedEta\(myStopRawSec, \{ resetKey: `\$\{selectedRouteId[^`]*\$\{myStopIdx/.test(pas));
 }
 
+console.log("\n[5] 큰 글씨 시각 = «예상» 줄 시각(alignLabelTime)");
+{
+  const ss = fs.readFileSync(path.join(ROOT, "src/lib/stopSchedule.js"), "utf8").replace(/\r\n/g, "\n")
+    .replace(/^import .*$/gm, "").replace(/^export /gm, "");
+  const rp = fs.readFileSync(path.join(ROOT, "src/lib/routeProgress.js"), "utf8").replace(/^export /gm, "");
+  const c = { Date, Math, Number, isFinite, Array, Object, String, console };
+  vm.createContext(c);
+  vm.runInContext(rp + "\n" + ss + "\n;this.A=alignLabelTime;", c);
+  const NOW = new Date(); NOW.setHours(14, 49, 0, 0); const T = NOW.getTime();
+  const L = { primary: "2분 후", tone: "primary", precise: "14:51", bucket: "min" }; // smoothing 이 늦게 따라온 값
+  const r = c.A(L, { estimatedAt: "14:52", status: "next" }, T);
+  ok("시각은 예상 14:52 로", r.precise === "14:52", r.precise);
+  ok("«N분 후»도 같은 예상 시각에서(14:49 → 14:52 = 3분 후)", r.primary === "3분 후", r.primary);
+  const r5 = c.A(L, { estimatedAt: "14:56", status: "next" }, T);
+  ok("7분 뒤면 «약 5분»(5분 단위 반올림 규칙 그대로)", r5.primary === "약 5분" && r5.precise === "14:56", r5.primary);
+  const far = c.A(L, { estimatedAt: "16:30", status: "upcoming" }, T);
+  ok("한 시간 넘으면 «HH:MM 예상» 도 같은 시각", far.primary === "16:30 예상" && far.precise === "16:30", far.primary);
+  ok("도착함·미설정·형식 오류·없음이면 들어온 라벨 그대로",
+    c.A(L, { estimatedAt: "14:54", status: "arrived" }, T) === L && c.A(L, { estimatedAt: "14:54", status: "unplanned" }, T) === L
+    && c.A(L, { estimatedAt: "", status: "next" }, T) === L && c.A(L, null, T) === L);
+  ok("한참 지난 예상(어제 값 등)이면 손대지 않는다", c.A(L, { estimatedAt: "10:00", status: "next" }, T) === L);
+  ok("라벨이 없으면 null 그대로", c.A(null, { estimatedAt: "14:54", status: "next" }) === null);
+  const emp = fs.readFileSync(path.join(ROOT, "src/pages/EmployeeApp.js"), "utf8");
+  const pas = fs.readFileSync(path.join(ROOT, "src/pages/PassengerApp.js"), "utf8");
+  ok("직원앱 홈 카드가 맞춘 라벨을 쓴다", /alignLabelTime\(formatPassengerEta\(smoothedEtaSec\), myStopEst\)/.test(emp));
+  ok("승객앱(/bus)도 맞춘 라벨을 쓴다", /alignLabelTime\(formatPassengerEta\(smoothedMyEtaSec\), myStop \? estByStopId\[myStop\.id\] : null\)/.test(pas));
+}
+
 console.log(`\n${pass} 통과 / ${fail} 실패`);
 process.exit(fail ? 1 : 0);

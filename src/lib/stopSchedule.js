@@ -596,6 +596,23 @@ export function computeStopEstimates({
 //   < 60분(3600s)     → "약 {round5}분", primary (5분 단위 반올림)
 //   ≥ 60분            → "{HH:MM} 예상", mute
 // ────────────────────────────────────────────────────────────────────────────
+// 카운트다운 라벨을 정류장 «예상» 시각에 맞춘다(2026-10-08 way «큰 글씨 시각을 예상 줄과 맞춰줘»).
+//   시각과 «N분 후» 둘 다 같은 예상 시각에서 계산한다 — 시각만 맞추면 «14:54 도착 예정 · 2분 후»처럼
+//   한 줄 안에서 서로 어긋난다. est 를 쓸 수 없으면(미설정·도착함·형식 오류) 들어온 라벨 그대로.
+export function alignLabelTime(label, est, now) {
+  if (!label) return label;
+  const at = est && est.estimatedAt && est.status !== "unplanned" && est.status !== "arrived"
+    && /^\d{2}:\d{2}$/.test(est.estimatedAt) ? est.estimatedAt : null;
+  if (!at) return label;
+  const T = now || Date.now();
+  const base = new Date(T); base.setHours(0, 0, 0, 0);
+  const [h, m] = at.split(":").map(Number);
+  const diffSec = Math.round((base.getTime() + (h * 60 + m) * 60000 - T) / 1000);
+  if (!(diffSec > -60 && diffSec < 6 * 3600)) return label;
+  const out = formatPassengerEta(Math.max(0, diffSec), T);
+  return { ...out, precise: at, primary: out.bucket === "time" ? `${at} 예상` : out.primary };
+}
+
 export function formatPassengerEta(etaSec, now) {
   if (etaSec == null || !isFinite(etaSec)) {
     return { primary: "대기 중", tone: "mute", precise: null, bucket: "wait" };
