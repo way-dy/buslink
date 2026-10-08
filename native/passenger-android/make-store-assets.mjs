@@ -3,11 +3,11 @@ import fs from 'node:fs';
 const ROOT = 'D:/dev-claude-config/app/buslink';
 const OUT = `${ROOT}/native/passenger-android/store`;
 fs.mkdirSync(OUT, { recursive: true });
-// 폰 스크린샷: iOS 6.3"(1206×2622 = 2.17:1) → Play 상한 2:1 → 위(상태바 쪽)를 남기고 아래를 잘라 1206×2412
+// 폰 스크린샷: iOS 6.3"(1206×2622 = 2.17:1) → Play 9:16 → 위(상태바 쪽)를 남기고 아래를 잘라 1206×2144
 const SRC = `${ROOT}/docs/store/screenshots-6.3`;
 for (const f of fs.readdirSync(SRC).filter(n => n.endsWith('.png') && !n.startsWith('1_'))) {
   const m = await sharp(`${SRC}/${f}`).metadata();
-  const h = Math.min(m.height, m.width * 2);
+  const h = Math.min(m.height, Math.round(m.width * 16 / 9)); // Play 권장 9:16
   await sharp(`${SRC}/${f}`).extract({ left: 0, top: 0, width: m.width, height: h }).png().toFile(`${OUT}/phone-${f}`);
   console.log(f, m.width, m.height, '→', m.width, h);
 }

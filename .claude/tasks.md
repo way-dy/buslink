@@ -3,7 +3,11 @@
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
 > **2026-10-08 — 승객앱 안드로이드(Play) 트랙 시작(way «안드로이드 진행 · 계정 다원서비스»)**: 래퍼 `native/passenger-android`(Windows 에서 빌드 · businweb `native/driver-android` 선례 복제) — appId `kr.co.buslink.passenger`(iOS 와 같음) · «BusLink 탑승» · 원격 `p.buslink.co.kr/p` · `@capacitor/barcode-scanner`·`@capacitor-firebase/messaging` · minSdk 26(스캐너 라이브러리 요구) · 권한 카메라·위치·알림(AD_ID 없음). Firebase 안드로이드 앱 `1:1040702853398:android:45b90d739a9bc5bd7c4037` 등록 → `google-services.json`(커밋). 🔴 업로드 키 `native/passenger-android/keys/`(git 제외 · **회사 드라이브 백업 필요**). release AAB `android/app/build/outputs/bundle/release/app-release.aab`(20MB · 서명 확인) · 시험 APK `E:\downloads\BusLink탑승-1.0-test.apk`. 웹: 토큰 `platform` 실제 OS · 안드로이드 채널 `default` 생성 · 권한 안내 `appSettingsPath`(✅ prod 배포). 스토어 그림 `native/passenger-android/store/`(512 아이콘·1024×500·폰 3장 = iOS 6.3" 를 2:1 로 자름 · 홈 제외).
-> - [ ] Play Console(다원서비스 · dy@ · /u/2/ · 개발자 ID 6712128681954992181): 확장 프로그램 play.google.com 권한 → 앱 생성 → 스토어 정보·앱 콘텐츠(처리방침 `https://p.buslink.co.kr/privacy` · 심사 계정 APPREVIEW · 데이터 보안) → 내부 테스트 AAB → 실기기 확인 → 프로덕션 심사
+> - [x] Play 앱 생성(10-08 · 앱 ID **4973478273411149704** · 패키지 사용 가능 확인 · 기본 언어 ko-KR · 무료) · 계정에 옛 «버스링크 승객용» `kr.co.buslink.cust`(프로덕션 4명) 있음 → **유지**(iOS 와 같은 결정)
+> - [x] 앱 콘텐츠: 처리방침 URL · 광고 없음 · 광고 ID 미사용 · 정부/금융/건강 없음 · 데이터 보안 **임시저장**(이름·사용자 ID·기타 정보[소속]=필수·앱 기능(+이름/ID 계정 관리) · 앱 상호작용[탑승 기록]=필수 · 기기 ID[알림 토큰]=선택 · 공유 없음 · 전송 암호화 · 계정 = 회사 발급 · 삭제 요청 URL=privacy) — 제출은 타겟층 뒤
+> - [x] 스토어 등록정보(임시저장): 간단·자세한 설명 `native/passenger-android/store/listing-ko.md` · 아이콘 512 · 그래픽 1024×500 · 폰 3장(🔴 Play 는 **9:16** — iOS 6.3" 를 1206×2144 로 자름) · 스토어 설정: 지도/내비게이션 · dy@ · +8215889718 · /support
+> - [ ] ⏳ way: ① 로그인 세부정보 비밀번호 칸 PIN → 추가 → 저장 ② IARC 설문 약관 동의 여부 ③ 타겟층(13세 이상 vs 18세 이상) ④ 내부 테스트 AAB 업로드(`E:\downloads\BusLink탑승-1.0-release.aab` — 20MB 라 브라우저 도구 10MB 한도 초과로 대행 불가)
+> - [ ] 그 뒤: 내부 테스터 → 실기기 → 프로덕션 심사
 > - [ ] 실기기: APK 설치 → 로그인·QR 스캔·알림 수신·상단 상태바 겹침(안드로이드 15+ edge-to-edge) 확인
 
 > **2026-10-08 게시판 `IJ7EcMnj` 홈화면 지도확장(배시현·채드윅)** ✅ prod 배포 · done: `homeMap.large` 는 켜져 있었다 — 10-01 21시 B안(`09ebfe3`)이 정류장 미선택 안내를 3줄·18px(111px)로 키워 지도 크게(`358032c`·15시)보다 뒤에 들어와 지도를 먹었다. `largeMap` 일 때만 2줄 압축형(63px · 360/390 폭 잘림 0 · 지도 +48px) `src/pages/EmployeeApp.js` `home-stop-prompt-compact`. 가드 `test_home_map_size.cjs` +3. 미검증: 실기기 지도 높이(로그인 계정 필요).
