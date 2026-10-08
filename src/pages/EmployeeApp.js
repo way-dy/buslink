@@ -1404,7 +1404,8 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
   // 'arriving'/'passed'/'waiting'은 텍스트 분기이므로 EMA 무관.
   // 분 단위 점프·5km/h 임계점프·GPS 노이즈를 흡수해 "갑자기 늘어났다 줄어드는" 현상 완화.
   const smoothedEtaSec = useSmoothedEta(
-    etaStatus.type === 'approaching' ? etaStatus.etaSec : null
+    etaStatus.type === 'approaching' ? etaStatus.etaSec : null,
+    { resetKey: `${activeRouteId || ''}:${myStop?.id || ''}` } // 내 정류장을 바꾸면 앞 정류장 시각을 끌고 오지 않는다
   );
   const passengerLabel = (etaStatus.type === 'approaching')
     ? formatPassengerEta(smoothedEtaSec)

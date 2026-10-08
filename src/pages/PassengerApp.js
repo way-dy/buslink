@@ -357,7 +357,7 @@ export default function PassengerApp() {
   // raw 초 산출은 myStopIdx/stops 의존 — 조건 미충족이면 null 반환되어 훅이 reset.
   // React rules-of-hooks: 조건부 호출 금지(early return 뒤에 두면 hook 순서 위반).
   const myStopRawSec = getMyETASec();
-  const smoothedMyEtaSec = useSmoothedEta(myStopRawSec);
+  const smoothedMyEtaSec = useSmoothedEta(myStopRawSec, { resetKey: `${selectedRouteId || ''}:${myStopIdx ?? ''}` });
 
   // ── ArrivalProximityModal (2026-05-28) ──────────────────────────────────
   // 내 정류장(myStopIdx) 직전 정류장(myStopIdx-1)이 stopArrivals에 새로 등장(actualAt

@@ -12,6 +12,10 @@
 //     ③ |raw - prev_predicted| > jumpThresholdSec(기본 300s=5분) → 즉시 raw
 //        (stopArrivals 누적지연 갱신 같은 의미 있는 변화는 곧장 반영).
 //     ④ 그 외 → 자연 감소(prev - dt) + 새 raw에 EMA α=0.25 + 변화량 캡.
+//     ⑤ opts.resetKey(대상 정류장 등)가 바뀌면 이전 값을 버리고 새 raw 즉시 채택.
+//        🔴 없으면 내 정류장을 바꿔도 앞 정류장 시각이 남는다 — 간격이 3분 미만인 이웃
+//           정류장(과천대로 인덕원→회사 2분)은 점프 판정에도 안 걸려 «같은 도착 시각»으로
+//           보였다(2026-10-08 way). 지우지 말 것.
 //
 // React 훅. Firebase·외부 SDK import 없음(순수).
 // ---------------------------------------------------------------------------
@@ -36,12 +40,13 @@ const DEFAULT_OPTS = {
 };
 
 export function useSmoothedEta(rawSec, opts) {
-  const { maxIncreasePerSec, maxDecreasePerSec, jumpThresholdSec, alpha } = {
+  const { maxIncreasePerSec, maxDecreasePerSec, jumpThresholdSec, alpha, resetKey = null } = {
     ...DEFAULT_OPTS,
     ...(opts || {}),
   };
   const prevRef = useRef(null);          // 직전 smoothed 값(초)
   const lastUpdateRef = useRef(0);       // 직전 갱신 시각(ms) — dt 계산
+  const keyRef = useRef(resetKey);       // 직전 대상(정류장) — 바뀌면 smoothing 상태 폐기
   const [smoothed, setSmoothed] = useState(null);
 
   useEffect(() => {
@@ -51,6 +56,11 @@ export function useSmoothedEta(rawSec, opts) {
       lastUpdateRef.current = 0;
       setSmoothed(null);
       return;
+    }
+
+    if (keyRef.current !== resetKey) {
+      keyRef.current = resetKey;
+      prevRef.current = null;
     }
 
     const now = Date.now();
@@ -90,7 +100,7 @@ export function useSmoothedEta(rawSec, opts) {
     prevRef.current = next;
     lastUpdateRef.current = now;
     setSmoothed(next);
-  }, [rawSec, maxIncreasePerSec, maxDecreasePerSec, jumpThresholdSec, alpha]);
+  }, [rawSec, maxIncreasePerSec, maxDecreasePerSec, jumpThresholdSec, alpha, resetKey]);
 
   return smoothed;
 }
