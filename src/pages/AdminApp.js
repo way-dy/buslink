@@ -7,7 +7,7 @@ import { signOut } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import {
   collection, onSnapshot, query, where,
-  doc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, orderBy, getCountFromServer
+  doc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, orderBy, getCountFromServer, documentId
 } from "firebase/firestore";
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { compareRoutes, seatUsage } from "../lib/routeOrder";
@@ -50,7 +50,9 @@ import { loadSeenMap, markSeen, isUnread } from "../lib/improvementSeen";
 import { sanitizeContentHtml, looksLikeHtml, htmlToPlainText, htmlByteSize, contentHasImage } from "../lib/richText";
 import RichTextEditor from "../components/RichTextEditor";
 import { planTimeForStop, offsetMinFromPlanTime, computeStopEstimates, formatDelayLabel } from "../lib/stopSchedule";
-import { aggregateBoardingsByStop, groupMappedByRoute } from "../lib/stopMapping";
+import { aggregateBoardingsByStop, groupMappedByRoute, nearestStop } from "../lib/stopMapping";
+// 탑승 기록 엑셀 내려받기(2026-10-08 최우석 `XG6BMPAt`) — 행 만들기는 순수 모듈
+import { EXPORT_MAX_DAYS, exportDateRange, buildBoardingRows, exportFileName } from "../lib/boardingExport";
 // 리디자인 3단계 — 실시간 관제(MapTab) 라이트 리스킨 전용. 타 탭 미사용.
 import { BusLinkLogo, Pill, StatusDot, Icon } from "../components/ui";
 // 협력사 필터 공통 컴포넌트 — 다수 탭에서 재사용
@@ -5337,7 +5339,8 @@ function BoardingStatsTab({ companyId, allowed }) {
 
   // 협력사 필터 + 검색 적용된 탑승 리스트
   // Phase B: 제한 admin 은 자기 allowed 협력사 탑승만(전체·미지정 선택 시에도).
-  const filtered = boardings.filter(b => {
+  // 🔴 엑셀 내려받기도 이 판정식을 그대로 쓴다 — 화면과 파일의 건수가 갈리면 안 된다.
+  const passesFilter = (b) => {
     const bp = b.partnerCode || null;
     if (!isAllAccess(allowed) && !partnerCodeAllowed(allowed, bp)) return false;
     if (partnerCode !== "전체") {
@@ -5351,7 +5354,80 @@ function BoardingStatsTab({ companyId, allowed }) {
       if (!hay.includes(s)) return false;
     }
     return true;
+  };
+  const filtered = boardings.filter(passesFilter);
+
+  // ── 엑셀 내려받기(기간) ──────────────────────────────────────────
+  // 화면은 하루치를 보지만 «버스인처럼 한 번에» 는 기간이다. 날짜마다 1회 조회 → 화면과 같은 판정식으로 거름
+  // → 소속은 명부에서 사번으로 30명씩 묶어 조회(명부 전체를 읽지 않는다 — 신촌세브란스 16,000명).
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportFrom, setExportFrom] = useState(getToday());
+  const [exportTo, setExportTo] = useState(getToday());
+  const [exportBusy, setExportBusy] = useState("");
+  const openExport = () => { setExportFrom(date); setExportTo(date); setExportOpen(o => !o); };
+  const ensureXlsx = () => new Promise((resolve, reject) => {
+    if (window.XLSX) return resolve(window.XLSX);
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+    s.onload = () => (window.XLSX ? resolve(window.XLSX) : reject(new Error("엑셀 기능을 불러오지 못했습니다")));
+    s.onerror = () => reject(new Error("엑셀 기능을 불러오지 못했습니다. 인터넷 연결을 확인해 주세요"));
+    document.head.appendChild(s);
   });
+  const handleExport = async () => {
+    const range = exportDateRange(exportFrom, exportTo);
+    if (range.error) return alert(range.error);
+    setExportBusy("준비 중…");
+    try {
+      const XLSX = await ensureXlsx();
+      const items = [];
+      for (let i = 0; i < range.days.length; i++) {
+        const day = range.days[i];
+        setExportBusy(`탑승 기록 불러오는 중… ${i + 1}/${range.days.length}일`);
+        const snap = await getDocs(collection(db, "companies", companyId, "boardings", day, "list"));
+        snap.docs.forEach(d => { const b = { id: d.id, ...d.data() }; if (passesFilter(b)) items.push({ day, b }); });
+      }
+      if (items.length === 0) { setExportBusy(""); return alert("이 기간에 내려받을 탑승 기록이 없습니다"); }
+      // 정류장 추정용 정류장 목록(화면 캐시를 먼저 쓰고 모자란 노선만)
+      setExportBusy("정류장 정보 불러오는 중…");
+      const stopsMap = { ...stopsByRoute };
+      const needRoutes = [...new window.Set(items.map(x => x.b.routeId).filter(r => r && !stopsMap[r]))];
+      await Promise.all(needRoutes.map(async rid => {
+        try {
+          const ss = await getDocs(query(collection(db, "companies", companyId, "routes", rid, "stops"), orderBy("order", "asc")));
+          stopsMap[rid] = ss.docs.map(d => ({ id: d.id, ...d.data() }));
+        } catch (_) { stopsMap[rid] = []; }
+      }));
+      // 소속 — 사번 30개씩
+      setExportBusy("소속 정보 불러오는 중…");
+      const deptByEmp = {};
+      const emps = [...new window.Set(items.map(x => x.b.empNo).filter(Boolean))];
+      for (let i = 0; i < emps.length; i += 30) {
+        try {
+          const ps = await getDocs(query(collection(db, "companies", companyId, "passengers"), where(documentId(), "in", emps.slice(i, i + 30))));
+          ps.docs.forEach(d => { deptByEmp[d.id] = d.data().dept || ""; });
+        } catch (_) { /* 소속을 못 읽어도 탑승 기록은 내려준다 */ }
+      }
+      const rows = buildBoardingRows(items, {
+        partnerNameOf,
+        deptOf: (e) => deptByEmp[e] || "",
+        estimateStop: (b) => {
+          const hit = nearestStop(b.vehicleLat, b.vehicleLng, stopsMap[b.routeId] || [], 300);
+          return hit ? hit.stop.name : null;
+        },
+      });
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws["!cols"] = [{ wch: 11 }, { wch: 10 }, { wch: 18 }, { wch: 28 }, { wch: 24 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 13 }, { wch: 10 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "탑승기록");
+      const label = partnerCode === "전체" ? "전체" : partnerCode === "_unassigned" ? "미지정" : partnerNameOf(partnerCode);
+      XLSX.writeFile(wb, exportFileName(exportFrom, exportTo, label));
+      setExportBusy("");
+      setExportOpen(false);
+    } catch (e) {
+      setExportBusy("");
+      alert("내려받기 오류: " + (e.message || e));
+    }
+  };
 
   // 집계: 협력사·노선·차량·정류장·시간대
   const byPartner = (() => {
@@ -5408,10 +5484,25 @@ function BoardingStatsTab({ companyId, allowed }) {
           <input type="date" value={date} max={getToday()} onChange={e => { if (e.target.value) setDate(e.target.value); }}
             style={S.dateInput} />
           <PartnerFilter companyId={companyId} value={partnerCode} onChange={setPartnerCode} allowedCodes={allowed} />
+          <button data-testid="boarding-export-open" onClick={openExport} style={S.editBtn}>엑셀 다운로드</button>
         </div>
       </div>
       <div style={S.tableWrap}>
         <div style={{ padding: "16px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+          {exportOpen && (
+            <div data-testid="boarding-export-panel" style={{ ...panelBox, padding: 14, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 14.5, fontWeight: 700 }}>탑승 기록 엑셀 다운로드</span>
+              <input type="date" value={exportFrom} max={getToday()} onChange={e => e.target.value && setExportFrom(e.target.value)} style={S.dateInput} disabled={!!exportBusy} />
+              <span style={{ color: "var(--color-label-mute)" }}>~</span>
+              <input type="date" value={exportTo} max={getToday()} onChange={e => e.target.value && setExportTo(e.target.value)} style={S.dateInput} disabled={!!exportBusy} />
+              <button data-testid="boarding-export-run" onClick={handleExport} disabled={!!exportBusy} style={{ ...S.addBtn, opacity: exportBusy ? 0.6 : 1 }}>
+                {exportBusy ? "내려받는 중…" : "내려받기"}
+              </button>
+              <span style={{ fontSize: 13, color: "var(--color-label-mute)" }}>
+                {exportBusy || `위에서 고른 협력사·검색 조건 그대로 · 한 번에 ${EXPORT_MAX_DAYS}일까지`}
+              </span>
+            </div>
+          )}
           {/* 종합 카드 */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
             <div style={statCard}>
