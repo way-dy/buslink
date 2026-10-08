@@ -63,6 +63,10 @@ ok("지도 컨테이너는 현행 그대로(flex 1 1 0 · 바닥 150)",
   /<div style=\{\{ flex: '1 1 0', minHeight: 150, position: 'relative' \}\}>/.test(emp));
 ok("노선도 스크롤 영역이 판정값을 쓴다", /flex: '0 1 auto', \.\.\.homeRouteListBounds\(largeMap\), overflowY: 'auto'/.test(emp));
 ok("지도 컨테이너에 고정 % 가 재도입되지 않았다", !/flex: '0 0 [0-9]+%'/.test(emp));
+// 2026-10-08 배시현 `IJ7EcMnj` — B안의 세 줄 안내(111px)가 지도 크게를 다시 줄였다 → 크게일 때만 두 줄(63px).
+ok("지도 크게일 때 정류장 미선택 안내는 압축형", /largeMap \? \([\s\S]{0,400}?<div data-testid="home-stop-prompt-compact"/.test(emp));
+ok("압축형 안내도 QR 탑승 끈 거래처 문구를 따로 둔다", /home-stop-prompt-compact[\s\S]{0,600}onScanTab \? '선택하시면 QR탑승 하실 수 있습니다\.' : '선택하시면 도착 시간을 안내해 드립니다\.'/.test(emp));
+ok("꺼진 거래처는 원래 세 줄 안내 그대로", /fontSize: 18, fontWeight: 700, color: 'var\(--color-label\)' \}\}>아래에서 정류장을 눌러 주세요/.test(emp));
 
 console.log("\n[E] 관리자 배선");
 ok("폼 초기값이 false(저장만 눌러도 켜지지 않게)", /const \[pHomeMapLarge, setPHomeMapLarge\] = useState\(false\)/.test(adm));

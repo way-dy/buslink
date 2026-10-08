@@ -1991,6 +1991,17 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
              (2026-08-11 최우석 «QR 태깅 화면을 못 찾겠다»의 답 · 예전엔 노선도 바로 위 문구).
              🔴 QR 탑승을 끈 거래처에서는 **문구를 지우지 않고 바꾼다**(2026-09-04).
              🔴 정류장 미선택 상태의 QR 탑승 버튼은 두지 않는다(2026-09-18 `43HgiApQ…`). */
+          largeMap ? (
+          /* 지도 크게(채드윅) — 안내를 두 줄로 줄여 그 높이를 지도에 돌려준다(2026-10-08 배시현
+             `IJ7EcMnj` «확장했던 지도가 다시 줄었다»: 10-01 B안이 이 안내를 세 줄·18px 로 키우며
+             지도 크게 스위치보다 뒤에 들어와 그만큼 지도를 먹었다). 꺼진 거래처는 아래 원래 모양 그대로. */
+          <div data-testid="home-stop-prompt-compact" style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-label)', lineHeight: 1.35 }}>아래에서 내 정류장을 눌러 주세요</div>
+            <div style={{ fontSize: 13.5, color: 'var(--color-primary-deep)', lineHeight: 1.35, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {onScanTab ? '선택하시면 QR탑승 하실 수 있습니다.' : '선택하시면 도착 시간을 안내해 드립니다.'}
+            </div>
+          </div>
+          ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             <div style={{ fontSize: 13, color: '#6B7280' }}>내 정류장</div>
             <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--color-label)' }}>아래에서 정류장을 눌러 주세요</div>
@@ -2000,6 +2011,7 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
                 : '탑승하실 정류장을 선택하시면 도착 시간을 안내해 드립니다.'}
             </div>
           </div>
+          )
         )}
       </div>
 
