@@ -5,6 +5,8 @@
 
 ## 미해결 / 함정
 
+- `[해결]` **도착 예정 큰 글씨가 이웃 정류장과 같은 시각 · 예상 줄과 최대 3분 어긋남(2026-10-08 way 과천대로 실주행 · `main.e16dcc39.js`)**: 엔진은 실 GPS 재생으로 정상(인덕원 14:54·회사 14:56). 원인 = `useSmoothedEta` 가 내 정류장을 바꿔도 이전 값을 유지(2분 차 < 점프 180초) + 큰 글씨가 smoothing 값이라 «예상» 줄과 어긋남. 수정 = `resetKey`(노선+내 정류장) · `stopSchedule.alignLabelTime`(시각·남은 분 모두 예상 시각에서). 🔴 회귀 가드: resetKey 제거 금지 · 큰 글씨를 smoothing 값으로 되돌리지 말 것(색 판정만 smoothing). 가드 `test_smoothed_eta_reset.cjs`.
+
 - `[패턴]` **앱 아이콘 교체 = 파일만 바꾸면 끝이 아니다 — 앱별 PNG 참조를 전수 grep(2026-10-01 A안 B 모노그램 · `main.c70b918a.js`)**: 교체 대상 = `public/icons/{passenger,driver,admin,partner}.svg`(모서리 둥글게) + `*-1024.png`(정사각 꽉 채움 — OS 가 모양을 씌운다) + `notification-employee.png`(승객 1024 사본 · CF 푸시 icon/badge 가 절대 URL 로 참조). 🔴 협력사는 그동안 **승객 PNG 를 빌려 쓰고 있었다**(`manifest-partner.json`·`appIcons.js` 13행) — `grep -rn "\-1024.png" public src` 로 앱↔파일 대응을 먼저 볼 것. `kakao-t.*`(카카오 테마 거래처)는 별개라 건드리지 않는다. 생성기 원본은 세션 스크래치였다(비영속) — 다시 그릴 땐 100×100 viewBox · 흰 B 획 10 · 이음목 점 (35,50) r7.5 #FFC233. 이미 설치한 폰은 OS 캐시로 늦게 바뀐다(iOS 는 재추가).
 
 - `[패턴]` **승객 홈 B안 시트 — 지도 위 겹침은 카카오 로고를 들어 올린 뒤에만(2026-10-01 · 프리뷰 `b-design`)**: 흰 시트가 지도 하단 16px(`HOME_SHEET_OVERLAP`)를 덮는다. 🔴 카카오 로고·축척은 지도 div 하단에 붙어 있어 그대로 덮으면 **약관 위반** → `liftMapCredits`(DriverApp `liftCredits` 와 같은 `a[href*="map.kakao.com"]` 탐색)가 그 상자에 `marginBottom` 을 주고 성공했을 때만 `creditsLifted=true` 로 겹친다(실패 = 겹침 0). 회귀 가드: 겹침을 상수로 늘리면 들어 올림도 같은 상수 · 시트 `minHeight:0` 제거 금지(지도가 150 밑으로 눌린다) · 버스 마커 래퍼 `translateY(-4px)` 와 펄스 span 분리 유지(`test_progress_marker`). 승객 화면 오류는 `friendlyError`(한국어 서버 안내만 통과) — 화면에 `e.message` 직출력 재도입 금지. 운영자 알림 진단은 설정 탭 `?debug=1`.
