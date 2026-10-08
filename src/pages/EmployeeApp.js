@@ -2138,7 +2138,10 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
                               color: isPast ? PAST_TEXT : isMyStop ? ACCENT : 'var(--color-label)',
                               fontWeight: isMyStop ? 700 : 500,
                               // `keep-all` 만 두면 띄어쓰기 없는 긴 이름이 줄바꿈을 못 해 넘친다 → `anywhere` 병용
-                              wordBreak: 'keep-all', overflowWrap: 'anywhere', lineHeight: 1.3, height: 36,
+                              wordBreak: 'keep-all', overflowWrap: 'anywhere', lineHeight: 1.3,
+                              // 🔴 높이는 em 으로(2줄 = 2.6em) — px 고정이면 휴대폰 «글자 크기» 를 키운 사람(안드로이드 앱·크롬은 그 설정을 따른다)에게
+                              //    글자만 커지고 칸은 그대로라 둘째 줄이 아래 «내 정류장» 에 잘린다(2026-10-08 way 안드로이드 앱 실기기).
+                              height: '2.6em',
                               display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden'
                             }}>
                               {s.name}
@@ -2146,7 +2149,7 @@ function HomeTab({ companyId, session, branding, theme, onScanTab, onSessionUpda
                             {/* 🔴 "내 정류장" 을 **모든 정류장 아래** 둔다(2026-08-11 목업) — 선택은 accent·굵게,
                                 나머지는 연한 회색으로 «여기를 누르면 내 정류장이 된다»가 읽히게. */}
                             <div style={{
-                              fontSize: 12, fontWeight: isMyStop ? 700 : 400, marginTop: 2, lineHeight: '15px',
+                              fontSize: 12, fontWeight: isMyStop ? 700 : 400, marginTop: 2, lineHeight: 1.25,
                               color: isMyStop ? ACCENT : '#C4C8CE',
                             }}>
                               내 정류장
