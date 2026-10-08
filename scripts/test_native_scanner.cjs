@@ -65,13 +65,20 @@ console.log("[3] 플러그인 있는 앱 — 네이티브 호출");
 
   ok(["hint", "scanInstructions", "scanButton", "scanText", "cameraDirection", "scanOrientation"].every((k) => new RegExp(k + ":").test(block)),
     "iOS 스캐너에 6개 값을 모두 보낸다(빠지면 OS-PLUG-BARC-0008)");
-  ok(/BusLink 탑승/.test(block) && !/BusLink 승객 →/.test(block), "권한 안내가 앱 이름 «BusLink 탑승» 을 가리킨다");
+  ok(/appSettingsPath\("카메라"\)/.test(block) && !/BusLink 승객 →/.test(block) && !/아이폰 설정 →/.test(block), "카메라 권한 안내는 OS 별 길(appSettingsPath)을 쓴다");
+  const ios = load({ Capacitor: { isNativePlatform: () => true, getPlatform: () => "ios" } });
+  const and = load({ Capacitor: { isNativePlatform: () => true, getPlatform: () => "android" } });
+  ok(ios.appSettingsPath("카메라") === "아이폰 설정 → BusLink 탑승 → 카메라", "아이폰: 설정 → BusLink 탑승 → 카메라", ios.appSettingsPath("카메라"));
+  ok(and.appSettingsPath("카메라").startsWith("휴대폰 설정 → 애플리케이션 → BusLink 탑승") && !/아이폰/.test(and.appSettingsPath("알림")), "안드로이드: 휴대폰 설정 → 애플리케이션 → BusLink 탑승");
+  ok(!/아이폰 설정 →/.test(appSrc), "EmployeeApp 에 «아이폰 설정 →» 하드코딩이 남지 않았다");
 
   console.log("[5] 앱 푸시 토큰 · 좌우 밀림 CSS — 웹은 그대로");
   const notiSrc = fs.readFileSync(path.join(root, "src/lib/notifications.js"), "utf8");
   ok(/if \(hasNativePlugin\("FirebaseMessaging"\)\)/.test(notiSrc), "앱 푸시는 플러그인 판정으로 게이트된다");
   ok(notiSrc.indexOf('hasNativePlugin("FirebaseMessaging")') < notiSrc.indexOf("Notification.requestPermission"), "네이티브 분기가 웹 푸시 경로보다 먼저");
   ok(/fcmTokens/.test(notiSrc.slice(notiSrc.indexOf("async function initNativePush"))), "앱 토큰도 같은 fcmTokens 문서에 저장");
+  ok(!/platform: "ios"/.test(notiSrc) && /getPlatform\(\)/.test(notiSrc), "토큰 platform 은 실제 OS(안드로이드 앱이 ios 로 찍히지 않는다)");
+  ok(/if \(platform === "android"\)[\s\S]{0,200}createChannel", \{ id: "default"/.test(notiSrc), "안드로이드만 서버 channelId(default) 채널을 만든다");
   const css = fs.readFileSync(path.join(root, "src/index.css"), "utf8");
   const clipLines = css.split("\n").filter((l) => /overflow-x:\s*(hidden|clip)/.test(l) && /^\s*html/.test(l));
   ok(clipLines.length > 0 && clipLines.every((l) => /html\.native-app/.test(l)), "html/body 가로 잘라내기는 앱(native-app)에서만");

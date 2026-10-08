@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1040702853398",
+    "project_id": "buslink-prod",
+    "storage_bucket": "buslink-prod.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1040702853398:android:45b90d739a9bc5bd7c4037",
+        "android_client_info": {
+          "package_name": "kr.co.buslink.passenger"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC4XWjOaxRG39t3kHGIHs6eCDRlvC3ZQy8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

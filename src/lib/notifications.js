@@ -89,18 +89,33 @@ export async function initNotifications({ companyId, empNo, partnerCode }) {
 
 // 앱 푸시 토큰 저장. 알림을 거부해도 앱은 그대로 쓴다(오류를 던지지 않는다).
 let nativeTokenListenerOn = false;
+// 앱이 도는 OS("ios"|"android"). 브리지가 못 알려 주면 "ios"(2026-10-07 첫 앱이 iOS 였다 — 그때 값 유지).
+function nativePlatform() {
+  try {
+    const p = window.Capacitor && typeof window.Capacitor.getPlatform === "function" && window.Capacitor.getPlatform();
+    return p === "android" ? "android" : "ios";
+  } catch (_) { return "ios"; }
+}
+
 async function initNativePush({ companyId, empNo, partnerCode }) {
+  const platform = nativePlatform();
   const save = async (token) => {
     if (!token) return;
     await setDoc(
       doc(db, "companies", companyId, "fcmTokens", empNo),
-      { token, empNo, companyId, partnerCode: partnerCode || null, platform: "ios", updatedAt: serverTimestamp() },
+      { token, empNo, companyId, partnerCode: partnerCode || null, platform, updatedAt: serverTimestamp() },
       { merge: true }
     );
   };
   try {
     const perm = await nativeCall("FirebaseMessaging", "requestPermissions");
     if (!perm || perm.receive !== "granted") return { supported: true, granted: false };
+    // 안드로이드(8+)는 알림 채널이 있어야 소리·진동이 서버 설정대로 난다. 서버(sendNoticeToCompany·notifyPreArrival)가
+    // `android.notification.channelId: "default"` 로 보내므로 같은 이름으로 만든다(있으면 덮어쓰기 = 멱등). 실패해도 진행.
+    if (platform === "android") {
+      try { await nativeCall("FirebaseMessaging", "createChannel", { id: "default", name: "공지·도착 알림", importance: 5, visibility: 1, vibration: true }); }
+      catch (_) { /* 채널이 없어도 알림은 기본 채널로 온다 */ }
+    }
     const res = await nativeCall("FirebaseMessaging", "getToken");
     const token = res && res.token;
     await save(token);

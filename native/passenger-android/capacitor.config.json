@@ -1,0 +1,13 @@
+{
+  "appId": "kr.co.buslink.passenger",
+  "appName": "BusLink 탑승",
+  "webDir": "www",
+  "backgroundColor": "#0066FF",
+  "server": {
+    "url": "https://p.buslink.co.kr/p",
+    "cleartext": false
+  },
+  "plugins": {
+    "FirebaseMessaging": { "presentationOptions": ["badge", "sound", "alert"] }
+  }
+}

@@ -11,7 +11,7 @@ import {
 } from "firebase/firestore";
 import { useAnimatedPositions } from "../lib/useAnimatedPositions";
 import { calcETA } from "../lib/gps";
-import { hasNativePlugin, nativeCall, isNativeApp } from "../lib/nativeApp";
+import { hasNativePlugin, nativeCall, isNativeApp, appSettingsPath } from "../lib/nativeApp";
 import { buildCumulativeLengths, projectToPolyline, pathUpTo, pathFrom, toLatLngPath, advanceProgress } from "../lib/routeProgress";
 import { computeStopEstimates, formatDelayLabel, formatPassengerEta } from "../lib/stopSchedule";
 import { useSmoothedEta } from "../lib/useSmoothedEta";
@@ -3346,7 +3346,7 @@ function ScanTabDriverQR({ companyId, session }) {
       setErrCode(e && e.code ? String(e.code) : "");
       setErrMsg(
         /permission|denied|access|권한/i.test(msg)
-          ? "카메라 사용을 허용해 주세요.\n아이폰 설정 → BusLink 탑승 → 카메라 켜기"
+          ? "카메라 사용을 허용해 주세요.\n" + appSettingsPath("카메라") + " 켜기"
           : "카메라를 열 수 없어요.\n" + friendlyError(e, "앱을 다시 실행한 뒤 시도해 주세요")
       );
       setStep("error");
@@ -3917,7 +3917,7 @@ function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate, 
       else if (typeof Notification !== "undefined") setPermState(Notification.permission);
       if (r?.granted === false) {
         setDiagResult({ ok:false, text: appPush
-          ? "알림이 꺼져 있어요. 아이폰 설정 → BusLink 탑승 → 알림을 켠 뒤 다시 눌러 주세요."
+          ? "알림이 꺼져 있어요. " + appSettingsPath("알림") + "을 켠 뒤 다시 눌러 주세요."
           : "알림이 꺼져 있어요. 주소창 왼쪽 자물쇠 아이콘 → 알림 → 허용으로 바꾼 뒤 다시 눌러 주세요.", detail:"granted=false" });
       } else if (!r?.token) {
         console.warn("[알림 진단] 토큰 발급 실패:", r?.error);
@@ -4052,7 +4052,7 @@ function SettingsTab({ companyId, session, onLogout, onGoHome, onSessionUpdate, 
           const box = notifyState === "on"
             ? { bg: "#E6F7EB", border: "#A7E2BB", fg: "#007A29", title: "알림을 받을 수 있어요", desc: "공지와 도착 알림이 이 휴대폰으로 옵니다." }
             : notifyState === "off"
-              ? { bg: "#FCE5E5", border: "#F6C9C9", fg: "#A81818", title: "알림이 꺼져 있어요", desc: appPush ? "아이폰 설정 → BusLink 탑승 → 알림을 켜 주세요." : "휴대폰(브라우저) 설정에서 알림을 허용해 주세요." }
+              ? { bg: "#FCE5E5", border: "#F6C9C9", fg: "#A81818", title: "알림이 꺼져 있어요", desc: appPush ? appSettingsPath("알림") + "을 켜 주세요." : "휴대폰(브라우저) 설정에서 알림을 허용해 주세요." }
               : { bg: "var(--color-bg-soft)", border: "var(--color-line)", fg: "var(--color-label)", title: "알림이 아직 연결되지 않았어요", desc: "아래 버튼을 누르고 «허용»을 선택해 주세요." };
           const btnLabel = diagLoading ? "연결 중..."
             : notifyState === "on" ? "알림이 안 오면 다시 연결하기"

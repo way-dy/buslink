@@ -1,0 +1,22 @@
+{
+  "name": "buslink-passenger-android",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BusLink 탑승 안드로이드 래퍼(Capacitor 원격 모드 — p.buslink.co.kr/p 를 그대로 띄운다 · iOS 와 같은 appId)",
+  "scripts": {
+    "sync": "cap sync android",
+    "icons": "node gen-icons.mjs",
+    "open": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.4.0",
+    "@capacitor/cli": "^8.4.0",
+    "@capacitor/core": "^8.4.0",
+    "@capacitor/barcode-scanner": "^3.1.2",
+    "@capacitor-firebase/messaging": "^8.0.0",
+    "firebase": "^12.0.0"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.0"
+  }
+}

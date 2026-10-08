@@ -36,6 +36,16 @@ export function applyNativeViewport() {
 // 원격 모드라 웹 번들에 `@capacitor/core` 가 없다 — 앱이 주입한 브리지(`window.Capacitor`)만
 // 쓴다. 플러그인 설치 여부는 **앱 빌드**가 정하므로(웹 배포가 아니다) 반드시 먼저 물어 본다:
 // 옛 앱(플러그인 없음)이 새 웹을 받아도 기존 경로로 떨어져야 한다.
+// 앱 권한을 다시 켜는 길 안내(2026-10-08 안드로이드 앱 추가 — 그전엔 «아이폰 설정 → …» 하나였다).
+// what = "카메라" | "알림". 화면에 보이는 메뉴 이름 그대로 적는다.
+export function appSettingsPath(what) {
+  let android = false;
+  try { android = !!(window.Capacitor && typeof window.Capacitor.getPlatform === "function" && window.Capacitor.getPlatform() === "android"); } catch (_) { android = false; }
+  return android
+    ? (what === "알림" ? "휴대폰 설정 → 애플리케이션 → BusLink 탑승 → 알림" : "휴대폰 설정 → 애플리케이션 → BusLink 탑승 → 권한 → " + what)
+    : "아이폰 설정 → BusLink 탑승 → " + what;
+}
+
 export function hasNativePlugin(name) {
   if (!isNativeApp()) return false;
   try {
