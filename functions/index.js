@@ -3501,6 +3501,22 @@ function selectNewFixRows(rows, lastFixMs, nowMs, backfillMin = 15) {
   return out.sort((a, b) => a.ms - b.ms);
 }
 
+// 단말(유비칸) 차량 속도(km/h) — 두 측정점 사이 직선거리 ÷ 시간(2026-10-08 배시현 `IZfJlQRn`
+// «유비칸 연동 차량은 속도가 안 나온다»). busin 위치 API 는 일시·위도·경도만 주고 속도 칸이 없어
+// 예전엔 늘 0 을 썼다. 원천이 2분 간격이라 값은 «최근 2분 평균» 이다(순간 속도보다 덜 출렁인다).
+// 🔴 이 값은 승객앱 ETA 에도 들어간다(`speed > 5 ? speed : 30`) — 그래서 믿을 수 없는 경우는 전부 0
+//    (= 예전 동작, ETA 는 기본 30km/h): 간격 <20초(좌표 떨림이 속도로 부풀려진다)·>5분(그 사이 정차
+//    여부를 모른다)·130km/h 초과(좌표 튐)·최신 측정점이 5분 넘게 묵음.
+function deviceSpeedKmh(prev, cur, nowMs) {
+  if (!prev || !cur) return 0;
+  const dt = (cur.ms - prev.ms) / 1000;
+  if (!Number.isFinite(dt) || dt < 20 || dt > 300) return 0;
+  if (typeof nowMs === "number" && nowMs - cur.ms > 5 * 60 * 1000) return 0;
+  const kmh = (distMeters(prev.lat, prev.lng, cur.lat, cur.lng) / dt) * 3.6;
+  if (!Number.isFinite(kmh) || kmh > 130) return 0;
+  return Math.round(kmh);
+}
+
 // ════════════════════════════════════════════════════════════════
 // 서버측 정류장 도착감지 유틸 (device 차량 — pollDeviceVehicleGps 에서 사용).
 // 모바일 lib/gps.js 와 동일한 100m 도착 반경·좌표 coercion 을 서버에 재현.
@@ -3864,12 +3880,16 @@ exports.pollDeviceVehicleGps = onSchedule(
               .filter(r => r.ms !== null);
             const latestMs = rowsWithMs.length ? rowsWithMs[rowsWithMs.length - 1].ms : null;
             const newRows = selectNewFixRows(rowsWithMs, lastFixMs, nowMs);
+            // 속도(2026-10-08) — 원천에 속도 칸이 없어 최신 두 측정점으로 계산(deviceSpeedKmh).
+            const nFix = rowsWithMs.length;
+            const latestSpeed = nFix >= 2 ? deviceSpeedKmh(rowsWithMs[nFix - 2], rowsWithMs[nFix - 1], nowMs) : 0;
+            const prevOf = new Map(rowsWithMs.map((r, k) => [r, k > 0 ? rowsWithMs[k - 1] : null]));
 
             // gps/{cid}_{vehicleId} — sendGPS(lib/gps.js) 와 동일 필드 + source:"device".
             // 🔴 lastFixMs 는 **이 문서에만** 추가되는 워터마크 — 소비측(관제·승객·직원앱)은
             //    안 읽는 옵셔널 필드라 표시 계약은 그대로다.
             await gpsRef.set({
-              lat: latest.lat, lng: latest.lng, speed: 0, accuracy: 0,
+              lat: latest.lat, lng: latest.lng, speed: latestSpeed, accuracy: 0,
               companyId: cid, vehicleId, vehicleNo: veh.plateNo || "",
               driverId: disp.driverId, driverName: disp.driverName,
               routeId: disp.routeId, routeName: disp.routeName,
@@ -3885,7 +3905,7 @@ exports.pollDeviceVehicleGps = onSchedule(
                 .collection(vehicleId).doc(today).collection("points");
               for (const r of newRows) {
                 batch.set(pcol.doc(`fix_${Math.floor(r.ms / 1000)}`), {
-                  lat: r.lat, lng: r.lng, speed: 0,
+                  lat: r.lat, lng: r.lng, speed: deviceSpeedKmh(prevOf.get(r), r),
                   ts: admin.firestore.Timestamp.fromMillis(r.ms),
                   source: "device",
                 });
