@@ -3347,7 +3347,7 @@ function RoutesTab({ companyId, allowed, currentUserUid, focusPartnerCode, onFoc
     ? partners
     : partners.filter(p => allowed.includes(p.code));
 
-  const shifts = ["주간조","야간조","오전조","오후조","등교","하교"];
+  const shifts = ["주간조","야간조","오전조","오후조","교대","통상","등교","하교"];
 
   return (
     <div style={{ ...S.panel, position:"relative" }}>

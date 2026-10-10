@@ -2,6 +2,8 @@
 
 > 작업 시작/완료 시 이 파일만 수정. 체크박스 관리. 어느 PC든 이어작업용.
 
+> **2026-10-10 게시판 `GUQgSRHp` 노선 추가 근무조 「교대·통상」(김준동)** ✅ prod `main.6f7ca36b.js` · 게이트 65/65 · smoke 통과 · done: 노선 관리 근무조 select 목록 `src/pages/AdminApp.js:3350` `shifts` 에 두 값 추가(주간조·야간조·오전조·오후조 뒤 · 등교·하교 앞). `shift` 는 표시 전용(직원·승객앱 라벨) — 판정 소비처 `routeKind`(등교/하교만)·`sleepingCheck`(하교/방과 정규식)에 안 걸려 동작 변화 0.
+
 > **2026-10-08 — 승객앱 안드로이드(Play) 트랙 시작(way «안드로이드 진행 · 계정 다원서비스»)**: 래퍼 `native/passenger-android`(Windows 에서 빌드 · businweb `native/driver-android` 선례 복제) — appId `kr.co.buslink.passenger`(iOS 와 같음) · «BusLink 탑승» · 원격 `p.buslink.co.kr/p` · `@capacitor/barcode-scanner`·`@capacitor-firebase/messaging` · minSdk 26(스캐너 라이브러리 요구) · 권한 카메라·위치·알림(AD_ID 없음). Firebase 안드로이드 앱 `1:1040702853398:android:45b90d739a9bc5bd7c4037` 등록 → `google-services.json`(커밋). 🔴 업로드 키 `native/passenger-android/keys/`(git 제외 · **회사 드라이브 백업 필요**). release AAB `android/app/build/outputs/bundle/release/app-release.aab`(20MB · 서명 확인) · 시험 APK `E:\downloads\BusLink탑승-1.0-test.apk`. 웹: 토큰 `platform` 실제 OS · 안드로이드 채널 `default` 생성 · 권한 안내 `appSettingsPath`(✅ prod 배포). 스토어 그림 `native/passenger-android/store/`(512 아이콘·1024×500·폰 3장 = iOS 6.3" 를 2:1 로 자름 · 홈 제외).
 > - [x] Play 앱 생성(10-08 · 앱 ID **4973478273411149704** · 패키지 사용 가능 확인 · 기본 언어 ko-KR · 무료) · 계정에 옛 «버스링크 승객용» `kr.co.buslink.cust`(프로덕션 4명) 있음 → **유지**(iOS 와 같은 결정)
 > - [x] 앱 콘텐츠: 처리방침 URL · 광고 없음 · 광고 ID 미사용 · 정부/금융/건강 없음 · 데이터 보안 **임시저장**(이름·사용자 ID·기타 정보[소속]=필수·앱 기능(+이름/ID 계정 관리) · 앱 상호작용[탑승 기록]=필수 · 기기 ID[알림 토큰]=선택 · 공유 없음 · 전송 암호화 · 계정 = 회사 발급 · 삭제 요청 URL=privacy) — 제출은 타겟층 뒤
